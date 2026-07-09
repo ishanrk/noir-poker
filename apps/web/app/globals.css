@@ -1,3 +1,9 @@
+@font-face {
+  font-family: "Block Blueprint";
+  src: url("/fonts/block-blueprint.ttf") format("truetype");
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
   --blue: #1f0bd1;
@@ -14,6 +20,7 @@
   --danger: #a72c37;
   --success: #176b3a;
   --card-red: #b12936;
+  --font-blockprint: "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
 }
 
 * { box-sizing: border-box; }

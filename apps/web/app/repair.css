@@ -105,3 +105,14 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Keep the site frame in the same block-print face as the game controls. */
+.site-header,
+.site-footer {
+  font-family: var(--font-blockprint);
+}
+
+.site-header :where(a, span),
+.site-footer :where(a, p, span) {
+  font-family: inherit !important;
+}
