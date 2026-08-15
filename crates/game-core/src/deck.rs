@@ -2,6 +2,7 @@ use rand::SeedableRng;
 use rand::seq::SliceRandom;
 use rand_chacha::ChaCha20Rng;
 
+// seeded chacha20 rng
 use crate::card::{Card, Rank, Suit};
 
 const CARD_COUNT: usize = Rank::ALL.len() * Suit::ALL.len();
@@ -13,7 +14,7 @@ pub struct Deck {
 
 impl Deck {
     pub fn new() -> Self {
-        // suit-major, with ranks low to high
+        // suit major ranks low to high
         let cards = core::array::from_fn(|i| {
             let rank = Rank::ALL[i % Rank::ALL.len()];
             let suit = Suit::ALL[i / Rank::ALL.len()];
@@ -47,8 +48,12 @@ impl Default for Deck {
 mod tests {
     use std::collections::HashSet;
 
+    // bring deck rank suit into test scope
     use super::*;
 
+    // seed selects deterministic deck order
+    // repeated bytes make test values obvious
+    // different values should change the order
     const SEED_A: [u8; 32] = [0x11; 32];
     const SEED_B: [u8; 32] = [0xa5; 32];
 
