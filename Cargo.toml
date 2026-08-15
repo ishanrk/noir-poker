@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/game-core"]
+resolver = "3"
