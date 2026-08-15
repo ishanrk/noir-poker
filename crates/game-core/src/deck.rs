@@ -1,3 +1,7 @@
+use rand::SeedableRng;
+use rand::seq::SliceRandom;
+use rand_chacha::ChaCha20Rng;
+
 use crate::card::{Card, Rank, Suit};
 
 const CARD_COUNT: usize = Rank::ALL.len() * Suit::ALL.len();
@@ -9,6 +13,7 @@ pub struct Deck {
 
 impl Deck {
     pub fn new() -> Self {
+        // suit-major, with ranks low to high
         let cards = core::array::from_fn(|i| {
             let rank = Rank::ALL[i % Rank::ALL.len()];
             let suit = Suit::ALL[i / Rank::ALL.len()];
@@ -17,6 +22,14 @@ impl Deck {
         });
 
         Self { cards }
+    }
+
+    pub fn from_seed(seed: [u8; 32]) -> Self {
+        let mut deck = Self::new();
+        let mut rng = ChaCha20Rng::from_seed(seed);
+
+        deck.cards.shuffle(&mut rng);
+        deck
     }
 
     pub fn cards(&self) -> &[Card; CARD_COUNT] {
@@ -36,13 +49,16 @@ mod tests {
 
     use super::*;
 
+    const SEED_A: [u8; 32] = [0x11; 32];
+    const SEED_B: [u8; 32] = [0xa5; 32];
+
     #[test]
-    fn deck_has_52_cards() {
+    fn full_deck() {
         assert_eq!(Deck::new().cards().len(), 52);
     }
 
     #[test]
-    fn cards_are_unique() {
+    fn unique_deck() {
         let deck = Deck::new();
         let cards: HashSet<_> = deck.cards().iter().copied().collect();
 
@@ -50,7 +66,7 @@ mod tests {
     }
 
     #[test]
-    fn each_suit_has_all_ranks() {
+    fn ranks_per_suit() {
         let deck = Deck::new();
 
         for suit in Suit::ALL {
@@ -67,7 +83,7 @@ mod tests {
     }
 
     #[test]
-    fn each_rank_has_all_suits() {
+    fn suits_per_rank() {
         let deck = Deck::new();
 
         for rank in Rank::ALL {
@@ -84,7 +100,45 @@ mod tests {
     }
 
     #[test]
-    fn deck_order_is_deterministic() {
-        assert_eq!(Deck::new(), Deck::new());
+    fn canonical_order() {
+        let deck = Deck::new();
+
+        for (i, card) in deck.cards().iter().enumerate() {
+            assert_eq!(card.rank(), Rank::ALL[i % Rank::ALL.len()]);
+            assert_eq!(card.suit(), Suit::ALL[i / Rank::ALL.len()]);
+        }
+
+        assert_eq!(deck, Deck::new());
+    }
+
+    #[test]
+    fn same_seed_order() {
+        assert_eq!(Deck::from_seed(SEED_A), Deck::from_seed(SEED_A));
+    }
+
+    #[test]
+    fn different_seed_order() {
+        assert_ne!(Deck::from_seed(SEED_A), Deck::from_seed(SEED_B));
+    }
+
+    #[test]
+    fn full_shuffle() {
+        assert_eq!(Deck::from_seed(SEED_A).cards().len(), 52);
+    }
+
+    #[test]
+    fn unique_shuffle() {
+        let deck = Deck::from_seed(SEED_A);
+        let cards: HashSet<_> = deck.cards().iter().copied().collect();
+
+        assert_eq!(cards.len(), 52);
+    }
+
+    #[test]
+    fn same_card_set() {
+        let canonical: HashSet<_> = Deck::new().cards().iter().copied().collect();
+        let shuffled: HashSet<_> = Deck::from_seed(SEED_A).cards().iter().copied().collect();
+
+        assert_eq!(shuffled, canonical);
     }
 }

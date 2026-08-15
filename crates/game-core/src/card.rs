@@ -55,6 +55,7 @@ pub struct Card(u8);
 
 impl Card {
     pub(crate) const fn new(rank: Rank, suit: Suit) -> Self {
+        // one byte: four suit blocks of thirteen ranks
         Self(rank as u8 + RANK_COUNT * suit as u8)
     }
 
