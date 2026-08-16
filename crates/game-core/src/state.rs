@@ -1,6 +1,5 @@
-use crate::{Card, Deck};
+use crate::{Card, Deck, eval7};
 
-// added action and event enums for game state updates
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     Fold,
@@ -18,12 +17,11 @@ pub enum Event {
     FlopDealt { cards: [Card; 3] },
     TurnDealt { card: Card },
     RiverDealt { card: Card },
+    Awarded { player: usize, amount: u32 },
     BettingRoundComplete,
     WonByFold { player: usize },
 }
 
-// tehcnically unnecessary considering the UI should only allow for legal actions
-// however its useufl for testing
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActionError {
     InvalidPlayer,
@@ -39,6 +37,18 @@ pub enum ActionError {
 pub enum AdvanceError {
     CannotAdvance,
     HandComplete,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SettlementError {
+    NotReady,
+    AlreadySettled,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NextHandError {
+    NotSettled,
+    CannotStart,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -68,13 +78,15 @@ pub struct State {
     pub board: Vec<Card>,
     pub pot: u32,
     pub min_raise: u32,
+    pub small_blind: u32,
     pub big_blind: u32,
     pub dealer: usize,
     pub turn: usize,
     pub next_card: usize,
     pub street: Street,
     pub round_complete: bool,
-    pub winner: Option<usize>,
+    pub fold_winner: Option<usize>,
+    pub settled: bool,
 }
 
 impl State {
@@ -132,13 +144,15 @@ impl State {
             board: Vec::with_capacity(5),
             pot: sb + bb,
             min_raise: bb,
+            small_blind: sb,
             big_blind: bb,
             dealer,
             turn,
             next_card: 2 * n,
             street: Street::Preflop,
             round_complete: false,
-            winner: None,
+            fold_winner: None,
+            settled: false,
         };
 
         state.round_complete = state.round_done();
@@ -150,7 +164,7 @@ impl State {
             return Err(ActionError::InvalidPlayer);
         }
 
-        if self.winner.is_some() {
+        if self.fold_winner.is_some() {
             return Err(ActionError::HandComplete);
         }
 
@@ -225,7 +239,7 @@ impl State {
                 .position(|player| !player.folded)
                 .unwrap();
 
-            self.winner = Some(winner);
+            self.fold_winner = Some(winner);
             events.push(Event::WonByFold { player: winner });
             return Ok(events);
         }
@@ -241,7 +255,7 @@ impl State {
     }
 
     pub fn advance_street(&mut self) -> Result<Event, AdvanceError> {
-        if self.winner.is_some() {
+        if self.fold_winner.is_some() {
             return Err(AdvanceError::HandComplete);
         }
 
@@ -287,6 +301,159 @@ impl State {
 
         self.start_round();
         Ok(event)
+    }
+
+    pub fn settle(&mut self) -> Result<Vec<Event>, SettlementError> {
+        if self.settled {
+            return Err(SettlementError::AlreadySettled);
+        }
+
+        if let Some(winner) = self.fold_winner {
+            let amount = self.pot;
+
+            self.players[winner].stack += amount;
+            self.pot = 0;
+            self.settled = true;
+
+            return Ok(vec![Event::Awarded {
+                player: winner,
+                amount,
+            }]);
+        }
+
+        if self.street != Street::River || !self.round_complete || self.board.len() != 5 {
+            return Err(SettlementError::NotReady);
+        }
+
+        // rank each live hand once for all pot layers
+        let mut values = vec![None; self.players.len()];
+
+        for (i, player) in self.players.iter().enumerate() {
+            if player.folded {
+                continue;
+            }
+
+            let hole = self.hole[i];
+            values[i] = Some(eval7([
+                hole[0],
+                hole[1],
+                self.board[0],
+                self.board[1],
+                self.board[2],
+                self.board[3],
+                self.board[4],
+            ]));
+        }
+
+        let mut levels: Vec<_> = self
+            .players
+            .iter()
+            .map(|player| player.contributed)
+            .filter(|&level| level > 0)
+            .collect();
+
+        levels.sort_unstable();
+        levels.dedup();
+
+        let mut payouts = vec![0u64; self.players.len()];
+        let mut prev = 0;
+
+        for level in levels {
+            // level gap times remaining contributors makes one pot layer
+            // folded players add chips but cannot win
+            let contributors = self
+                .players
+                .iter()
+                .filter(|player| player.contributed >= level)
+                .count() as u64;
+            let amount = u64::from(level - prev) * contributors;
+            let best = self
+                .players
+                .iter()
+                .enumerate()
+                .filter(|(_, player)| !player.folded && player.contributed >= level)
+                .map(|(i, _)| values[i].unwrap())
+                .max()
+                .unwrap();
+            let winners: Vec<_> = self
+                .players
+                .iter()
+                .enumerate()
+                .filter(|(i, player)| {
+                    !player.folded && player.contributed >= level && values[*i] == Some(best)
+                })
+                .map(|(i, _)| i)
+                .collect();
+            let base = amount / winners.len() as u64;
+            let mut remainder = amount % winners.len() as u64;
+
+            for &winner in &winners {
+                payouts[winner] += base;
+            }
+
+            // odd chips move clockwise left of dealer
+            for offset in 1..=self.players.len() {
+                if remainder == 0 {
+                    break;
+                }
+
+                let player = (self.dealer + offset) % self.players.len();
+
+                if winners.contains(&player) {
+                    payouts[player] += 1;
+                    remainder -= 1;
+                }
+            }
+
+            prev = level;
+        }
+
+        assert_eq!(payouts.iter().sum::<u64>(), u64::from(self.pot));
+
+        let mut events = Vec::with_capacity(self.players.len());
+
+        for (i, payout) in payouts.into_iter().enumerate() {
+            if payout == 0 {
+                continue;
+            }
+
+            let amount = u32::try_from(payout).unwrap();
+
+            self.players[i].stack += amount;
+            events.push(Event::Awarded { player: i, amount });
+        }
+
+        self.pot = 0;
+        self.settled = true;
+        Ok(events)
+    }
+
+    pub fn next_hand(&self, seed: [u8; 32]) -> Result<Self, NextHandError> {
+        if !self.settled {
+            return Err(NextHandError::NotSettled);
+        }
+
+        let n = self.players.len();
+
+        if !(2..=6).contains(&n)
+            || self
+                .players
+                .iter()
+                .any(|player| player.stack < self.big_blind)
+        {
+            return Err(NextHandError::CannotStart);
+        }
+
+        let dealer = (self.dealer + 1) % n;
+        let stacks: Vec<_> = self.players.iter().map(|player| player.stack).collect();
+
+        Ok(Self::new(
+            seed,
+            dealer,
+            &stacks,
+            self.small_blind,
+            self.big_blind,
+        ))
     }
 
     fn start_round(&mut self) {
@@ -395,10 +562,16 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Rank::*;
+    use crate::Suit::*;
+    use crate::{Rank, Suit};
 
     // fixed seed keeps deck order repeatable
     // repeated 0x42 fills required seed size
     const SEED: [u8; 32] = [0x42; 32];
+
+    // separate fixed seed makes next shuffle repeatable
+    const NEXT_SEED: [u8; 32] = [0x24; 32];
 
     fn player(stack: u32, bet: u32) -> Player {
         Player {
@@ -431,6 +604,93 @@ mod tests {
         }
     }
 
+    fn showdown(
+        dealer: usize,
+        contributed: &[u32],
+        board: [(Rank, Suit); 5],
+        hole: &[[(Rank, Suit); 2]],
+    ) -> State {
+        assert_eq!(contributed.len(), hole.len());
+
+        let stacks = vec![100; contributed.len()];
+        let mut state = State::new(SEED, dealer, &stacks, 5, 10);
+
+        state.board = board.map(|(rank, suit)| Card::new(rank, suit)).to_vec();
+        state.hole = hole
+            .iter()
+            .map(|&cards| cards.map(|(rank, suit)| Card::new(rank, suit)))
+            .collect();
+
+        for (player, &amount) in state.players.iter_mut().zip(contributed) {
+            player.stack = 100 - amount;
+            player.bet = 0;
+            player.contributed = amount;
+            player.folded = false;
+            player.acted_bet = None;
+        }
+
+        state.pot = contributed.iter().sum();
+        state.street = Street::River;
+        state.round_complete = true;
+        state.fold_winner = None;
+        state.settled = false;
+        state
+    }
+
+    fn stack_total(state: &State) -> u64 {
+        state
+            .players
+            .iter()
+            .map(|player| u64::from(player.stack))
+            .sum()
+    }
+
+    fn finish_hand(state: &mut State) {
+        finish_round(state);
+
+        for _ in 0..3 {
+            state.advance_street().unwrap();
+            finish_round(state);
+        }
+
+        state.settle().unwrap();
+    }
+
+    fn unique_cards(state: &State) {
+        let mut cards: Vec<_> = state.hole.iter().flatten().copied().collect();
+        cards.extend(state.board.iter().copied());
+
+        for a in 0..cards.len() {
+            for b in a + 1..cards.len() {
+                assert_ne!(cards[a], cards[b]);
+            }
+        }
+    }
+
+    fn assert_active(state: &State, total: u64) {
+        assert_eq!(stack_total(state) + u64::from(state.pot), total);
+        assert_eq!(contributions(state), u64::from(state.pot));
+    }
+
+    fn assert_settled(state: &State, total: u64) {
+        assert!(state.settled);
+        assert_eq!(state.pot, 0);
+        assert_eq!(stack_total(state), total);
+    }
+
+    fn fold_hand(n: usize, dealer: usize) -> State {
+        let stacks = vec![100; n];
+        let mut state = State::new(SEED, dealer, &stacks, 5, 10);
+
+        while state.fold_winner.is_none() {
+            let player = state.turn;
+            state.apply(player, Action::Fold).unwrap();
+        }
+
+        state.settle().unwrap();
+        state
+    }
+
     #[test]
     fn player_bounds() {
         let two = State::new(SEED, 0, &[1000; 2], 5, 10);
@@ -443,9 +703,11 @@ mod tests {
         assert_eq!(two.street, Street::Preflop);
         assert!(two.board.is_empty());
         assert_eq!(two.min_raise, 10);
+        assert_eq!(two.small_blind, 5);
         assert_eq!(two.big_blind, 10);
         assert!(!two.round_complete);
-        assert_eq!(two.winner, None);
+        assert_eq!(two.fold_winner, None);
+        assert!(!two.settled);
     }
 
     #[test]
@@ -696,7 +958,7 @@ mod tests {
         );
         assert_eq!(state.players[1].acted_bet, Some(10));
         assert!(state.round_complete);
-        assert_eq!(state.winner, None);
+        assert_eq!(state.fold_winner, None);
 
         assert_eq!(
             state.apply(0, Action::Fold),
@@ -763,7 +1025,7 @@ mod tests {
         assert_eq!(state.pot, 15);
         assert_eq!(state.turn, 1);
         assert!(!state.players[state.turn].folded);
-        assert_eq!(state.winner, None);
+        assert_eq!(state.fold_winner, None);
     }
 
     #[test]
@@ -780,7 +1042,7 @@ mod tests {
                 Event::WonByFold { player: 2 }
             ])
         );
-        assert_eq!(state.winner, Some(2));
+        assert_eq!(state.fold_winner, Some(2));
         assert!(!state.round_complete);
         assert_eq!(state.players[2].stack, 990);
         assert_eq!(state.pot, 15);
@@ -853,7 +1115,7 @@ mod tests {
             ])
         );
         assert!(state.round_complete);
-        assert_eq!(state.winner, None);
+        assert_eq!(state.fold_winner, None);
         assert_eq!(state.pot, 40);
     }
 
@@ -1131,7 +1393,7 @@ mod tests {
     }
 
     #[test]
-    fn advance_winner() {
+    fn advance_fold_win() {
         let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
         let mut same = State::new(SEED, 0, &[100; 2], 5, 10);
 
@@ -1268,24 +1530,24 @@ mod tests {
         state.apply(1, Action::Call).unwrap();
 
         assert!(state.round_complete);
-        assert_eq!(state.winner, None);
+        assert_eq!(state.fold_winner, None);
         state.advance_street().unwrap();
         assert_eq!(state.street, Street::Flop);
         assert_eq!(state.board.len(), 3);
         assert!(state.round_complete);
-        assert_eq!(state.winner, None);
+        assert_eq!(state.fold_winner, None);
 
         state.advance_street().unwrap();
         assert_eq!(state.street, Street::Turn);
         assert_eq!(state.board.len(), 4);
         assert!(state.round_complete);
-        assert_eq!(state.winner, None);
+        assert_eq!(state.fold_winner, None);
 
         state.advance_street().unwrap();
         assert_eq!(state.street, Street::River);
         assert_eq!(state.board.len(), 5);
         assert!(state.round_complete);
-        assert_eq!(state.winner, None);
+        assert_eq!(state.fold_winner, None);
 
         assert_eq!(state.players[0].stack, 0);
         assert_eq!(state.players[1].stack, 0);
@@ -1761,7 +2023,7 @@ mod tests {
         );
         assert!(state.round_complete);
         assert_eq!(state.board.len(), 5);
-        assert_eq!(state.winner, None);
+        assert_eq!(state.fold_winner, None);
     }
 
     #[test]
@@ -1817,5 +2079,621 @@ mod tests {
         assert!(state.round_complete);
         assert_eq!(state.advance_street(), Err(AdvanceError::CannotAdvance));
         assert_eq!(state, same);
+    }
+
+    #[test]
+    fn showdown_win() {
+        let mut state = showdown(
+            0,
+            &[10, 10],
+            [
+                (Two, Clubs),
+                (Three, Diamonds),
+                (Seven, Hearts),
+                (Nine, Spades),
+                (Jack, Clubs),
+            ],
+            &[
+                [(Ace, Clubs), (Ace, Diamonds)],
+                [(King, Clubs), (King, Diamonds)],
+            ],
+        );
+        let total = stack_total(&state) + u64::from(state.pot);
+        let loser = state.players[1].stack;
+
+        assert_eq!(
+            state.settle(),
+            Ok(vec![Event::Awarded {
+                player: 0,
+                amount: 20
+            }])
+        );
+        assert_eq!(state.players[0].stack, 110);
+        assert_eq!(state.players[1].stack, loser);
+        assert_eq!(state.pot, 0);
+        assert!(state.settled);
+        assert_eq!(stack_total(&state), total);
+
+        let stacks: Vec<_> = state.players.iter().map(|player| player.stack).collect();
+
+        assert_eq!(state.settle(), Err(SettlementError::AlreadySettled));
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.stack)
+                .collect::<Vec<_>>(),
+            stacks
+        );
+    }
+
+    #[test]
+    fn board_tie() {
+        let mut state = showdown(
+            0,
+            &[20, 20],
+            [
+                (Ten, Clubs),
+                (Jack, Diamonds),
+                (Queen, Hearts),
+                (King, Spades),
+                (Ace, Clubs),
+            ],
+            &[
+                [(Two, Clubs), (Three, Clubs)],
+                [(Two, Diamonds), (Three, Diamonds)],
+            ],
+        );
+        let total = stack_total(&state) + u64::from(state.pot);
+
+        assert_eq!(
+            state.settle(),
+            Ok(vec![
+                Event::Awarded {
+                    player: 0,
+                    amount: 20
+                },
+                Event::Awarded {
+                    player: 1,
+                    amount: 20
+                }
+            ])
+        );
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.stack)
+                .collect::<Vec<_>>(),
+            vec![100, 100]
+        );
+        assert_eq!(state.pot, 0);
+        assert!(state.settled);
+        assert_eq!(stack_total(&state), total);
+    }
+
+    #[test]
+    fn odd_chip() {
+        let mut state = showdown(
+            0,
+            &[10, 10, 10, 1],
+            [
+                (Ten, Clubs),
+                (Jack, Diamonds),
+                (Queen, Hearts),
+                (King, Spades),
+                (Ace, Clubs),
+            ],
+            &[
+                [(Two, Clubs), (Three, Clubs)],
+                [(Four, Diamonds), (Five, Diamonds)],
+                [(Six, Hearts), (Seven, Hearts)],
+                [(Eight, Spades), (Nine, Spades)],
+            ],
+        );
+        state.players[3].folded = true;
+        let total = stack_total(&state) + u64::from(state.pot);
+
+        assert_eq!(
+            state.settle(),
+            Ok(vec![
+                Event::Awarded {
+                    player: 0,
+                    amount: 10
+                },
+                Event::Awarded {
+                    player: 1,
+                    amount: 11
+                },
+                Event::Awarded {
+                    player: 2,
+                    amount: 10
+                }
+            ])
+        );
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.stack)
+                .collect::<Vec<_>>(),
+            vec![100, 101, 100, 99]
+        );
+        assert_eq!(state.pot, 0);
+        assert!(state.settled);
+        assert_eq!(stack_total(&state), total);
+    }
+
+    #[test]
+    fn side_pots() {
+        let mut state = showdown(
+            0,
+            &[100, 60, 30],
+            [
+                (Two, Clubs),
+                (Three, Diamonds),
+                (Seven, Hearts),
+                (Nine, Spades),
+                (Jack, Clubs),
+            ],
+            &[
+                [(Queen, Clubs), (Queen, Diamonds)],
+                [(King, Clubs), (King, Diamonds)],
+                [(Ace, Clubs), (Ace, Diamonds)],
+            ],
+        );
+        let total = stack_total(&state) + u64::from(state.pot);
+
+        assert_eq!(
+            state.settle(),
+            Ok(vec![
+                Event::Awarded {
+                    player: 0,
+                    amount: 40
+                },
+                Event::Awarded {
+                    player: 1,
+                    amount: 60
+                },
+                Event::Awarded {
+                    player: 2,
+                    amount: 90
+                }
+            ])
+        );
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.stack)
+                .collect::<Vec<_>>(),
+            vec![40, 100, 160]
+        );
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.contributed)
+                .collect::<Vec<_>>(),
+            vec![100, 60, 30]
+        );
+        assert_eq!(state.pot, 0);
+        assert!(state.settled);
+        assert_eq!(stack_total(&state), total);
+    }
+
+    #[test]
+    fn dead_money() {
+        let mut state = showdown(
+            0,
+            &[100, 60, 30, 60],
+            [
+                (Two, Clubs),
+                (Three, Diamonds),
+                (Seven, Hearts),
+                (Nine, Spades),
+                (Jack, Clubs),
+            ],
+            &[
+                [(Queen, Clubs), (Queen, Diamonds)],
+                [(King, Clubs), (King, Diamonds)],
+                [(Ace, Clubs), (Ace, Diamonds)],
+                [(Ten, Clubs), (Ten, Diamonds)],
+            ],
+        );
+        state.players[3].folded = true;
+        let total = stack_total(&state) + u64::from(state.pot);
+        let folded_stack = state.players[3].stack;
+
+        assert_eq!(
+            state.settle(),
+            Ok(vec![
+                Event::Awarded {
+                    player: 0,
+                    amount: 40
+                },
+                Event::Awarded {
+                    player: 1,
+                    amount: 90
+                },
+                Event::Awarded {
+                    player: 2,
+                    amount: 120
+                }
+            ])
+        );
+        assert_eq!(state.players[3].stack, folded_stack);
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.stack)
+                .collect::<Vec<_>>(),
+            vec![40, 130, 190, 40]
+        );
+        assert_eq!(state.pot, 0);
+        assert!(state.settled);
+        assert_eq!(stack_total(&state), total);
+    }
+
+    #[test]
+    fn many_side_pots() {
+        let mut state = showdown(
+            0,
+            &[100, 80, 50, 20, 20],
+            [
+                (Two, Clubs),
+                (Three, Diamonds),
+                (Four, Hearts),
+                (Seven, Spades),
+                (Nine, Clubs),
+            ],
+            &[
+                [(Jack, Clubs), (Jack, Diamonds)],
+                [(Queen, Clubs), (Queen, Diamonds)],
+                [(King, Clubs), (King, Diamonds)],
+                [(Ten, Clubs), (Ten, Diamonds)],
+                [(Ace, Hearts), (Ace, Spades)],
+            ],
+        );
+        let total = stack_total(&state) + u64::from(state.pot);
+
+        assert_eq!(
+            state.settle(),
+            Ok(vec![
+                Event::Awarded {
+                    player: 0,
+                    amount: 20
+                },
+                Event::Awarded {
+                    player: 1,
+                    amount: 60
+                },
+                Event::Awarded {
+                    player: 2,
+                    amount: 90
+                },
+                Event::Awarded {
+                    player: 4,
+                    amount: 100
+                }
+            ])
+        );
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.stack)
+                .collect::<Vec<_>>(),
+            vec![20, 80, 140, 80, 180]
+        );
+        assert_eq!(state.pot, 0);
+        assert!(state.settled);
+        assert_eq!(stack_total(&state), total);
+    }
+
+    #[test]
+    fn fold_payout() {
+        let mut state = State::new(SEED, 0, &[100; 3], 5, 10);
+        let total = stack_total(&state) + u64::from(state.pot);
+
+        state.apply(0, Action::Fold).unwrap();
+        state.apply(1, Action::Fold).unwrap();
+
+        assert_eq!(state.fold_winner, Some(2));
+        assert_eq!(
+            state.settle(),
+            Ok(vec![Event::Awarded {
+                player: 2,
+                amount: 15
+            }])
+        );
+        assert_eq!(state.players[2].stack, 105);
+        assert_eq!(state.pot, 0);
+        assert!(state.settled);
+        assert_eq!(stack_total(&state), total);
+
+        let stacks: Vec<_> = state.players.iter().map(|player| player.stack).collect();
+
+        assert_eq!(state.settle(), Err(SettlementError::AlreadySettled));
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.stack)
+                .collect::<Vec<_>>(),
+            stacks
+        );
+    }
+
+    #[test]
+    fn settle_early() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+        let mut same = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        assert_eq!(state.settle(), Err(SettlementError::NotReady));
+        assert_eq!(state, same);
+
+        finish_round(&mut state);
+        finish_round(&mut same);
+        assert_eq!(state.settle(), Err(SettlementError::NotReady));
+        assert_eq!(state, same);
+
+        for street in [Street::Flop, Street::Turn, Street::River] {
+            state.advance_street().unwrap();
+            same.advance_street().unwrap();
+
+            assert_eq!(state.street, street);
+            assert!(!state.round_complete);
+            assert_eq!(state.settle(), Err(SettlementError::NotReady));
+            assert_eq!(state, same);
+
+            if street != Street::River {
+                finish_round(&mut state);
+                finish_round(&mut same);
+            }
+        }
+    }
+
+    #[test]
+    fn two_lifecycle() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+        let total = 200;
+
+        assert_active(&state, total);
+        finish_round(&mut state);
+        assert_active(&state, total);
+
+        state.advance_street().unwrap();
+        assert_eq!(state.street, Street::Flop);
+        assert_eq!(state.board.len(), 3);
+        unique_cards(&state);
+        finish_round(&mut state);
+        assert_active(&state, total);
+
+        state.advance_street().unwrap();
+        assert_eq!(state.street, Street::Turn);
+        assert_eq!(state.board.len(), 4);
+        unique_cards(&state);
+        finish_round(&mut state);
+        assert_active(&state, total);
+
+        state.advance_street().unwrap();
+        assert_eq!(state.street, Street::River);
+        assert_eq!(state.board.len(), 5);
+        unique_cards(&state);
+        finish_round(&mut state);
+        assert_active(&state, total);
+
+        state.settle().unwrap();
+        assert_settled(&state, total);
+
+        let stacks: Vec<_> = state.players.iter().map(|player| player.stack).collect();
+        let hole = state.hole.clone();
+        let board = state.board.clone();
+        let next = state.next_hand(NEXT_SEED).unwrap();
+
+        assert_eq!(state.hole, hole);
+        assert_eq!(state.board, board);
+        assert!(state.settled);
+
+        assert_eq!(next.dealer, 1);
+        assert_eq!(next.street, Street::Preflop);
+        assert!(next.board.is_empty());
+        assert_eq!(next.next_card, 4);
+        assert_eq!(next.small_blind, 5);
+        assert_eq!(next.big_blind, 10);
+        assert_eq!(next.min_raise, 10);
+        assert_eq!(next.pot, 15);
+        assert_eq!(next.turn, 1);
+        assert_eq!(next.fold_winner, None);
+        assert!(!next.settled);
+        assert!(next.players.iter().all(|player| !player.folded));
+        assert!(next.players.iter().all(|player| player.acted_bet.is_none()));
+        assert_eq!(next.players[0].stack, stacks[0] - 10);
+        assert_eq!(next.players[0].bet, 10);
+        assert_eq!(next.players[0].contributed, 10);
+        assert_eq!(next.players[1].stack, stacks[1] - 5);
+        assert_eq!(next.players[1].bet, 5);
+        assert_eq!(next.players[1].contributed, 5);
+        assert_ne!(next.hole, state.hole);
+        unique_cards(&next);
+        assert_active(&next, total);
+    }
+
+    #[test]
+    fn six_hand() {
+        let mut state = State::new(SEED, 0, &[100; 6], 5, 10);
+        let total = 600;
+
+        state.apply(3, Action::RaiseTo(20)).unwrap();
+        state.apply(4, Action::Call).unwrap();
+        state.apply(5, Action::Fold).unwrap();
+        state.apply(0, Action::Call).unwrap();
+        state.apply(1, Action::Call).unwrap();
+        state.apply(2, Action::Call).unwrap();
+        assert_active(&state, total);
+
+        state.advance_street().unwrap();
+        state.apply(1, Action::Check).unwrap();
+        state.apply(2, Action::Check).unwrap();
+        state.apply(3, Action::RaiseTo(20)).unwrap();
+        state.apply(4, Action::Call).unwrap();
+        state.apply(0, Action::Call).unwrap();
+        state.apply(1, Action::Call).unwrap();
+        state.apply(2, Action::Fold).unwrap();
+        assert_active(&state, total);
+
+        state.advance_street().unwrap();
+        state.apply(1, Action::RaiseTo(60)).unwrap();
+        state.apply(3, Action::Call).unwrap();
+        state.apply(4, Action::Call).unwrap();
+        state.apply(0, Action::Call).unwrap();
+
+        assert!(state.round_complete);
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .filter(|player| player.stack == 0)
+                .count(),
+            4
+        );
+        assert_active(&state, total);
+
+        state.advance_street().unwrap();
+        assert_eq!(state.street, Street::River);
+        assert_eq!(state.board.len(), 5);
+        assert!(state.round_complete);
+        assert!(state.players[2].folded);
+        assert!(state.players[5].folded);
+        unique_cards(&state);
+        assert_active(&state, total);
+
+        state.settle().unwrap();
+        assert_settled(&state, total);
+    }
+
+    #[test]
+    fn lifecycle_sweep() {
+        for seed in [SEED, NEXT_SEED] {
+            for n in 2..=6 {
+                let stacks = vec![100; n];
+                let total = 100 * n as u64;
+
+                for dealer in 0..n {
+                    let mut state = State::new(seed, dealer, &stacks, 5, 10);
+
+                    assert_eq!(state.street, Street::Preflop);
+                    assert!(state.board.is_empty());
+                    unique_cards(&state);
+                    assert_active(&state, total);
+
+                    finish_round(&mut state);
+                    assert!(state.round_complete);
+                    assert_active(&state, total);
+
+                    for (street, len) in [(Street::Flop, 3), (Street::Turn, 4), (Street::River, 5)]
+                    {
+                        state.advance_street().unwrap();
+
+                        assert_eq!(state.street, street);
+                        assert_eq!(state.board.len(), len);
+                        unique_cards(&state);
+                        assert_active(&state, total);
+
+                        finish_round(&mut state);
+                        assert!(state.round_complete);
+                        assert_active(&state, total);
+                    }
+
+                    state.settle().unwrap();
+                    assert_settled(&state, total);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn next_same() {
+        let mut a = State::new(SEED, 2, &[100; 6], 5, 10);
+        let mut b = State::new(SEED, 2, &[100; 6], 5, 10);
+
+        finish_hand(&mut a);
+        finish_hand(&mut b);
+
+        assert_eq!(a, b);
+        assert_eq!(a.next_hand(NEXT_SEED), b.next_hand(NEXT_SEED));
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn next_early() {
+        let state = State::new(SEED, 0, &[100; 2], 5, 10);
+        let same = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        assert_eq!(state.next_hand(NEXT_SEED), Err(NextHandError::NotSettled));
+        assert_eq!(state, same);
+    }
+
+    #[test]
+    fn next_short() {
+        let mut state = State::new(SEED, 0, &[10; 2], 5, 10);
+
+        state.apply(0, Action::Fold).unwrap();
+        state.settle().unwrap();
+
+        assert_eq!(state.players[0].stack, 5);
+        assert_eq!(state.next_hand(NEXT_SEED), Err(NextHandError::CannotStart));
+        assert_eq!(state.players[0].stack, 5);
+        assert!(state.settled);
+    }
+
+    #[test]
+    fn dealer_rotation() {
+        for n in 2..=6 {
+            for dealer in 0..n {
+                let state = fold_hand(n, dealer);
+                let stacks: Vec<_> = state.players.iter().map(|player| player.stack).collect();
+                let next = state.next_hand(NEXT_SEED).unwrap();
+                let next_dealer = (dealer + 1) % n;
+                let sb = if n == 2 {
+                    next_dealer
+                } else {
+                    (next_dealer + 1) % n
+                };
+                let bb = (sb + 1) % n;
+                let turn = if n == 2 { next_dealer } else { (bb + 1) % n };
+
+                assert_eq!(next.dealer, next_dealer);
+                assert_eq!(next.turn, turn);
+
+                for (i, player) in next.players.iter().enumerate() {
+                    let blind = if i == sb {
+                        next.small_blind
+                    } else if i == bb {
+                        next.big_blind
+                    } else {
+                        0
+                    };
+
+                    assert_eq!(player.stack, stacks[i] - blind);
+                    assert_eq!(player.bet, blind);
+                    assert_eq!(player.contributed, blind);
+                }
+
+                let first = (next_dealer + 1) % n;
+
+                for round in 0..2 {
+                    for offset in 0..n {
+                        let player = (first + offset) % n;
+                        assert_eq!(
+                            next.hole[player][round],
+                            next.deck.cards()[round * n + offset]
+                        );
+                    }
+                }
+            }
+        }
     }
 }

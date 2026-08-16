@@ -1,3 +1,3 @@
 [workspace]
-members = ["crates/game-core"]
+members = ["crates/game-core", "crates/game-wasm"]
 resolver = "3"
