@@ -4,4 +4,4 @@ mod hand;
 
 pub use card::{Card, Rank, Suit};
 pub use deck::Deck;
-pub use hand::{HandKind, HandVal, eval5};
+pub use hand::{HandKind, HandVal, eval5, eval7};

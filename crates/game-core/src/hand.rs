@@ -115,6 +115,40 @@ pub fn eval5(cards: [Card; 5]) -> HandVal {
     hand_val(HandKind::HighCard, &high)
 }
 
+// check every way to remove two cards from seven
+// eval5 ranks each remaining five card hand
+// keep strongest value from all twenty one hands
+pub fn eval7(cards: [Card; 7]) -> HandVal {
+    let mut best = eval5([cards[0], cards[1], cards[2], cards[3], cards[4]]);
+
+    for a in 0..6 {
+        for b in a + 1..7 {
+            // first hand already removes final two cards
+            if a == 5 && b == 6 {
+                continue;
+            }
+
+            let mut hand = [cards[0]; 5];
+            let mut n = 0;
+
+            for (i, card) in cards.iter().enumerate() {
+                if i != a && i != b {
+                    hand[n] = *card;
+                    n += 1;
+                }
+            }
+
+            let value = eval5(hand);
+
+            if value > best {
+                best = value;
+            }
+        }
+    }
+
+    best
+}
+
 fn straight_high(cnt: &[u8; 13]) -> Option<Rank> {
     for high in (4..Rank::ALL.len()).rev() {
         if cnt[high - 4..=high].iter().all(|&n| n == 1) {
@@ -140,12 +174,16 @@ fn hand_val(kind: HandKind, ranks: &[Rank]) -> HandVal {
 // private evaluator checks built only for cargo test
 #[cfg(test)]
 mod tests {
-    use super::{HandKind, eval5};
+    use super::{HandKind, eval5, eval7};
     use crate::Rank::*;
     use crate::Suit::*;
     use crate::{Card, Rank, Suit};
 
     fn hand(cards: [(Rank, Suit); 5]) -> [Card; 5] {
+        cards.map(|(rank, suit)| Card::new(rank, suit))
+    }
+
+    fn hand7(cards: [(Rank, Suit); 7]) -> [Card; 7] {
         cards.map(|(rank, suit)| Card::new(rank, suit))
     }
 
@@ -516,5 +554,275 @@ mod tests {
         ]));
 
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn best_straight_flush() {
+        let cards = hand7([
+            (Ace, Spades),
+            (King, Spades),
+            (Queen, Spades),
+            (Jack, Spades),
+            (Ten, Spades),
+            (Two, Diamonds),
+            (Three, Clubs),
+        ]);
+        let best = hand([
+            (Ace, Spades),
+            (King, Spades),
+            (Queen, Spades),
+            (Jack, Spades),
+            (Ten, Spades),
+        ]);
+
+        assert_eq!(eval7(cards), eval5(best));
+    }
+
+    #[test]
+    fn best_four_kind() {
+        let cards = hand7([
+            (Ace, Clubs),
+            (Ace, Diamonds),
+            (Ace, Hearts),
+            (Ace, Spades),
+            (King, Clubs),
+            (Queen, Diamonds),
+            (Jack, Hearts),
+        ]);
+        let best = hand([
+            (Ace, Clubs),
+            (Ace, Diamonds),
+            (Ace, Hearts),
+            (Ace, Spades),
+            (King, Clubs),
+        ]);
+
+        assert_eq!(eval7(cards), eval5(best));
+    }
+
+    #[test]
+    fn best_full_house() {
+        let cards = hand7([
+            (Ace, Clubs),
+            (Ace, Diamonds),
+            (Ace, Hearts),
+            (King, Clubs),
+            (King, Diamonds),
+            (King, Hearts),
+            (Two, Spades),
+        ]);
+        let best = hand([
+            (Ace, Clubs),
+            (Ace, Diamonds),
+            (Ace, Hearts),
+            (King, Clubs),
+            (King, Diamonds),
+        ]);
+
+        assert_eq!(eval7(cards), eval5(best));
+    }
+
+    #[test]
+    fn best_flush() {
+        let cards = hand7([
+            (Ace, Spades),
+            (King, Spades),
+            (Jack, Spades),
+            (Nine, Spades),
+            (Five, Spades),
+            (Two, Spades),
+            (Queen, Hearts),
+        ]);
+        let best = hand([
+            (Ace, Spades),
+            (King, Spades),
+            (Jack, Spades),
+            (Nine, Spades),
+            (Five, Spades),
+        ]);
+
+        assert_eq!(eval7(cards), eval5(best));
+    }
+
+    #[test]
+    fn best_straight() {
+        let cards = hand7([
+            (Four, Clubs),
+            (Five, Diamonds),
+            (Six, Hearts),
+            (Seven, Spades),
+            (Eight, Clubs),
+            (Nine, Diamonds),
+            (King, Hearts),
+        ]);
+        let best = hand([
+            (Five, Diamonds),
+            (Six, Hearts),
+            (Seven, Spades),
+            (Eight, Clubs),
+            (Nine, Diamonds),
+        ]);
+
+        assert_eq!(eval7(cards), eval5(best));
+    }
+
+    #[test]
+    fn seven_wheel() {
+        let wheel = hand7([
+            (Ace, Clubs),
+            (Two, Diamonds),
+            (Three, Hearts),
+            (Four, Spades),
+            (Five, Clubs),
+            (Nine, Diamonds),
+            (King, Hearts),
+        ]);
+        let both = hand7([
+            (Ace, Clubs),
+            (Two, Diamonds),
+            (Three, Hearts),
+            (Four, Spades),
+            (Five, Clubs),
+            (Six, Diamonds),
+            (King, Hearts),
+        ]);
+        let five_high = hand([
+            (Ace, Clubs),
+            (Two, Diamonds),
+            (Three, Hearts),
+            (Four, Spades),
+            (Five, Clubs),
+        ]);
+        let six_high = hand([
+            (Two, Diamonds),
+            (Three, Hearts),
+            (Four, Spades),
+            (Five, Clubs),
+            (Six, Diamonds),
+        ]);
+
+        assert_eq!(eval7(wheel), eval5(five_high));
+        assert_eq!(eval7(both), eval5(six_high));
+    }
+
+    #[test]
+    fn best_two_pair() {
+        let cards = hand7([
+            (Ace, Clubs),
+            (Ace, Diamonds),
+            (King, Hearts),
+            (King, Spades),
+            (Queen, Clubs),
+            (Jack, Diamonds),
+            (Two, Hearts),
+        ]);
+        let best = hand([
+            (Ace, Clubs),
+            (Ace, Diamonds),
+            (King, Hearts),
+            (King, Spades),
+            (Queen, Clubs),
+        ]);
+
+        assert_eq!(eval7(cards), eval5(best));
+    }
+
+    #[test]
+    fn three_pairs() {
+        let cards = hand7([
+            (Ace, Clubs),
+            (Ace, Diamonds),
+            (King, Hearts),
+            (King, Spades),
+            (Queen, Clubs),
+            (Queen, Diamonds),
+            (Two, Hearts),
+        ]);
+        let best = hand([
+            (Ace, Clubs),
+            (Ace, Diamonds),
+            (King, Hearts),
+            (King, Spades),
+            (Queen, Clubs),
+        ]);
+
+        assert_eq!(eval7(cards), eval5(best));
+    }
+
+    #[test]
+    fn flush_over_straight() {
+        let cards = hand7([
+            (Ace, Hearts),
+            (King, Hearts),
+            (Queen, Hearts),
+            (Seven, Hearts),
+            (Two, Hearts),
+            (Jack, Clubs),
+            (Ten, Diamonds),
+        ]);
+        let value = eval7(cards);
+
+        assert_eq!(value.kind(), HandKind::Flush);
+    }
+
+    #[test]
+    fn seven_order() {
+        let a = hand7([
+            (Ace, Clubs),
+            (Ace, Diamonds),
+            (King, Hearts),
+            (King, Spades),
+            (Queen, Clubs),
+            (Queen, Diamonds),
+            (Two, Hearts),
+        ]);
+        let b = hand7([
+            (Queen, Diamonds),
+            (Two, Hearts),
+            (King, Spades),
+            (Ace, Clubs),
+            (Queen, Clubs),
+            (Ace, Diamonds),
+            (King, Hearts),
+        ]);
+
+        assert_eq!(eval7(a), eval7(b));
+    }
+
+    #[test]
+    fn subset_max() {
+        let cards = hand7([
+            (Ace, Clubs),
+            (Ace, Diamonds),
+            (King, Hearts),
+            (King, Spades),
+            (Queen, Clubs),
+            (Queen, Diamonds),
+            (Two, Hearts),
+        ]);
+        let aa_kk = eval5(hand([
+            (Ace, Clubs),
+            (Ace, Diamonds),
+            (King, Hearts),
+            (King, Spades),
+            (Queen, Clubs),
+        ]));
+        let aa_qq = eval5(hand([
+            (Ace, Clubs),
+            (Ace, Diamonds),
+            (Queen, Clubs),
+            (Queen, Diamonds),
+            (King, Hearts),
+        ]));
+        let kk_qq = eval5(hand([
+            (King, Hearts),
+            (King, Spades),
+            (Queen, Clubs),
+            (Queen, Diamonds),
+            (Ace, Clubs),
+        ]));
+        let best = aa_kk.max(aa_qq).max(kk_qq);
+
+        assert_eq!(eval7(cards), best);
     }
 }
