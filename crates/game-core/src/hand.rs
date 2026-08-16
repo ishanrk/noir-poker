@@ -20,6 +20,7 @@ pub enum HandKind {
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct HandVal {
     kind: HandKind,
+    // compare ranks left to right when kinds match
     tie: [Rank; 5],
 }
 
@@ -29,10 +30,11 @@ impl HandVal {
     }
 }
 
-// rank counts = pair two pair three kind full house four kind
-// same suit = flush
-// five rank run = straight
-// result = kind plus tie ranks
+// count each rank to find pairs three kind full house and four kind
+// check every suit against the first card to find a flush
+// check five ranks in a row with ace low as five high
+// scan ranks ace to two to store groups and kickers high first
+// return category and tie ranks ready for hand comparison
 pub fn eval5(cards: [Card; 5]) -> HandVal {
     let mut cnt = [0u8; 13];
 
@@ -135,6 +137,7 @@ fn hand_val(kind: HandKind, ranks: &[Rank]) -> HandVal {
     HandVal { kind, tie }
 }
 
+// private evaluator checks built only for cargo test
 #[cfg(test)]
 mod tests {
     use super::{HandKind, eval5};
