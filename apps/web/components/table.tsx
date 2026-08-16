@@ -1,51 +1,97 @@
 import { Card } from "@/components/card";
 import { Seat } from "@/components/seat";
 
-export function Table() {
+type CardView = {
+  value: string;
+};
+
+type PlayerView = {
+  stack: number;
+  bet: number;
+  folded: boolean;
+};
+
+export type View = {
+  players: PlayerView[];
+  hole: [CardView, CardView];
+  board: CardView[];
+  pot: number;
+  dealer: number;
+  turn: number | undefined;
+  street: string;
+  round_complete: boolean;
+};
+
+type TableProps = {
+  view: View;
+};
+
+const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
+
+export function Table({ view }: TableProps) {
+  const hole = [view.hole[0].value, view.hole[1].value] as const;
+
   return (
     <section className="table-shell" aria-label="Six-max poker table">
       <div className="table-stage">
         <div className="table-surface">
           <div className="table-label">
-            <span>Table 01</span>
-            <strong>5 / 10 NLH</strong>
+            <span>Local game</span>
+            <strong>{view.street}</strong>
           </div>
 
           <div className="board-area">
             <div className="pot">
               <span>Pot</span>
-              <strong>120</strong>
+              <strong>{view.pot.toLocaleString("en-US")}</strong>
             </div>
 
             <div className="board" aria-label="Community cards">
-              <Card value="10♣" />
-              <Card value="J♦" />
-              <Card value="Q♠" />
-              <Card />
-              <Card />
+              <Card value={view.board[0]?.value} />
+              <Card value={view.board[1]?.value} />
+              <Card value={view.board[2]?.value} />
+              <Card value={view.board[3]?.value} />
+              <Card value={view.board[4]?.value} />
             </div>
           </div>
         </div>
 
-        <Seat position={0} name="You" stack="1,000" cards={["A♠", "K♥"]} acting />
-        <Seat position={1} name="Mara" stack="950" blind="SB" />
-        <Seat position={2} name="Leon" stack="1,340" />
-        <Seat position={3} empty />
-        <Seat position={4} name="Iris" stack="780" dealer />
-        <Seat position={5} name="Niko" stack="1,120" blind="BB" />
+        {POSITIONS.map((position) => {
+          const player = view.players[position];
+
+          return (
+            <Seat
+              key={position}
+              position={position}
+              name={position === 0 ? "You" : `Player ${position + 1}`}
+              stack={player?.stack}
+              bet={player?.bet}
+              cards={position === 0 && player ? hole : undefined}
+              acting={view.turn === position}
+              dealer={view.dealer === position}
+              empty={!player}
+            />
+          );
+        })}
       </div>
 
       <div className="action-bar" aria-label="Player actions">
         <div className="action-copy">
-          <span>Your action</span>
-          <strong>20 to call</strong>
+          <span>Read only</span>
+          <strong>Actions unavailable</strong>
         </div>
 
         <div className="actions">
-          <button type="button">Fold</button>
-          <button type="button">Check</button>
-          <button type="button">Call 20</button>
-          <button className="raise-button" type="button">
+          <button type="button" disabled>
+            Fold
+          </button>
+          <button type="button" disabled>
+            Check
+          </button>
+          <button type="button" disabled>
+            Call
+          </button>
+          <button className="raise-button" type="button" disabled>
             Raise
           </button>
         </div>

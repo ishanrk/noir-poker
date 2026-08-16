@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "wasm": "wasm-pack build ../../crates/game-wasm --target web --out-dir ../../apps/web/wasm",
+    "dev": "npm run wasm && next dev",
+    "build": "npm run wasm && next build",
     "start": "next start",
     "lint": "eslint ."
   },

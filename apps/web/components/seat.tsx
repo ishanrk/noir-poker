@@ -3,11 +3,11 @@ import { Card } from "@/components/card";
 type SeatProps = {
   position: 0 | 1 | 2 | 3 | 4 | 5;
   name?: string;
-  stack?: string;
+  stack?: number;
+  bet?: number;
   cards?: readonly [string, string];
   acting?: boolean;
   dealer?: boolean;
-  blind?: "SB" | "BB";
   empty?: boolean;
 };
 
@@ -15,10 +15,10 @@ export function Seat({
   position,
   name,
   stack,
+  bet,
   cards,
   acting = false,
   dealer = false,
-  blind,
   empty = false,
 }: SeatProps) {
   const className = `seat seat-${position}${acting ? " seat-acting" : ""}${empty ? " seat-empty" : ""}`;
@@ -33,10 +33,9 @@ export function Seat({
       )}
 
       <div className="seat-panel">
-        {(dealer || blind) && (
+        {dealer && (
           <div className="seat-markers">
-            {dealer && <span className="dealer-marker">D</span>}
-            {blind && <span className="blind-marker">{blind}</span>}
+            <span className="dealer-marker">D</span>
           </div>
         )}
 
@@ -48,7 +47,8 @@ export function Seat({
         ) : (
           <>
             <strong>{name}</strong>
-            <span>{stack}</span>
+            <span>{stack?.toLocaleString("en-US")}</span>
+            {!!bet && <small>Bet {bet.toLocaleString("en-US")}</small>}
             {acting && <small>Acting</small>}
           </>
         )}

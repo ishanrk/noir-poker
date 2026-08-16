@@ -70,6 +70,18 @@ button {
   margin: 0 auto;
 }
 
+.table-status {
+  display: grid;
+  min-height: clamp(560px, 62vw, 690px);
+  place-items: center;
+  margin: 0;
+  color: var(--muted);
+}
+
+.table-error {
+  color: #d98d91;
+}
+
 .table-stage {
   position: relative;
   width: 100%;
@@ -296,8 +308,7 @@ button {
   transform: translateY(-50%);
 }
 
-.dealer-marker,
-.blind-marker {
+.dealer-marker {
   display: grid;
   height: 26px;
   min-width: 26px;
@@ -308,11 +319,6 @@ button {
   color: #171a19;
   font-size: 10px;
   font-weight: 800;
-}
-
-.blind-marker {
-  padding: 0 7px;
-  background: var(--gold);
 }
 
 .action-bar {
@@ -362,6 +368,11 @@ button {
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
+}
+
+.actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .actions .raise-button {

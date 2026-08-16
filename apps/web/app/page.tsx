@@ -1,4 +1,4 @@
-import { Table } from "@/components/table";
+import { Game } from "@/components/game";
 
 export default function Home() {
   return (
@@ -9,7 +9,7 @@ export default function Home() {
         <p>Six-max No-Limit Hold&apos;em</p>
       </header>
 
-      <Table />
+      <Game />
     </main>
   );
 }

@@ -5,7 +5,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Noir Poker",
-  description: "A static six-max poker table",
+  description: "A deterministic six-max poker table",
 };
 
 type LayoutProps = Readonly<{
