@@ -48,12 +48,14 @@ impl Default for Deck {
 mod tests {
     use std::collections::HashSet;
 
-    // bring deck rank suit into test scope
+    // imports all from parent module
     use super::*;
 
-    // seed selects deterministic deck order
-    // repeated bytes make test values obvious
-    // different values should change the order
+    // seed = input that picks shuffle order
+    // same seed = same deck order
+    // 0x11 and 0xa5 = simple different test bytes
+    // repeated 32 times = required seed size
+    // values have no special meaning
     const SEED_A: [u8; 32] = [0x11; 32];
     const SEED_B: [u8; 32] = [0xa5; 32];
 
