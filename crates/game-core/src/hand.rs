@@ -15,21 +15,25 @@ pub enum HandKind {
     StraightFlush,
 }
 
-// kind first = category before tie ranks
-// tie ranks = strongest first
+// pair aces king queen eight = kind Pair tie Ace King Queen Eight
+// compare kind first then tie left to right
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub struct HandValue {
+pub struct HandVal {
     kind: HandKind,
     tie: [Rank; 5],
 }
 
-impl HandValue {
+impl HandVal {
     pub const fn kind(self) -> HandKind {
         self.kind
     }
 }
 
-pub fn eval5(cards: [Card; 5]) -> HandValue {
+// rank counts = pair two pair three kind full house four kind
+// same suit = flush
+// five rank run = straight
+// result = kind plus tie ranks
+pub fn eval5(cards: [Card; 5]) -> HandVal {
     let mut cnt = [0u8; 13];
 
     for card in &cards {
@@ -73,40 +77,40 @@ pub fn eval5(cards: [Card; 5]) -> HandValue {
     if let Some(rank) = straight
         && flush
     {
-        return value(HandKind::StraightFlush, &[rank]);
+        return hand_val(HandKind::StraightFlush, &[rank]);
     }
 
     if let Some(rank) = four {
-        return value(HandKind::FourKind, &[rank, single[0]]);
+        return hand_val(HandKind::FourKind, &[rank, single[0]]);
     }
 
     if let Some(rank) = three
         && pair_len == 1
     {
-        return value(HandKind::FullHouse, &[rank, pairs[0]]);
+        return hand_val(HandKind::FullHouse, &[rank, pairs[0]]);
     }
 
     if flush {
-        return value(HandKind::Flush, &high);
+        return hand_val(HandKind::Flush, &high);
     }
 
     if let Some(rank) = straight {
-        return value(HandKind::Straight, &[rank]);
+        return hand_val(HandKind::Straight, &[rank]);
     }
 
     if let Some(rank) = three {
-        return value(HandKind::ThreeKind, &[rank, single[0], single[1]]);
+        return hand_val(HandKind::ThreeKind, &[rank, single[0], single[1]]);
     }
 
     if pair_len == 2 {
-        return value(HandKind::TwoPair, &[pairs[0], pairs[1], single[0]]);
+        return hand_val(HandKind::TwoPair, &[pairs[0], pairs[1], single[0]]);
     }
 
     if pair_len == 1 {
-        return value(HandKind::Pair, &[pairs[0], single[0], single[1], single[2]]);
+        return hand_val(HandKind::Pair, &[pairs[0], single[0], single[1], single[2]]);
     }
 
-    value(HandKind::HighCard, &high)
+    hand_val(HandKind::HighCard, &high)
 }
 
 fn straight_high(cnt: &[u8; 13]) -> Option<Rank> {
@@ -124,11 +128,11 @@ fn straight_high(cnt: &[u8; 13]) -> Option<Rank> {
     None
 }
 
-fn value(kind: HandKind, ranks: &[Rank]) -> HandValue {
+fn hand_val(kind: HandKind, ranks: &[Rank]) -> HandVal {
     let mut tie = [Rank::Two; 5];
     tie[..ranks.len()].copy_from_slice(ranks);
 
-    HandValue { kind, tie }
+    HandVal { kind, tie }
 }
 
 #[cfg(test)]
