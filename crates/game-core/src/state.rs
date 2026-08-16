@@ -1,13 +1,11 @@
 use crate::{Card, Deck};
 
-
-// add new enums for actions, event based on raising folding etc
-// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     Fold,
     Check,
     Call,
+    RaiseTo(u32),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -15,13 +13,11 @@ pub enum Event {
     Folded { player: usize },
     Checked { player: usize },
     Called { player: usize, amount: u32 },
+    Raised { player: usize, to: u32 },
     BettingRoundComplete,
     WonByFold { player: usize },
 }
 
-
-// THE PLAYER SHOULD ONLY BE ABLE TO ACT ON LEGAL ACTIONS THRU UI
-// THIS IS JUST A SAFETY MEASURE TO ENSURE ILLEGAL ACTIONS THROW ERRORS
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActionError {
     InvalidPlayer,
@@ -30,15 +26,15 @@ pub enum ActionError {
     HandComplete,
     CannotCheck,
     CannotCall,
+    CannotRaise,
 }
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Player {
     pub stack: u32,
     pub bet: u32,
     pub folded: bool,
-    pub acted: bool,
+    pub acted_bet: Option<u32>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -46,10 +42,10 @@ pub struct State {
     // same shuffled deck continues after hole cards
     deck: Deck,
 
-    // now vector of players added support for more than 2
     pub players: Vec<Player>,
     pub hole: Vec<[Card; 2]>,
     pub pot: u32,
+    pub min_raise: u32,
     pub dealer: usize,
     pub turn: usize,
     pub next_card: usize,
@@ -58,19 +54,18 @@ pub struct State {
 }
 
 impl State {
-    // MAJOR ISSUE EMBEDDED SHADOW TOKENS INTO THIS AS FAKE MONEY
-    // STACKS AND BETS need to be in shadow token
-    // also designing the chip bounty system
     pub fn new(seed: [u8; 32], dealer: usize, stacks: &[u32], sb: u32, bb: u32) -> Self {
         let n = stacks.len();
+        let total: u64 = stacks.iter().map(|&stack| u64::from(stack)).sum();
 
         assert!((2..=6).contains(&n));
         assert!(dealer < n);
         assert!(sb > 0);
         assert!(bb >= sb);
         assert!(stacks.iter().all(|&stack| stack >= bb));
+        assert!(total <= u64::from(u32::MAX));
 
-        // heads up dealer bets small blind
+        // heads up dealer posts small blind
         // three plus starts blinds left of dealer
         let sb_pos = if n == 2 { dealer } else { (dealer + 1) % n };
         let bb_pos = (sb_pos + 1) % n;
@@ -83,7 +78,7 @@ impl State {
                 stack,
                 bet: 0,
                 folded: false,
-                acted: false,
+                acted_bet: None,
             })
             .collect();
         let mut hole = vec![[cards[0]; 2]; n];
@@ -103,20 +98,23 @@ impl State {
             }
         }
 
-        Self {
+        let mut state = Self {
             deck,
             players,
             hole,
             pot: sb + bb,
+            min_raise: bb,
             dealer,
             turn,
             next_card: 2 * n,
             round_complete: false,
             winner: None,
-        }
+        };
+
+        state.round_complete = state.round_done();
+        state
     }
 
-    // update game state based off of action
     pub fn apply(&mut self, player: usize, action: Action) -> Result<Vec<Event>, ActionError> {
         if player >= self.players.len() {
             return Err(ActionError::InvalidPlayer);
@@ -143,6 +141,9 @@ impl State {
             Action::Call if self.players[player].bet >= current_bet => {
                 return Err(ActionError::CannotCall);
             }
+            Action::RaiseTo(to) if !self.can_raise(player, to, current_bet) => {
+                return Err(ActionError::CannotRaise);
+            }
             _ => {}
         }
 
@@ -151,21 +152,37 @@ impl State {
         match action {
             Action::Fold => {
                 self.players[player].folded = true;
-                self.players[player].acted = true;
                 events.push(Event::Folded { player });
             }
             Action::Check => {
-                self.players[player].acted = true;
+                self.players[player].acted_bet = Some(current_bet);
                 events.push(Event::Checked { player });
             }
             Action::Call => {
-                let amount = current_bet - self.players[player].bet;
+                let owed = current_bet - self.players[player].bet;
+                let amount = self.players[player].stack.min(owed);
 
                 self.players[player].stack -= amount;
                 self.players[player].bet += amount;
-                self.players[player].acted = true;
+                self.players[player].acted_bet = Some(current_bet);
                 self.pot += amount;
                 events.push(Event::Called { player, amount });
+            }
+            Action::RaiseTo(to) => {
+                let amount = to - self.players[player].bet;
+                let raise_size = to - current_bet;
+
+                self.players[player].stack -= amount;
+                self.players[player].bet = to;
+                self.players[player].acted_bet = Some(to);
+                self.pot += amount;
+
+                // short all in raises keep the last full raise size
+                if raise_size >= self.min_raise {
+                    self.min_raise = raise_size;
+                }
+
+                events.push(Event::Raised { player, to });
             }
         }
 
@@ -181,7 +198,7 @@ impl State {
             return Ok(events);
         }
 
-        if self.round_done(current_bet) {
+        if self.round_done() {
             self.round_complete = true;
             events.push(Event::BettingRoundComplete);
             return Ok(events);
@@ -195,18 +212,65 @@ impl State {
         self.players.iter().map(|player| player.bet).max().unwrap()
     }
 
-    fn round_done(&self, current_bet: u32) -> bool {
+    fn can_raise(&self, player: usize, to: u32, current_bet: u32) -> bool {
+        let player = &self.players[player];
+        let Some(max_bet) = player.bet.checked_add(player.stack) else {
+            return false;
+        };
+
+        if to <= current_bet || to > max_bet {
+            return false;
+        }
+
+        // raising reopens after a full raise since the last response
+        if let Some(acted_bet) = player.acted_bet
+            && current_bet - acted_bet < self.min_raise
+        {
+            return false;
+        }
+
+        let raise_size = to - current_bet;
+        raise_size >= self.min_raise || to == max_bet
+    }
+
+    fn round_done(&self) -> bool {
+        let current_bet = self.current_bet();
+        let live = self
+            .players
+            .iter()
+            .filter(|player| !player.folded && player.stack > 0)
+            .count();
+
+        // one player with chips only acts when still below current bet
+        if live <= 1 {
+            return self
+                .players
+                .iter()
+                .filter(|player| !player.folded && player.stack > 0)
+                .all(|player| player.bet == current_bet);
+        }
+
         self.players
             .iter()
-            .filter(|player| !player.folded)
-            .all(|player| player.acted && player.bet == current_bet)
+            .filter(|player| !player.folded && player.stack > 0)
+            .all(|player| player.acted_bet.is_some() && player.bet == current_bet)
+    }
+
+    fn needs_action(&self, player: usize, current_bet: u32) -> bool {
+        let player = &self.players[player];
+
+        !player.folded
+            && player.stack > 0
+            && (player.acted_bet.is_none() || player.bet < current_bet)
     }
 
     fn advance_turn(&mut self, player: usize) {
+        let current_bet = self.current_bet();
+
         for offset in 1..=self.players.len() {
             let next = (player + offset) % self.players.len();
 
-            if !self.players[next].folded && !self.players[next].acted {
+            if self.needs_action(next, current_bet) {
                 self.turn = next;
                 return;
             }
@@ -227,7 +291,7 @@ mod tests {
             stack,
             bet,
             folded: false,
-            acted: false,
+            acted_bet: None,
         }
     }
 
@@ -240,6 +304,7 @@ mod tests {
         assert_eq!(two.hole.len(), 2);
         assert_eq!(six.players.len(), 6);
         assert_eq!(six.hole.len(), 6);
+        assert_eq!(two.min_raise, 10);
         assert!(!two.round_complete);
         assert_eq!(two.winner, None);
     }
@@ -254,6 +319,21 @@ mod tests {
     #[should_panic]
     fn seven_players() {
         State::new(SEED, 0, &[1000; 7], 5, 10);
+    }
+
+    #[test]
+    #[should_panic]
+    fn chip_limit() {
+        State::new(SEED, 0, &[u32::MAX, 10], 5, 10);
+    }
+
+    #[test]
+    fn blind_all_in() {
+        let state = State::new(SEED, 0, &[10, 100], 10, 10);
+
+        assert_eq!(state.players[0].stack, 0);
+        assert_eq!(state.players[1].acted_bet, None);
+        assert!(state.round_complete);
     }
 
     #[test]
@@ -394,12 +474,13 @@ mod tests {
 
     #[test]
     fn chip_total() {
-        let stacks = [1000, 1200, 900, 1500, 800, 1100];
-        let mut state = State::new(SEED, 2, &stacks, 5, 10);
+        let stacks = [100, 20, 100];
+        let mut state = State::new(SEED, 0, &stacks, 5, 10);
         let before: u64 = stacks.iter().map(|&stack| u64::from(stack)).sum();
 
-        state.apply(5, Action::Call).unwrap();
-        state.apply(0, Action::Call).unwrap();
+        state.apply(0, Action::RaiseTo(50)).unwrap();
+        state.apply(1, Action::Call).unwrap();
+        state.apply(2, Action::Call).unwrap();
 
         let after: u64 = state
             .players
@@ -423,7 +504,7 @@ mod tests {
         );
         assert_eq!(state.players[0].stack, 990);
         assert_eq!(state.players[0].bet, 10);
-        assert!(state.players[0].acted);
+        assert_eq!(state.players[0].acted_bet, Some(10));
         assert_eq!(state.pot, 20);
         assert_eq!(state.turn, 1);
         assert!(!state.round_complete);
@@ -435,7 +516,7 @@ mod tests {
                 Event::BettingRoundComplete
             ])
         );
-        assert!(state.players[1].acted);
+        assert_eq!(state.players[1].acted_bet, Some(10));
         assert!(state.round_complete);
         assert_eq!(state.winner, None);
 
@@ -498,7 +579,7 @@ mod tests {
             Ok(vec![Event::Folded { player: 0 }])
         );
         assert!(state.players[0].folded);
-        assert!(state.players[0].acted);
+        assert_eq!(state.players[0].acted_bet, None);
         assert_eq!(state.players[0].stack, 1000);
         assert_eq!(state.players[0].bet, 0);
         assert_eq!(state.pot, 15);
@@ -548,7 +629,7 @@ mod tests {
         assert!(state.players.iter().all(|player| player.bet == 10));
         assert!(!state.round_complete);
         assert_eq!(state.turn, 2);
-        assert!(!state.players[2].acted);
+        assert_eq!(state.players[2].acted_bet, None);
 
         assert_eq!(
             state.apply(2, Action::Check),
@@ -596,5 +677,269 @@ mod tests {
         assert!(state.round_complete);
         assert_eq!(state.winner, None);
         assert_eq!(state.pot, 40);
+    }
+
+    #[test]
+    fn minimum_raise() {
+        let mut state = State::new(SEED, 0, &[20, 100], 5, 10);
+
+        assert_eq!(
+            state.apply(0, Action::RaiseTo(20)),
+            Ok(vec![Event::Raised { player: 0, to: 20 }])
+        );
+        assert_eq!(state.players[0].stack, 0);
+        assert_eq!(state.players[0].bet, 20);
+        assert_eq!(state.players[0].acted_bet, Some(20));
+        assert_eq!(state.pot, 30);
+        assert_eq!(state.min_raise, 10);
+        assert_eq!(state.turn, 1);
+        assert!(!state.round_complete);
+    }
+
+    #[test]
+    fn larger_raise() {
+        let mut state = State::new(SEED, 0, &[100; 3], 5, 10);
+
+        assert_eq!(
+            state.apply(0, Action::RaiseTo(30)),
+            Ok(vec![Event::Raised { player: 0, to: 30 }])
+        );
+        assert_eq!(state.players[0].stack, 70);
+        assert_eq!(state.players[0].bet, 30);
+        assert_eq!(state.pot, 45);
+        assert_eq!(state.min_raise, 20);
+        assert_eq!(state.turn, 1);
+
+        let player = state.players[1];
+        let pot = state.pot;
+
+        assert_eq!(
+            state.apply(1, Action::RaiseTo(40)),
+            Err(ActionError::CannotRaise)
+        );
+        assert_eq!(state.players[1], player);
+        assert_eq!(state.pot, pot);
+        assert_eq!(state.min_raise, 20);
+        assert_eq!(state.turn, 1);
+
+        assert_eq!(
+            state.apply(1, Action::RaiseTo(50)),
+            Ok(vec![Event::Raised { player: 1, to: 50 }])
+        );
+        assert_eq!(state.players[1].stack, 50);
+        assert_eq!(state.players[1].bet, 50);
+        assert_eq!(state.pot, 90);
+        assert_eq!(state.min_raise, 20);
+        assert_eq!(state.turn, 2);
+    }
+
+    #[test]
+    fn invalid_raise() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+        let same = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        for action in [
+            Action::RaiseTo(10),
+            Action::RaiseTo(101),
+            Action::RaiseTo(15),
+        ] {
+            assert_eq!(state.apply(0, action), Err(ActionError::CannotRaise));
+            assert_eq!(state, same);
+        }
+    }
+
+    #[test]
+    fn full_reopen() {
+        let mut call = State::new(SEED, 0, &[100; 4], 5, 10);
+        let mut raise = State::new(SEED, 0, &[100; 4], 5, 10);
+
+        for state in [&mut call, &mut raise] {
+            state.apply(3, Action::Call).unwrap();
+            state.apply(0, Action::Call).unwrap();
+            state.apply(1, Action::RaiseTo(20)).unwrap();
+            state.apply(2, Action::Call).unwrap();
+
+            assert_eq!(state.turn, 3);
+            assert_eq!(state.players[3].acted_bet, Some(10));
+        }
+
+        assert_eq!(
+            call.apply(3, Action::Call),
+            Ok(vec![Event::Called {
+                player: 3,
+                amount: 10
+            }])
+        );
+        assert_eq!(
+            raise.apply(3, Action::RaiseTo(30)),
+            Ok(vec![Event::Raised { player: 3, to: 30 }])
+        );
+    }
+
+    #[test]
+    fn short_call() {
+        let stacks = [100, 20, 100];
+        let mut state = State::new(SEED, 0, &stacks, 5, 10);
+        let before: u64 = stacks.iter().map(|&stack| u64::from(stack)).sum();
+
+        state.apply(0, Action::RaiseTo(50)).unwrap();
+        assert_eq!(
+            state.apply(1, Action::Call),
+            Ok(vec![Event::Called {
+                player: 1,
+                amount: 15
+            }])
+        );
+        assert_eq!(state.players[1].stack, 0);
+        assert_eq!(state.players[1].bet, 20);
+        assert_eq!(state.players[1].acted_bet, Some(50));
+        assert_eq!(state.turn, 2);
+
+        assert_eq!(
+            state.apply(2, Action::Call),
+            Ok(vec![
+                Event::Called {
+                    player: 2,
+                    amount: 40
+                },
+                Event::BettingRoundComplete
+            ])
+        );
+        assert!(state.round_complete);
+
+        let after: u64 = state
+            .players
+            .iter()
+            .map(|player| u64::from(player.stack))
+            .sum();
+
+        assert_eq!(before, after + u64::from(state.pot));
+    }
+
+    #[test]
+    fn short_raise() {
+        let mut state = State::new(SEED, 0, &[15, 100, 100], 5, 10);
+
+        assert_eq!(
+            state.apply(0, Action::RaiseTo(15)),
+            Ok(vec![Event::Raised { player: 0, to: 15 }])
+        );
+        assert_eq!(state.players[0].stack, 0);
+        assert_eq!(state.players[0].bet, 15);
+        assert_eq!(state.players[0].acted_bet, Some(15));
+        assert_eq!(state.pot, 30);
+        assert_eq!(state.min_raise, 10);
+        assert_eq!(state.turn, 1);
+    }
+
+    #[test]
+    fn short_closed() {
+        let mut state = State::new(SEED, 0, &[100, 15, 100, 100], 5, 10);
+
+        state.apply(3, Action::Call).unwrap();
+        state.apply(0, Action::Fold).unwrap();
+        state.apply(1, Action::RaiseTo(15)).unwrap();
+        state.apply(2, Action::Call).unwrap();
+
+        assert_eq!(state.turn, 3);
+        assert_eq!(state.current_bet(), 15);
+        assert_eq!(state.min_raise, 10);
+
+        let player = state.players[3];
+        let pot = state.pot;
+
+        assert_eq!(
+            state.apply(3, Action::RaiseTo(25)),
+            Err(ActionError::CannotRaise)
+        );
+        assert_eq!(state.players[3], player);
+        assert_eq!(state.pot, pot);
+        assert_eq!(state.turn, 3);
+
+        assert_eq!(
+            state.apply(3, Action::Call),
+            Ok(vec![
+                Event::Called {
+                    player: 3,
+                    amount: 5
+                },
+                Event::BettingRoundComplete
+            ])
+        );
+    }
+
+    #[test]
+    fn short_reopen() {
+        let mut state = State::new(SEED, 0, &[20, 100, 100, 100, 15], 5, 10);
+
+        state.apply(3, Action::Call).unwrap();
+        state.apply(4, Action::RaiseTo(15)).unwrap();
+        state.apply(0, Action::RaiseTo(20)).unwrap();
+        state.apply(1, Action::Call).unwrap();
+        state.apply(2, Action::Call).unwrap();
+
+        assert_eq!(state.current_bet(), 20);
+        assert_eq!(state.min_raise, 10);
+        assert_eq!(state.turn, 3);
+        assert_eq!(state.players[3].acted_bet, Some(10));
+
+        assert_eq!(
+            state.apply(3, Action::RaiseTo(30)),
+            Ok(vec![Event::Raised { player: 3, to: 30 }])
+        );
+        assert_eq!(state.players[3].stack, 70);
+        assert_eq!(state.players[3].bet, 30);
+        assert_eq!(state.players[4].stack, 0);
+        assert_eq!(state.players[0].stack, 0);
+        assert_eq!(state.turn, 1);
+    }
+
+    #[test]
+    fn all_in_skip() {
+        let mut state = State::new(SEED, 0, &[15, 100, 100, 100], 5, 10);
+
+        state.apply(3, Action::Call).unwrap();
+        state.apply(0, Action::RaiseTo(15)).unwrap();
+        state.apply(1, Action::Call).unwrap();
+        state.apply(2, Action::RaiseTo(25)).unwrap();
+        state.apply(3, Action::Call).unwrap();
+
+        assert_eq!(state.players[0].stack, 0);
+        assert_eq!(state.turn, 1);
+
+        assert_eq!(
+            state.apply(1, Action::Call),
+            Ok(vec![
+                Event::Called {
+                    player: 1,
+                    amount: 10
+                },
+                Event::BettingRoundComplete
+            ])
+        );
+        assert!(state.round_complete);
+    }
+
+    #[test]
+    fn lone_stack() {
+        let mut state = State::new(SEED, 0, &[10, 10, 100], 5, 10);
+
+        state.apply(0, Action::Call).unwrap();
+        assert_eq!(state.turn, 1);
+
+        assert_eq!(
+            state.apply(1, Action::Call),
+            Ok(vec![
+                Event::Called {
+                    player: 1,
+                    amount: 5
+                },
+                Event::BettingRoundComplete
+            ])
+        );
+        assert!(state.round_complete);
+        assert_eq!(state.players[0].stack, 0);
+        assert_eq!(state.players[1].stack, 0);
+        assert_eq!(state.players[2].acted_bet, None);
     }
 }
