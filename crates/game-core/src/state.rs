@@ -1,5 +1,6 @@
 use crate::{Card, Deck};
 
+// added action and event enums for game state updates
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     Fold,
@@ -14,10 +15,13 @@ pub enum Event {
     Checked { player: usize },
     Called { player: usize, amount: u32 },
     Raised { player: usize, to: u32 },
+    FlopDealt { cards: [Card; 3] },
     BettingRoundComplete,
     WonByFold { player: usize },
 }
 
+// tehcnically unnecessary considering the UI should only allow for legal actions
+// however its useufl for testing
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActionError {
     InvalidPlayer,
@@ -30,9 +34,24 @@ pub enum ActionError {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AdvanceError {
+    CannotAdvance,
+    HandComplete,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Street {
+    Preflop,
+    Flop,
+    Turn,
+    River,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Player {
     pub stack: u32,
     pub bet: u32,
+    pub contributed: u32,
     pub folded: bool,
     pub acted_bet: Option<u32>,
 }
@@ -44,11 +63,14 @@ pub struct State {
 
     pub players: Vec<Player>,
     pub hole: Vec<[Card; 2]>,
+    pub board: Vec<Card>,
     pub pot: u32,
     pub min_raise: u32,
+    pub big_blind: u32,
     pub dealer: usize,
     pub turn: usize,
     pub next_card: usize,
+    pub street: Street,
     pub round_complete: bool,
     pub winner: Option<usize>,
 }
@@ -77,6 +99,7 @@ impl State {
             .map(|&stack| Player {
                 stack,
                 bet: 0,
+                contributed: 0,
                 folded: false,
                 acted_bet: None,
             })
@@ -85,8 +108,10 @@ impl State {
 
         players[sb_pos].stack -= sb;
         players[sb_pos].bet = sb;
+        players[sb_pos].contributed = sb;
         players[bb_pos].stack -= bb;
         players[bb_pos].bet = bb;
+        players[bb_pos].contributed = bb;
 
         // deal clockwise from left of dealer for two rounds
         let first = (dealer + 1) % n;
@@ -102,11 +127,14 @@ impl State {
             deck,
             players,
             hole,
+            board: Vec::with_capacity(5),
             pot: sb + bb,
             min_raise: bb,
+            big_blind: bb,
             dealer,
             turn,
             next_card: 2 * n,
+            street: Street::Preflop,
             round_complete: false,
             winner: None,
         };
@@ -164,6 +192,7 @@ impl State {
 
                 self.players[player].stack -= amount;
                 self.players[player].bet += amount;
+                self.players[player].contributed += amount;
                 self.players[player].acted_bet = Some(current_bet);
                 self.pot += amount;
                 events.push(Event::Called { player, amount });
@@ -174,6 +203,7 @@ impl State {
 
                 self.players[player].stack -= amount;
                 self.players[player].bet = to;
+                self.players[player].contributed += amount;
                 self.players[player].acted_bet = Some(to);
                 self.pot += amount;
 
@@ -206,6 +236,48 @@ impl State {
 
         self.advance_turn(player);
         Ok(events)
+    }
+
+    pub fn advance_street(&mut self) -> Result<Event, AdvanceError> {
+        if self.winner.is_some() {
+            return Err(AdvanceError::HandComplete);
+        }
+
+        if !self.round_complete || self.street != Street::Preflop {
+            return Err(AdvanceError::CannotAdvance);
+        }
+
+        // burn next card then deal three
+        let k = self.next_card;
+        let flop = [
+            self.deck.cards()[k + 1],
+            self.deck.cards()[k + 2],
+            self.deck.cards()[k + 3],
+        ];
+
+        self.board.extend_from_slice(&flop);
+        self.next_card += 4;
+        self.street = Street::Flop;
+        self.min_raise = self.big_blind;
+
+        for player in &mut self.players {
+            player.bet = 0;
+            player.acted_bet = None;
+        }
+
+        let live = self
+            .players
+            .iter()
+            .filter(|player| !player.folded && player.stack > 0)
+            .count();
+
+        self.round_complete = live < 2;
+
+        if !self.round_complete {
+            self.turn = self.first_postflop().unwrap();
+        }
+
+        Ok(Event::FlopDealt { cards: flop })
     }
 
     fn current_bet(&self) -> u32 {
@@ -276,6 +348,18 @@ impl State {
             }
         }
     }
+
+    fn first_postflop(&self) -> Option<usize> {
+        for offset in 1..=self.players.len() {
+            let player = (self.dealer + offset) % self.players.len();
+
+            if !self.players[player].folded && self.players[player].stack > 0 {
+                return Some(player);
+            }
+        }
+
+        None
+    }
 }
 
 #[cfg(test)]
@@ -290,8 +374,30 @@ mod tests {
         Player {
             stack,
             bet,
+            contributed: bet,
             folded: false,
             acted_bet: None,
+        }
+    }
+
+    fn contributions(state: &State) -> u64 {
+        state
+            .players
+            .iter()
+            .map(|player| u64::from(player.contributed))
+            .sum()
+    }
+
+    fn finish_round(state: &mut State) {
+        while !state.round_complete {
+            let player = state.turn;
+            let action = if state.players[player].bet == state.current_bet() {
+                Action::Check
+            } else {
+                Action::Call
+            };
+
+            state.apply(player, action).unwrap();
         }
     }
 
@@ -304,7 +410,10 @@ mod tests {
         assert_eq!(two.hole.len(), 2);
         assert_eq!(six.players.len(), 6);
         assert_eq!(six.hole.len(), 6);
+        assert_eq!(two.street, Street::Preflop);
+        assert!(two.board.is_empty());
         assert_eq!(two.min_raise, 10);
+        assert_eq!(two.big_blind, 10);
         assert!(!two.round_complete);
         assert_eq!(two.winner, None);
     }
@@ -356,6 +465,20 @@ mod tests {
         assert_eq!(state.pot, 15);
         assert_eq!(state.dealer, 1);
         assert_eq!(state.turn, 1);
+    }
+
+    #[test]
+    fn initial_contribution() {
+        let state = State::new(SEED, 2, &[1000; 6], 5, 10);
+
+        for i in [0, 1, 2, 5] {
+            assert_eq!(state.players[i].contributed, 0);
+        }
+
+        assert_eq!(state.players[3].contributed, 5);
+        assert_eq!(state.players[4].contributed, 10);
+        assert_eq!(state.pot, 15);
+        assert_eq!(contributions(&state), u64::from(state.pot));
     }
 
     #[test]
@@ -489,6 +612,31 @@ mod tests {
             .sum();
 
         assert_eq!(before, after + u64::from(state.pot));
+        assert_eq!(contributions(&state), u64::from(state.pot));
+    }
+
+    #[test]
+    fn contribution_total() {
+        let mut state = State::new(SEED, 0, &[100; 3], 5, 10);
+
+        state.apply(0, Action::Call).unwrap();
+        assert_eq!(contributions(&state), u64::from(state.pot));
+        state.apply(1, Action::RaiseTo(20)).unwrap();
+        assert_eq!(contributions(&state), u64::from(state.pot));
+        state.apply(2, Action::Call).unwrap();
+        assert_eq!(contributions(&state), u64::from(state.pot));
+        state.apply(0, Action::Call).unwrap();
+
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.contributed)
+                .collect::<Vec<_>>(),
+            vec![20, 20, 20]
+        );
+        assert_eq!(state.pot, 60);
+        assert_eq!(contributions(&state), u64::from(state.pot));
     }
 
     #[test]
@@ -941,5 +1089,207 @@ mod tests {
         assert_eq!(state.players[0].stack, 0);
         assert_eq!(state.players[1].stack, 0);
         assert_eq!(state.players[2].acted_bet, None);
+    }
+
+    #[test]
+    fn cannot_advance() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+        let same = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        assert_eq!(state.advance_street(), Err(AdvanceError::CannotAdvance));
+        assert_eq!(state, same);
+    }
+
+    #[test]
+    fn advance_winner() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+        let mut same = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        state.apply(0, Action::Fold).unwrap();
+        same.apply(0, Action::Fold).unwrap();
+
+        assert_eq!(state.advance_street(), Err(AdvanceError::HandComplete));
+        assert_eq!(state, same);
+    }
+
+    #[test]
+    fn flop_deal() {
+        for n in [2, 6] {
+            let stacks = vec![100; n];
+            let mut state = State::new(SEED, 0, &stacks, 5, 10);
+
+            assert_eq!(state.street, Street::Preflop);
+            assert!(state.board.is_empty());
+            finish_round(&mut state);
+
+            let k = state.next_card;
+            let burn = state.deck.cards()[k];
+            let flop = [
+                state.deck.cards()[k + 1],
+                state.deck.cards()[k + 2],
+                state.deck.cards()[k + 3],
+            ];
+
+            assert_eq!(state.advance_street(), Ok(Event::FlopDealt { cards: flop }));
+            assert_eq!(state.street, Street::Flop);
+            assert_eq!(state.board.as_slice(), flop.as_slice());
+            assert!(!state.board.contains(&burn));
+            assert_eq!(state.next_card, k + 4);
+        }
+    }
+
+    #[test]
+    fn flop_reset() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        state.apply(0, Action::RaiseTo(40)).unwrap();
+        state.apply(1, Action::Call).unwrap();
+
+        let contributed: Vec<_> = state
+            .players
+            .iter()
+            .map(|player| player.contributed)
+            .collect();
+        let stacks: Vec<_> = state.players.iter().map(|player| player.stack).collect();
+        let pot = state.pot;
+
+        assert_eq!(state.min_raise, 30);
+        assert!(state.players.iter().all(|player| player.bet == 40));
+        state.advance_street().unwrap();
+
+        assert_eq!(state.street, Street::Flop);
+        assert_eq!(state.board.len(), 3);
+        assert!(state.players.iter().all(|player| player.bet == 0));
+        assert!(
+            state
+                .players
+                .iter()
+                .all(|player| player.acted_bet.is_none())
+        );
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.contributed)
+                .collect::<Vec<_>>(),
+            contributed
+        );
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.stack)
+                .collect::<Vec<_>>(),
+            stacks
+        );
+        assert_eq!(state.pot, pot);
+        assert_eq!(state.min_raise, 10);
+        assert_eq!(state.big_blind, 10);
+        assert_eq!(state.current_bet(), 0);
+        assert_eq!(state.turn, 1);
+        assert!(!state.round_complete);
+        assert_eq!(contributions(&state), u64::from(state.pot));
+    }
+
+    #[test]
+    fn flop_turn() {
+        let mut state = State::new(SEED, 5, &[100; 6], 5, 10);
+
+        state.apply(2, Action::Call).unwrap();
+        state.apply(3, Action::Call).unwrap();
+        state.apply(4, Action::Call).unwrap();
+        state.apply(5, Action::Call).unwrap();
+        state.apply(0, Action::Fold).unwrap();
+        state.apply(1, Action::Check).unwrap();
+        state.advance_street().unwrap();
+
+        assert!(state.players[0].folded);
+        assert_eq!(state.players[0].bet, 0);
+        assert_eq!(state.players[0].contributed, 5);
+        assert_eq!(state.turn, 1);
+        assert!(!state.round_complete);
+    }
+
+    #[test]
+    fn flop_all_in() {
+        let mut state = State::new(SEED, 5, &[10, 100, 100, 100, 100, 100], 5, 10);
+
+        state.apply(2, Action::Call).unwrap();
+        state.apply(3, Action::Call).unwrap();
+        state.apply(4, Action::Call).unwrap();
+        state.apply(5, Action::Call).unwrap();
+        state.apply(0, Action::Call).unwrap();
+        state.apply(1, Action::Check).unwrap();
+        state.advance_street().unwrap();
+
+        assert_eq!(state.players[0].stack, 0);
+        assert_eq!(state.players[0].bet, 0);
+        assert_eq!(state.players[0].contributed, 10);
+        assert!(!state.players[0].folded);
+        assert_eq!(state.turn, 1);
+        assert!(!state.round_complete);
+    }
+
+    #[test]
+    fn flop_no_action() {
+        let mut state = State::new(SEED, 0, &[10, 10, 100], 5, 10);
+        let mut same = State::new(SEED, 0, &[10, 10, 100], 5, 10);
+
+        for state in [&mut state, &mut same] {
+            state.apply(0, Action::Call).unwrap();
+            state.apply(1, Action::Call).unwrap();
+            state.advance_street().unwrap();
+        }
+
+        assert_eq!(state.street, Street::Flop);
+        assert_eq!(state.board.len(), 3);
+        assert!(state.round_complete);
+        assert_eq!(state.winner, None);
+        assert_eq!(state.players[0].stack, 0);
+        assert_eq!(state.players[1].stack, 0);
+        assert!(!state.players[0].folded);
+        assert!(!state.players[1].folded);
+        assert_eq!(state.advance_street(), Err(AdvanceError::CannotAdvance));
+        assert_eq!(state, same);
+    }
+
+    #[test]
+    fn flop_betting() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        state.apply(0, Action::Call).unwrap();
+        state.apply(1, Action::Check).unwrap();
+        state.advance_street().unwrap();
+
+        assert_eq!(state.turn, 1);
+        assert_eq!(
+            state.apply(1, Action::Check),
+            Ok(vec![Event::Checked { player: 1 }])
+        );
+        assert_eq!(state.turn, 0);
+        assert_eq!(
+            state.apply(0, Action::RaiseTo(10)),
+            Ok(vec![Event::Raised { player: 0, to: 10 }])
+        );
+        assert_eq!(state.turn, 1);
+        assert_eq!(
+            state.apply(1, Action::Call),
+            Ok(vec![
+                Event::Called {
+                    player: 1,
+                    amount: 10
+                },
+                Event::BettingRoundComplete
+            ])
+        );
+
+        assert_eq!(state.street, Street::Flop);
+        assert!(state.round_complete);
+        assert_eq!(state.players[0].bet, 10);
+        assert_eq!(state.players[1].bet, 10);
+        assert_eq!(state.players[0].contributed, 20);
+        assert_eq!(state.players[1].contributed, 20);
+        assert_eq!(state.pot, 40);
+        assert_eq!(contributions(&state), u64::from(state.pot));
     }
 }
