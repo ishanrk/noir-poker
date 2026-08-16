@@ -15,6 +15,8 @@ pub struct Deck {
 impl Deck {
     pub fn new() -> Self {
         // suit major ranks low to high
+
+        // use rank all and suit all constants to add modularity for different decks
         let cards = core::array::from_fn(|i| {
             let rank = Rank::ALL[i % Rank::ALL.len()];
             let suit = Suit::ALL[i / Rank::ALL.len()];
