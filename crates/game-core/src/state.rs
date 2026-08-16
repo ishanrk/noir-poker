@@ -16,6 +16,8 @@ pub enum Event {
     Called { player: usize, amount: u32 },
     Raised { player: usize, to: u32 },
     FlopDealt { cards: [Card; 3] },
+    TurnDealt { card: Card },
+    RiverDealt { card: Card },
     BettingRoundComplete,
     WonByFold { player: usize },
 }
@@ -243,21 +245,51 @@ impl State {
             return Err(AdvanceError::HandComplete);
         }
 
-        if !self.round_complete || self.street != Street::Preflop {
+        if !self.round_complete {
             return Err(AdvanceError::CannotAdvance);
         }
 
-        // burn next card then deal three
-        let k = self.next_card;
-        let flop = [
-            self.deck.cards()[k + 1],
-            self.deck.cards()[k + 2],
-            self.deck.cards()[k + 3],
-        ];
+        let event = match self.street {
+            Street::Preflop => {
+                // burn next card then deal three
+                let k = self.next_card;
+                let cards = [
+                    self.deck.cards()[k + 1],
+                    self.deck.cards()[k + 2],
+                    self.deck.cards()[k + 3],
+                ];
 
-        self.board.extend_from_slice(&flop);
-        self.next_card += 4;
-        self.street = Street::Flop;
+                self.board.extend_from_slice(&cards);
+                self.next_card += 4;
+                self.street = Street::Flop;
+                Event::FlopDealt { cards }
+            }
+            Street::Flop => {
+                // burn next card then deal one
+                let card = self.deck.cards()[self.next_card + 1];
+
+                self.board.push(card);
+                self.next_card += 2;
+                self.street = Street::Turn;
+                Event::TurnDealt { card }
+            }
+            Street::Turn => {
+                // burn next card then deal one
+                let card = self.deck.cards()[self.next_card + 1];
+
+                self.board.push(card);
+                self.next_card += 2;
+                self.street = Street::River;
+                Event::RiverDealt { card }
+            }
+            Street::River => return Err(AdvanceError::CannotAdvance),
+        };
+
+        self.start_round();
+        Ok(event)
+    }
+
+    fn start_round(&mut self) {
         self.min_raise = self.big_blind;
 
         for player in &mut self.players {
@@ -276,8 +308,6 @@ impl State {
         if !self.round_complete {
             self.turn = self.first_postflop().unwrap();
         }
-
-        Ok(Event::FlopDealt { cards: flop })
     }
 
     fn current_bet(&self) -> u32 {
@@ -1231,26 +1261,36 @@ mod tests {
     }
 
     #[test]
-    fn flop_no_action() {
+    fn lone_stack_runout() {
         let mut state = State::new(SEED, 0, &[10, 10, 100], 5, 10);
-        let mut same = State::new(SEED, 0, &[10, 10, 100], 5, 10);
 
-        for state in [&mut state, &mut same] {
-            state.apply(0, Action::Call).unwrap();
-            state.apply(1, Action::Call).unwrap();
-            state.advance_street().unwrap();
-        }
+        state.apply(0, Action::Call).unwrap();
+        state.apply(1, Action::Call).unwrap();
 
+        assert!(state.round_complete);
+        assert_eq!(state.winner, None);
+        state.advance_street().unwrap();
         assert_eq!(state.street, Street::Flop);
         assert_eq!(state.board.len(), 3);
         assert!(state.round_complete);
         assert_eq!(state.winner, None);
+
+        state.advance_street().unwrap();
+        assert_eq!(state.street, Street::Turn);
+        assert_eq!(state.board.len(), 4);
+        assert!(state.round_complete);
+        assert_eq!(state.winner, None);
+
+        state.advance_street().unwrap();
+        assert_eq!(state.street, Street::River);
+        assert_eq!(state.board.len(), 5);
+        assert!(state.round_complete);
+        assert_eq!(state.winner, None);
+
         assert_eq!(state.players[0].stack, 0);
         assert_eq!(state.players[1].stack, 0);
-        assert!(!state.players[0].folded);
-        assert!(!state.players[1].folded);
-        assert_eq!(state.advance_street(), Err(AdvanceError::CannotAdvance));
-        assert_eq!(state, same);
+        assert_eq!(state.players[2].stack, 90);
+        assert!(state.players.iter().all(|player| !player.folded));
     }
 
     #[test]
@@ -1291,5 +1331,491 @@ mod tests {
         assert_eq!(state.players[1].contributed, 20);
         assert_eq!(state.pot, 40);
         assert_eq!(contributions(&state), u64::from(state.pot));
+    }
+
+    #[test]
+    fn turn_deal() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+        finish_round(&mut state);
+
+        let k = state.next_card;
+        let burn = state.deck.cards()[k];
+        let turn = state.deck.cards()[k + 1];
+
+        assert_eq!(state.advance_street(), Ok(Event::TurnDealt { card: turn }));
+        assert_eq!(state.street, Street::Turn);
+        assert_eq!(state.board.len(), 4);
+        assert_eq!(state.board[3], turn);
+        assert!(!state.board.contains(&burn));
+        assert_eq!(state.next_card, k + 2);
+    }
+
+    #[test]
+    fn river_deal() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+        finish_round(&mut state);
+
+        let k = state.next_card;
+        let burn = state.deck.cards()[k];
+        let river = state.deck.cards()[k + 1];
+
+        assert_eq!(
+            state.advance_street(),
+            Ok(Event::RiverDealt { card: river })
+        );
+        assert_eq!(state.street, Street::River);
+        assert_eq!(state.board.len(), 5);
+        assert_eq!(state.board[4], river);
+        assert!(!state.board.contains(&burn));
+        assert_eq!(state.next_card, k + 2);
+    }
+
+    #[test]
+    fn board_positions() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+        let h = state.next_card;
+        let board = [
+            state.deck.cards()[h + 1],
+            state.deck.cards()[h + 2],
+            state.deck.cards()[h + 3],
+            state.deck.cards()[h + 5],
+            state.deck.cards()[h + 7],
+        ];
+
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+
+        assert_eq!(state.board.as_slice(), board.as_slice());
+        assert_eq!(state.next_card, h + 8);
+    }
+
+    #[test]
+    fn unique_runout() {
+        for n in [2, 6] {
+            let stacks = vec![100; n];
+            let mut state = State::new(SEED, 0, &stacks, 5, 10);
+            let h = state.next_card;
+            let burns = [
+                state.deck.cards()[h],
+                state.deck.cards()[h + 4],
+                state.deck.cards()[h + 6],
+            ];
+
+            finish_round(&mut state);
+            state.advance_street().unwrap();
+            finish_round(&mut state);
+            state.advance_street().unwrap();
+            finish_round(&mut state);
+            state.advance_street().unwrap();
+
+            let mut cards: Vec<_> = state.hole.iter().flatten().copied().collect();
+            cards.extend(state.board.iter().copied());
+            cards.extend(burns);
+
+            assert_eq!(cards.len(), 2 * n + 8);
+
+            for a in 0..cards.len() {
+                for b in a + 1..cards.len() {
+                    assert_ne!(cards[a], cards[b]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn turn_reset() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+        state.apply(1, Action::RaiseTo(20)).unwrap();
+        state.apply(0, Action::Call).unwrap();
+
+        let stacks: Vec<_> = state.players.iter().map(|player| player.stack).collect();
+        let contributed: Vec<_> = state
+            .players
+            .iter()
+            .map(|player| player.contributed)
+            .collect();
+        let folded: Vec<_> = state.players.iter().map(|player| player.folded).collect();
+        let pot = state.pot;
+
+        assert_eq!(state.min_raise, 20);
+        assert!(state.players.iter().all(|player| player.bet == 20));
+        assert!(
+            state
+                .players
+                .iter()
+                .all(|player| player.acted_bet.is_some())
+        );
+        state.advance_street().unwrap();
+
+        assert_eq!(state.street, Street::Turn);
+        assert!(state.players.iter().all(|player| player.bet == 0));
+        assert!(
+            state
+                .players
+                .iter()
+                .all(|player| player.acted_bet.is_none())
+        );
+        assert_eq!(state.min_raise, state.big_blind);
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.stack)
+                .collect::<Vec<_>>(),
+            stacks
+        );
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.contributed)
+                .collect::<Vec<_>>(),
+            contributed
+        );
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.folded)
+                .collect::<Vec<_>>(),
+            folded
+        );
+        assert_eq!(state.pot, pot);
+    }
+
+    #[test]
+    fn river_reset() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+        state.apply(1, Action::RaiseTo(20)).unwrap();
+        state.apply(0, Action::Call).unwrap();
+
+        let stacks: Vec<_> = state.players.iter().map(|player| player.stack).collect();
+        let contributed: Vec<_> = state
+            .players
+            .iter()
+            .map(|player| player.contributed)
+            .collect();
+        let folded: Vec<_> = state.players.iter().map(|player| player.folded).collect();
+        let pot = state.pot;
+
+        assert_eq!(state.min_raise, 20);
+        assert!(state.players.iter().all(|player| player.bet == 20));
+        assert!(
+            state
+                .players
+                .iter()
+                .all(|player| player.acted_bet.is_some())
+        );
+        state.advance_street().unwrap();
+
+        assert_eq!(state.street, Street::River);
+        assert!(state.players.iter().all(|player| player.bet == 0));
+        assert!(
+            state
+                .players
+                .iter()
+                .all(|player| player.acted_bet.is_none())
+        );
+        assert_eq!(state.min_raise, state.big_blind);
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.stack)
+                .collect::<Vec<_>>(),
+            stacks
+        );
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.contributed)
+                .collect::<Vec<_>>(),
+            contributed
+        );
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.folded)
+                .collect::<Vec<_>>(),
+            folded
+        );
+        assert_eq!(state.pot, pot);
+    }
+
+    #[test]
+    fn street_contributions() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        state.apply(0, Action::RaiseTo(20)).unwrap();
+        state.apply(1, Action::Call).unwrap();
+
+        let before: Vec<_> = state
+            .players
+            .iter()
+            .map(|player| player.contributed)
+            .collect();
+        let pot = state.pot;
+
+        state.advance_street().unwrap();
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.contributed)
+                .collect::<Vec<_>>(),
+            before
+        );
+        assert_eq!(state.pot, pot);
+        assert_eq!(contributions(&state), u64::from(state.pot));
+
+        state.apply(1, Action::RaiseTo(10)).unwrap();
+        state.apply(0, Action::Call).unwrap();
+
+        let before: Vec<_> = state
+            .players
+            .iter()
+            .map(|player| player.contributed)
+            .collect();
+        let pot = state.pot;
+
+        state.advance_street().unwrap();
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.contributed)
+                .collect::<Vec<_>>(),
+            before
+        );
+        assert_eq!(state.pot, pot);
+        assert_eq!(contributions(&state), u64::from(state.pot));
+
+        state.apply(1, Action::RaiseTo(20)).unwrap();
+        state.apply(0, Action::Call).unwrap();
+
+        let before: Vec<_> = state
+            .players
+            .iter()
+            .map(|player| player.contributed)
+            .collect();
+        let pot = state.pot;
+
+        state.advance_street().unwrap();
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| player.contributed)
+                .collect::<Vec<_>>(),
+            before
+        );
+        assert_eq!(state.pot, pot);
+        assert_eq!(contributions(&state), u64::from(state.pot));
+    }
+
+    #[test]
+    fn turn_betting() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+
+        assert_eq!(state.turn, 1);
+        assert_eq!(
+            state.apply(1, Action::Check),
+            Ok(vec![Event::Checked { player: 1 }])
+        );
+        assert_eq!(
+            state.apply(0, Action::RaiseTo(10)),
+            Ok(vec![Event::Raised { player: 0, to: 10 }])
+        );
+        assert_eq!(
+            state.apply(1, Action::Call),
+            Ok(vec![
+                Event::Called {
+                    player: 1,
+                    amount: 10
+                },
+                Event::BettingRoundComplete
+            ])
+        );
+
+        assert_eq!(state.street, Street::Turn);
+        assert!(state.round_complete);
+        assert_eq!(state.players[0].contributed, 20);
+        assert_eq!(state.players[1].contributed, 20);
+        assert_eq!(state.pot, 40);
+        assert_eq!(contributions(&state), u64::from(state.pot));
+    }
+
+    #[test]
+    fn river_betting() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+
+        assert_eq!(state.turn, 1);
+        assert_eq!(
+            state.apply(1, Action::Check),
+            Ok(vec![Event::Checked { player: 1 }])
+        );
+        assert_eq!(
+            state.apply(0, Action::RaiseTo(10)),
+            Ok(vec![Event::Raised { player: 0, to: 10 }])
+        );
+        assert_eq!(
+            state.apply(1, Action::Call),
+            Ok(vec![
+                Event::Called {
+                    player: 1,
+                    amount: 10
+                },
+                Event::BettingRoundComplete
+            ])
+        );
+
+        assert_eq!(state.street, Street::River);
+        assert!(state.round_complete);
+        assert_eq!(state.players[0].contributed, 20);
+        assert_eq!(state.players[1].contributed, 20);
+        assert_eq!(state.pot, 40);
+        assert_eq!(contributions(&state), u64::from(state.pot));
+    }
+
+    #[test]
+    fn postflop_actor() {
+        let mut state = State::new(SEED, 0, &[100, 100, 10, 100], 5, 10);
+
+        state.apply(3, Action::Call).unwrap();
+        state.apply(0, Action::Call).unwrap();
+        state.apply(1, Action::Fold).unwrap();
+
+        state.advance_street().unwrap();
+        assert_eq!(state.street, Street::Flop);
+        assert_eq!(state.turn, 3);
+
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+        assert_eq!(state.street, Street::Turn);
+        assert_eq!(state.turn, 3);
+
+        finish_round(&mut state);
+        state.advance_street().unwrap();
+        assert_eq!(state.street, Street::River);
+        assert_eq!(state.turn, 3);
+        assert!(state.players[1].folded);
+        assert_eq!(state.players[2].stack, 0);
+    }
+
+    #[test]
+    fn all_in_runout() {
+        let mut state = State::new(SEED, 0, &[10; 2], 5, 10);
+        let h = state.next_card;
+        let flop = [
+            state.deck.cards()[h + 1],
+            state.deck.cards()[h + 2],
+            state.deck.cards()[h + 3],
+        ];
+        let turn = state.deck.cards()[h + 5];
+        let river = state.deck.cards()[h + 7];
+
+        finish_round(&mut state);
+        assert!(state.players.iter().all(|player| player.stack == 0));
+
+        assert_eq!(state.advance_street(), Ok(Event::FlopDealt { cards: flop }));
+        assert!(state.round_complete);
+        assert_eq!(state.advance_street(), Ok(Event::TurnDealt { card: turn }));
+        assert!(state.round_complete);
+        assert_eq!(
+            state.advance_street(),
+            Ok(Event::RiverDealt { card: river })
+        );
+        assert!(state.round_complete);
+        assert_eq!(state.board.len(), 5);
+        assert_eq!(state.winner, None);
+    }
+
+    #[test]
+    fn early_turn() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+        let mut same = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        for state in [&mut state, &mut same] {
+            finish_round(state);
+            state.advance_street().unwrap();
+        }
+
+        assert_eq!(state.street, Street::Flop);
+        assert!(!state.round_complete);
+        assert_eq!(state.advance_street(), Err(AdvanceError::CannotAdvance));
+        assert_eq!(state, same);
+    }
+
+    #[test]
+    fn early_river() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+        let mut same = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        for state in [&mut state, &mut same] {
+            finish_round(state);
+            state.advance_street().unwrap();
+            finish_round(state);
+            state.advance_street().unwrap();
+        }
+
+        assert_eq!(state.street, Street::Turn);
+        assert!(!state.round_complete);
+        assert_eq!(state.advance_street(), Err(AdvanceError::CannotAdvance));
+        assert_eq!(state, same);
+    }
+
+    #[test]
+    fn after_river() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+        let mut same = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        for state in [&mut state, &mut same] {
+            finish_round(state);
+            state.advance_street().unwrap();
+            finish_round(state);
+            state.advance_street().unwrap();
+            finish_round(state);
+            state.advance_street().unwrap();
+            finish_round(state);
+        }
+
+        assert_eq!(state.street, Street::River);
+        assert!(state.round_complete);
+        assert_eq!(state.advance_street(), Err(AdvanceError::CannotAdvance));
+        assert_eq!(state, same);
     }
 }
