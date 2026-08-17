@@ -40,6 +40,23 @@ pub struct NewChallenge {
     pub next_rev: u64,
 }
 
+pub struct ClaimUpdate {
+    pub room: Uuid,
+    pub hand_no: u64,
+    pub seat: usize,
+    pub tier: u8,
+    pub hand_tag: [u8; 32],
+    pub commitment: [u8; 32],
+    pub nonce: [u8; 32],
+    pub facts_hash: [u8; 32],
+    pub nullifier: [u8; 32],
+    pub points: u32,
+    pub prior_points: u64,
+    pub next_points: u64,
+    pub rev: u64,
+    pub next_rev: u64,
+}
+
 #[derive(Clone)]
 pub struct FactHash {
     pub seat: usize,
@@ -76,6 +93,7 @@ pub struct StoredSeat {
     pub seat: i32,
     pub token_hash: Vec<u8>,
     pub ready_hand: Option<Uuid>,
+    pub proof_points: i64,
 }
 
 #[derive(Clone)]
@@ -106,6 +124,9 @@ pub struct StoredChallenge {
     pub commitment: Vec<u8>,
     pub nonce: Vec<u8>,
     pub facts_hash: Option<Vec<u8>>,
+    pub nullifier: Option<Vec<u8>>,
+    pub points: Option<i64>,
+    pub claimed: bool,
 }
 
 #[derive(Clone)]
@@ -279,6 +300,72 @@ impl Db {
         Ok(())
     }
 
+    pub async fn claim(&self, claim: ClaimUpdate) -> DbResult<()> {
+        let mut tx = self.pool.begin().await?;
+        let row = query(
+            "SELECT version, tier, hand_tag, commitment, nonce, facts_hash, nullifier \
+             FROM challenge_assignments \
+             WHERE room_id = $1 AND hand_no = $2 AND seat = $3 FOR UPDATE",
+        )
+        .bind(claim.room)
+        .bind(i64::try_from(claim.hand_no)?)
+        .bind(i32::try_from(claim.seat)?)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        if row.try_get::<i32, _>("version")? != i32::from(PROTOCOL_VERSION)
+            || row.try_get::<i32, _>("tier")? != i32::from(claim.tier)
+            || row.try_get::<Vec<u8>, _>("hand_tag")? != claim.hand_tag
+            || row.try_get::<Vec<u8>, _>("commitment")? != claim.commitment
+            || row.try_get::<Vec<u8>, _>("nonce")? != claim.nonce
+            || row.try_get::<Option<Vec<u8>>, _>("facts_hash")? != Some(claim.facts_hash.to_vec())
+            || row.try_get::<Option<Vec<u8>>, _>("nullifier")?.is_some()
+        {
+            return Err(io::Error::other("challenge claim mismatch").into());
+        }
+
+        let changed = query(
+            "UPDATE challenge_assignments \
+             SET nullifier = $4, points = $5, claimed_at = now() \
+             WHERE room_id = $1 AND hand_no = $2 AND seat = $3 AND nullifier IS NULL",
+        )
+        .bind(claim.room)
+        .bind(i64::try_from(claim.hand_no)?)
+        .bind(i32::try_from(claim.seat)?)
+        .bind(claim.nullifier.as_slice())
+        .bind(i64::from(claim.points))
+        .execute(&mut *tx)
+        .await?;
+
+        one_row(changed)?;
+
+        let changed = query(
+            "UPDATE seats SET proof_points = $3 \
+             WHERE room_id = $1 AND seat = $2 AND proof_points = $4",
+        )
+        .bind(claim.room)
+        .bind(i32::try_from(claim.seat)?)
+        .bind(i64::try_from(claim.next_points)?)
+        .bind(i64::try_from(claim.prior_points)?)
+        .execute(&mut *tx)
+        .await?;
+
+        if changed.rows_affected() != 1 {
+            return Err(io::Error::other("seat points mismatch").into());
+        }
+
+        let changed = query("UPDATE rooms SET rev = $2 WHERE id = $1 AND rev = $3")
+            .bind(claim.room)
+            .bind(i64::try_from(claim.next_rev)?)
+            .bind(i64::try_from(claim.rev)?)
+            .execute(&mut *tx)
+            .await?;
+
+        one_row(changed)?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn append_action(&self, action: NewAction) -> DbResult<()> {
         let mut tx = self.pool.begin().await?;
         let (name, raise_to) = action_data(action.action);
@@ -358,7 +445,8 @@ impl Db {
 
     async fn load_seats(&self, room: Uuid) -> DbResult<Vec<StoredSeat>> {
         let rows = query(
-            "SELECT seat, token_hash, ready_hand FROM seats WHERE room_id = $1 ORDER BY seat",
+            "SELECT seat, token_hash, ready_hand, proof_points \
+             FROM seats WHERE room_id = $1 ORDER BY seat",
         )
         .bind(room)
         .fetch_all(&self.pool)
@@ -370,6 +458,7 @@ impl Db {
                     seat: row.try_get("seat")?,
                     token_hash: row.try_get("token_hash")?,
                     ready_hand: row.try_get("ready_hand")?,
+                    proof_points: row.try_get("proof_points")?,
                 })
             })
             .collect()
@@ -418,7 +507,8 @@ impl Db {
 
     async fn load_challenges(&self, room: Uuid) -> DbResult<Vec<StoredChallenge>> {
         let rows = query(
-            "SELECT hand_no, seat, version, tier, hand_tag, commitment, nonce, facts_hash \
+            "SELECT hand_no, seat, version, tier, hand_tag, commitment, nonce, facts_hash, \
+             nullifier, points, claimed_at IS NOT NULL AS claimed \
              FROM challenge_assignments WHERE room_id = $1 ORDER BY hand_no, seat",
         )
         .bind(room)
@@ -436,6 +526,9 @@ impl Db {
                     commitment: row.try_get("commitment")?,
                     nonce: row.try_get("nonce")?,
                     facts_hash: row.try_get("facts_hash")?,
+                    nullifier: row.try_get("nullifier")?,
+                    points: row.try_get("points")?,
+                    claimed: row.try_get("claimed")?,
                 })
             })
             .collect()

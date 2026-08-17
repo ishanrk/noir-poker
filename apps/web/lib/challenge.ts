@@ -13,6 +13,7 @@ export type ChallengeSecret = {
 
 const COMMITMENT_DOMAIN = Uint8Array.from([78, 80, 67, 79, 77, 77, 48, 49]);
 const SELECTOR_DOMAIN = Uint8Array.from([78, 80, 83, 69, 76, 69, 48, 49]);
+const FACTS_DOMAIN = Uint8Array.from([78, 80, 70, 65, 67, 84, 48, 49]);
 const NULLIFIER_DOMAIN = Uint8Array.from([78, 80, 78, 85, 76, 76, 48, 49]);
 
 const OBJECTIVES = [
@@ -63,6 +64,38 @@ export function nullifier(
   secret: Uint8Array,
 ) {
   return blake2s(join(NULLIFIER_DOMAIN, handTag, Uint8Array.of(seat, tier), secret));
+}
+
+export function factsHash(handTag: Uint8Array, seat: number, facts: readonly number[]) {
+  return blake2s(join(FACTS_DOMAIN, handTag, Uint8Array.of(seat), Uint8Array.from(facts)));
+}
+
+export function objectiveMet(tier: number, index: number, facts: readonly number[]) {
+  if (facts.length !== 6 || facts.some((fact) => fact !== 0 && fact !== 1)) {
+    return false;
+  }
+
+  if (tier === EASY_TIER) {
+    return facts[index] === 1;
+  }
+
+  if (tier !== HARD_TIER) {
+    return false;
+  }
+
+  if (index === 0) {
+    return facts[4] === 1;
+  }
+
+  if (index === 1) {
+    return facts[5] === 1;
+  }
+
+  if (index === 2) {
+    return facts[1] === 1 && facts[5] === 1;
+  }
+
+  return index === 3 && facts[1] === 0 && facts[4] === 1 && facts[5] === 1;
 }
 
 export function objectiveDescription(tier: number, index: number) {
@@ -123,6 +156,10 @@ export function loadChallengeSecret(room: string, handNo: number, seat: number) 
   }
 
   return undefined;
+}
+
+export function removeChallengeSecret(room: string, handNo: number, seat: number) {
+  sessionStorage.removeItem(secretKey(room, handNo, seat));
 }
 
 function secretKey(room: string, handNo: number, seat: number) {

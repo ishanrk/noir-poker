@@ -9,6 +9,7 @@ type PlayerView = {
   stack: number;
   bet: number;
   folded: boolean;
+  proof_points?: number;
 };
 
 type ActionView = {
@@ -47,7 +48,8 @@ export type ClaimView = {
   nonce: string;
   facts_hash: string;
   facts: [number, number, number, number, number, number];
-  claimable: boolean;
+  status: "claimable" | "claimed";
+  points?: number;
 };
 
 export type View = {
@@ -81,9 +83,11 @@ type TableProps = {
   onNewHand?: () => void;
   onReady?: () => void;
   onChallenge?: (tier: number) => void;
+  onClaim?: () => void;
   objective?: string;
   claimObjective?: string;
   challengeError?: string;
+  claimStatus?: string;
 };
 
 const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
@@ -103,9 +107,11 @@ export function Table({
   onNewHand,
   onReady,
   onChallenge,
+  onClaim,
   objective,
   claimObjective,
   challengeError,
+  claimStatus,
 }: TableProps) {
   const hole = [view.hole[0].value, view.hole[1].value] as const;
   const actions = view.actions;
@@ -168,6 +174,7 @@ export function Table({
               name={position === viewer ? "You" : `Player ${position + 1}`}
               stack={player?.stack}
               bet={player?.bet}
+              proofPoints={player?.proof_points}
               cards={position === viewer && player ? hole : undefined}
               acting={view.turn === position}
               dealer={view.dealer === position}
@@ -197,13 +204,24 @@ export function Table({
               </button>
             </div>
           )}
-          {view.claim?.claimable && (
-            <span>
-              {claimObjective
-                ? `Previous challenge ${claimObjective}`
-                : "Previous challenge ready to prove"}
-            </span>
+          {view.claim?.status === "claimable" && (
+            <div className="challenge-tiers">
+              <span>
+                {claimObjective
+                  ? `Previous challenge ${claimObjective}`
+                  : "Previous challenge ready to prove"}
+              </span>
+              {onClaim && (
+                <button type="button" onClick={onClaim} disabled={disabled}>
+                  Claim
+                </button>
+              )}
+            </div>
           )}
+          {view.claim?.status === "claimed" && (
+            <strong>Verified +{view.claim.points} proof points</strong>
+          )}
+          {claimStatus && <span>{claimStatus}</span>}
           {challengeError && <span className="room-error">{challengeError}</span>}
         </div>
       )}

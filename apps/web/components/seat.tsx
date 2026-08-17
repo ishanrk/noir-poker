@@ -5,6 +5,7 @@ type SeatProps = {
   name?: string;
   stack?: number;
   bet?: number;
+  proofPoints?: number;
   cards?: readonly [string, string];
   acting?: boolean;
   dealer?: boolean;
@@ -16,6 +17,7 @@ export function Seat({
   name,
   stack,
   bet,
+  proofPoints,
   cards,
   acting = false,
   dealer = false,
@@ -49,6 +51,7 @@ export function Seat({
             <strong>{name}</strong>
             <span>{stack?.toLocaleString("en-US")}</span>
             {!!bet && <small>Bet {bet.toLocaleString("en-US")}</small>}
+            {!!proofPoints && <small>{proofPoints} proof points</small>}
             {acting && <small>Acting</small>}
           </>
         )}

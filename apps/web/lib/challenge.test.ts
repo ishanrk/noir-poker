@@ -4,8 +4,10 @@ import {
   commitment,
   decodeHex,
   encodeHex,
+  factsHash,
   nullifier,
   objectiveIndex,
+  objectiveMet,
   selector,
 } from "./challenge.ts";
 
@@ -26,3 +28,11 @@ assert.equal(
   encodeHex(nullifier(handTag, 2, 0, secret)),
   "4378956178b8af73c267002cd809d5ef2c42bd152a63f46ef48316be96c24411",
 );
+assert.equal(
+  encodeHex(factsHash(handTag, 2, [1, 1, 1, 1, 1, 1])),
+  "cdc4ad0d044f42a722aca8076bd3d8cdcacae3c49df34d84f45f481683592a23",
+);
+assert.equal(objectiveMet(0, 2, [0, 0, 1, 0, 0, 0]), true);
+assert.equal(objectiveMet(0, 2, [0, 0, 0, 0, 0, 0]), false);
+assert.equal(objectiveMet(1, 3, [0, 0, 0, 0, 1, 1]), true);
+assert.equal(objectiveMet(1, 3, [0, 1, 0, 0, 1, 1]), false);

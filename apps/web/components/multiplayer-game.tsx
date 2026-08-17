@@ -14,11 +14,16 @@ import {
   commitment as challengeCommitment,
   decodeHex,
   encodeHex,
+  factsHash,
   loadChallengeSecret,
+  nullifier as challengeNullifier,
   objectiveDescription,
   objectiveIndex,
+  objectiveMet,
+  removeChallengeSecret,
   saveChallengeSecret,
 } from "@/lib/challenge";
+import { proveChallenge, type ProofStatus } from "@/lib/challenge-proof";
 import { loadSeat, type RoomSeat, roomSocket } from "@/lib/server";
 
 type Waiting = {
@@ -37,6 +42,7 @@ type ClientAction =
   | { type: "call" }
   | { type: "raise_to"; to: number }
   | { type: "challenge_commit"; hand_no: number; tier: number; commitment: string }
+  | { type: "challenge_claim"; hand_no: number; proof: string; public_inputs: string }
   | { type: "ready" };
 
 type Assignment = {
@@ -137,6 +143,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
   const socket = useRef<WebSocket | undefined>(undefined);
   const auth = useRef<RoomSeat | undefined>(undefined);
   const rev = useRef(-1);
+  const claiming = useRef(false);
   const [seat, setSeat] = useState<number | null>();
   const [waiting, setWaiting] = useState<Waiting>();
   const [view, setView] = useState<View>();
@@ -148,6 +155,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
   const [objective, setObjective] = useState<string>();
   const [claimObjective, setClaimObjective] = useState<string>();
   const [challengeError, setChallengeError] = useState<string>();
+  const [claimStatus, setClaimStatus] = useState<string>();
 
   const connect = useCallback(() => {
     const current = auth.current;
@@ -217,12 +225,19 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
           current.seat,
           challengeAssignment(message.view.challenge),
         );
-        const currentClaim = privateObjective(
-          room,
-          current.seat,
-          claimAssignment(message.view.claim),
-        );
+        const claimed = message.view.claim?.status === "claimed";
+        const currentClaim = claimed
+          ? {}
+          : privateObjective(room, current.seat, claimAssignment(message.view.claim));
 
+        if (claimed && message.view.claim) {
+          removeChallengeSecret(room, message.view.claim.hand_no, current.seat);
+          setClaimStatus("Verified");
+        } else if (!message.view.claim) {
+          setClaimStatus(undefined);
+        }
+
+        claiming.current = false;
         setWaiting(undefined);
         setView(message.view);
         setRaiseTo(message.view.actions?.raise?.min_to ?? 0);
@@ -237,6 +252,11 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
       }
 
       if (message.type === "error") {
+        if (claiming.current) {
+          claiming.current = false;
+          setClaimStatus("Failed");
+        }
+
         setConnecting(false);
         setPending(false);
         setError(message.message);
@@ -341,6 +361,97 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
     }
   }
 
+  async function claimChallenge() {
+    const claim = view?.claim;
+    const current = socket.current;
+
+    if (
+      !claim ||
+      claim.status !== "claimable" ||
+      typeof seat !== "number" ||
+      !current ||
+      current.readyState !== WebSocket.OPEN ||
+      !connected ||
+      pending
+    ) {
+      return;
+    }
+
+    const stored = loadChallengeSecret(room, claim.hand_no, seat);
+
+    if (!stored) {
+      setChallengeError("Challenge secret unavailable");
+      setClaimStatus("Failed");
+      return;
+    }
+
+    try {
+      const handTag = decodeHex(claim.hand_tag);
+      const secret = decodeHex(stored.secret);
+      const nonce = decodeHex(claim.nonce);
+      const commitment = decodeHex(claim.commitment);
+      const expectedCommitment = challengeCommitment(handTag, seat, claim.tier, secret);
+      const expectedFactsHash = factsHash(handTag, seat, claim.facts);
+      const index = objectiveIndex(handTag, seat, claim.tier, nonce, secret);
+
+      if (
+        stored.tier !== claim.tier ||
+        stored.commitment !== claim.commitment ||
+        encodeHex(expectedCommitment) !== claim.commitment ||
+        encodeHex(expectedFactsHash) !== claim.facts_hash
+      ) {
+        throw new Error("challenge mismatch");
+      }
+
+      if (!objectiveMet(claim.tier, index, claim.facts)) {
+        setChallengeError("Challenge not completed");
+        setClaimStatus("Failed");
+        return;
+      }
+
+      claiming.current = true;
+      setPending(true);
+      setError(undefined);
+      setChallengeError(undefined);
+
+      const result = await proveChallenge(
+        {
+          handTag,
+          seat,
+          tier: claim.tier,
+          commitment,
+          nonce,
+          factsHash: expectedFactsHash,
+          nullifier: challengeNullifier(handTag, seat, claim.tier, secret),
+          secret,
+          facts: claim.facts,
+        },
+        (status: ProofStatus) => {
+          setClaimStatus(status === "preparing" ? "Preparing proof" : "Proving");
+        },
+      );
+
+      if (socket.current !== current || current.readyState !== WebSocket.OPEN) {
+        throw new Error("socket closed");
+      }
+
+      setClaimStatus("Submitting");
+      current.send(
+        JSON.stringify({
+          type: "challenge_claim",
+          hand_no: claim.hand_no,
+          proof: result.proof,
+          public_inputs: result.public_inputs,
+        } satisfies ClientAction),
+      );
+    } catch {
+      claiming.current = false;
+      setPending(false);
+      setClaimStatus("Failed");
+      setChallengeError("Challenge proof failed");
+    }
+  }
+
   if (seat === undefined) {
     return <p className="table-status">Loading room...</p>;
   }
@@ -412,9 +523,11 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
         onRaise={() => send({ type: "raise_to", to: raiseTo })}
         onReady={() => send({ type: "ready" })}
         onChallenge={chooseChallenge}
+        onClaim={() => void claimChallenge()}
         objective={objective}
         claimObjective={claimObjective}
         challengeError={challengeError}
+        claimStatus={claimStatus}
       />
     </>
   );

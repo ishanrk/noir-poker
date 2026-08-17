@@ -3,15 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "zk": "../../scripts/build-zk.sh",
     "wasm": "wasm-pack build ../../crates/game-wasm --target web --out-dir ../../apps/web/wasm",
-    "dev": "npm run wasm && next dev",
-    "build": "npm run wasm && next build",
+    "dev": "npm run zk && npm run wasm && next dev",
+    "build": "npm run zk && npm run wasm && next build",
     "start": "next start",
     "lint": "eslint .",
     "challenge:test": "node --experimental-strip-types lib/challenge.test.ts"
   },
   "dependencies": {
+    "@aztec/bb.js": "5.2.0",
     "@noble/hashes": "2.2.0",
+    "@noir-lang/noir_js": "1.0.0-beta.26",
     "next": "16.3.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"

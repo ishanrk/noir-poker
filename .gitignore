@@ -2,3 +2,5 @@
 /target/
 /crates/game-wasm/pkg/
 /circuits/challenge-v1/target/
+/apps/server/zk/
+/apps/web/zk/
