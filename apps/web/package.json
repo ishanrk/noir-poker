@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "zk": "../../scripts/build-zk.sh",
-    "wasm": "wasm-pack build ../../crates/game-wasm --target web --out-dir ../../apps/web/wasm",
-    "dev": "npm run zk && npm run wasm && next dev",
-    "build": "npm run zk && npm run wasm && next build",
+    "runtime": "../../scripts/web-runtime.sh update",
+    "runtime:check": "../../scripts/web-runtime.sh check",
+    "dev": "next dev",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint .",
     "challenge:test": "node --experimental-strip-types lib/challenge.test.ts"

@@ -45,14 +45,14 @@ trap 'rm -rf "$tmp"' EXIT
     -t noir-recursive
 
 mkdir -p "$root/apps/web/zk" "$root/apps/server/zk"
-cp "$root/circuits/challenge-v1/target/challenge_v1.json" "$root/apps/web/zk/challenge_v1.json"
 cp "$tmp/vk/vk" "$root/apps/server/zk/challenge_v1.vk"
 
 # remove checkout path from debug metadata
-artifact_digest="$(
-    sed -E 's#"path":"[^"]*/circuits/challenge-v1/src/main.nr"#"path":"/repo/circuits/challenge-v1/src/main.nr"#g' \
-        "$root/apps/web/zk/challenge_v1.json" | sha256sum | awk '{print $1}'
-)"
+sed -E 's#"path":"[^"]*/circuits/challenge-v1/src/main.nr"#"path":"/repo/circuits/challenge-v1/src/main.nr"#g' \
+    "$root/circuits/challenge-v1/target/challenge_v1.json" > "$tmp/challenge_v1.json"
+cp "$tmp/challenge_v1.json" "$root/apps/web/zk/challenge_v1.json"
+
+artifact_digest="$(sha256sum "$root/apps/web/zk/challenge_v1.json" | awk '{print $1}')"
 vk_digest="$(sha256sum "$root/apps/server/zk/challenge_v1.vk" | awk '{print $1}')"
 
 if test "$artifact_digest" != "94125fd41b87a412605169b5839ad9d7c9022d4009e795ba63ff1efcf8adc28d"; then
