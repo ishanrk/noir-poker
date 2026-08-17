@@ -31,8 +31,8 @@ use crate::db::{
 };
 use crate::proof::{ClaimInputs, ProofVerifier, decode_claim};
 use crate::room::{
-    Challenge, Challenges, JoinError, LiveHand, PendingClaim, PlayedAction, Room, RoomConfig, Seat,
-    TokenHash, challenge_points, replay_hand, start_game,
+    Award, Challenge, Challenges, HandResult, HandResultKind, JoinError, LiveHand, PendingClaim,
+    PlayedAction, Room, RoomConfig, Seat, TokenHash, challenge_points, replay_hand, start_game,
 };
 
 type HttpError = (StatusCode, &'static str);
@@ -120,11 +120,26 @@ struct SeatView {
     #[serde(skip_serializing_if = "Option::is_none")]
     actions: Option<ActionView>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<HandResultView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     ready: Option<ReadyView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     challenge: Option<ChallengeView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     claim: Option<ClaimView>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct HandResultView {
+    kind: &'static str,
+    awards: Vec<AwardView>,
+    revealed: Vec<Option<[CardView; 2]>>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct AwardView {
+    player: usize,
+    amount: u32,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -306,6 +321,7 @@ async fn join_room(
         seed,
         starting_stacks: stacks.clone().expect("starting stacks"),
         game: start_game(room.config, seed),
+        result: None,
         next_seq: 0,
         actions: Vec::new(),
     });
@@ -687,6 +703,10 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
     }
 
     if hand.game.settled {
+        view.result = Some(result_view(
+            &hand.game,
+            hand.result.as_ref().expect("settled result"),
+        ));
         let count = room
             .seats
             .iter()
@@ -1052,7 +1072,7 @@ fn restore_hand(
         actions.push(PlayedAction { player, action });
     }
 
-    let (game, facts) = replay_hand(config, seed, dealer, &stacks, &actions)
+    let (game, result, facts) = replay_hand(config, seed, dealer, &stacks, &actions)
         .map_err(|_| recovery_error(id, "action replay failed"))?;
     let facts = game.settled.then_some(facts);
 
@@ -1063,6 +1083,7 @@ fn restore_hand(
             seed,
             starting_stacks: stacks.clone(),
             game,
+            result,
             next_seq,
             actions,
         },
@@ -1235,6 +1256,34 @@ fn recovery_error(room: Uuid, message: &str) -> io::Error {
     )
 }
 
+fn result_view(game: &State, result: &HandResult) -> HandResultView {
+    let revealed = game
+        .players
+        .iter()
+        .enumerate()
+        .map(|(seat, player)| match result.kind {
+            HandResultKind::Showdown if !player.folded => Some(game.hole[seat].map(card_view)),
+            HandResultKind::Fold | HandResultKind::Showdown => None,
+        })
+        .collect();
+
+    HandResultView {
+        kind: match result.kind {
+            HandResultKind::Fold => "fold",
+            HandResultKind::Showdown => "showdown",
+        },
+        awards: result.awards.iter().copied().map(award_view).collect(),
+        revealed,
+    }
+}
+
+fn award_view(award: Award) -> AwardView {
+    AwardView {
+        player: award.player,
+        amount: award.amount,
+    }
+}
+
 fn seat_view(game: &State, seat: usize) -> SeatView {
     let players = game
         .players
@@ -1260,6 +1309,7 @@ fn seat_view(game: &State, seat: usize) -> SeatView {
         round_complete: game.round_complete,
         settled: game.settled,
         actions: game.legal_actions(seat).map(action_view),
+        result: None,
         ready: None,
         challenge: None,
         claim: None,
@@ -1377,6 +1427,7 @@ mod tests {
             seed,
             game: State::new(seed, dealer, &stacks, config.small_blind, config.big_blind),
             starting_stacks: stacks,
+            result: None,
             next_seq: 0,
             actions: Vec::new(),
         }
@@ -2063,7 +2114,7 @@ mod tests {
                 action: Action::Call,
             },
         ];
-        let (_, facts) = replay_hand(config, SEED, 0, &stacks, &actions).unwrap();
+        let (_, _, facts) = replay_hand(config, SEED, 0, &stacks, &actions).unwrap();
 
         assert!(facts[0].raised_preflop);
         assert!(facts[0].saw_flop);
@@ -2087,7 +2138,7 @@ mod tests {
                 action: Action::Fold,
             },
         ];
-        let (game, facts) = replay_hand(config, SEED, 0, &stacks, &actions).unwrap();
+        let (game, _, facts) = replay_hand(config, SEED, 0, &stacks, &actions).unwrap();
 
         assert!(game.settled);
         assert!(facts[0].called_preflop);
@@ -2101,7 +2152,7 @@ mod tests {
             player: 0,
             action: Action::Fold,
         }];
-        let (_, facts) = replay_hand(config, SEED, 0, &stacks, &actions).unwrap();
+        let (_, _, facts) = replay_hand(config, SEED, 0, &stacks, &actions).unwrap();
 
         assert!(!facts[0].saw_flop);
         assert!(!facts[1].saw_flop);
@@ -2140,7 +2191,7 @@ mod tests {
                 action: Action::Check,
             },
         ];
-        let (game, facts) = replay_hand(config, SEED, 0, &stacks, &actions).unwrap();
+        let (game, _, facts) = replay_hand(config, SEED, 0, &stacks, &actions).unwrap();
 
         assert!(game.settled);
         assert!(facts.iter().all(|facts| facts.reached_showdown));
@@ -2166,7 +2217,7 @@ mod tests {
             raise_to: None,
         });
         stored.rev = 4;
-        let (_, facts) = replay_hand(
+        let (_, _, facts) = replay_hand(
             config(2),
             SEED,
             0,
@@ -2243,6 +2294,7 @@ mod tests {
             seed: NEXT_SEED,
             starting_stacks: stacks.clone(),
             game,
+            result: None,
             next_seq: 0,
             actions: Vec::new(),
         };

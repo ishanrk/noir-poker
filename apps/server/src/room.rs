@@ -1,5 +1,5 @@
 use challenge_core::{Facts, TIER_EASY, TIER_HARD, facts_hash, hand_tag};
-use game_core::{Action, ActionError, NextHandError, State, Street};
+use game_core::{Action, ActionError, Event, NextHandError, State, Street};
 use serde::Deserialize;
 use tokio::sync::broadcast;
 use uuid::Uuid;
@@ -142,6 +142,7 @@ impl Room {
                 seed,
                 starting_stacks: stacks,
                 game,
+                result: None,
                 next_seq: 0,
                 actions: Vec::new(),
             })),
@@ -287,7 +288,7 @@ impl Room {
         let mut game = hand.game.clone();
 
         game.apply(seat, action).map_err(action_error)?;
-        advance(&mut game)?;
+        let result = advance(&mut game)?;
 
         let mut actions = hand.actions.clone();
         actions.push(PlayedAction {
@@ -295,7 +296,7 @@ impl Room {
             action,
         });
         let facts = if game.settled && hand.no > 0 {
-            let (replayed, facts) = replay_hand(
+            let (replayed, replayed_result, facts) = replay_hand(
                 self.config,
                 hand.seed,
                 hand.game.dealer,
@@ -303,7 +304,7 @@ impl Room {
                 &actions,
             )?;
 
-            if replayed != game {
+            if replayed != game || replayed_result != result {
                 return Err("hand replay mismatch");
             }
 
@@ -324,6 +325,7 @@ impl Room {
             player: seat,
             action,
             game,
+            result,
             actions,
             facts,
             fact_hashes,
@@ -334,6 +336,7 @@ impl Room {
         let hand = self.hand.as_mut().expect("staged hand");
 
         hand.game = action.game;
+        hand.result = action.result;
         hand.next_seq = action.next_seq;
         hand.actions = action.actions;
 
@@ -369,6 +372,7 @@ pub(super) struct LiveHand {
     pub(super) seed: [u8; 32],
     pub(super) starting_stacks: Vec<u32>,
     pub(super) game: State,
+    pub(super) result: Option<HandResult>,
     pub(super) next_seq: u64,
     pub(super) actions: Vec<PlayedAction>,
 }
@@ -431,6 +435,7 @@ pub(super) struct PendingAction {
     pub(super) player: usize,
     pub(super) action: Action,
     pub(super) game: State,
+    pub(super) result: Option<HandResult>,
     pub(super) actions: Vec<PlayedAction>,
     pub(super) facts: Option<Vec<Facts>>,
     pub(super) fact_hashes: Option<Vec<FactHash>>,
@@ -439,6 +444,24 @@ pub(super) struct PendingAction {
 pub(super) struct FactHash {
     pub(super) seat: usize,
     pub(super) value: [u8; 32],
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct HandResult {
+    pub(super) kind: HandResultKind,
+    pub(super) awards: Vec<Award>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum HandResultKind {
+    Fold,
+    Showdown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct Award {
+    pub(super) player: usize,
+    pub(super) amount: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -453,21 +476,20 @@ pub(super) fn start_game(config: RoomConfig, seed: [u8; 32]) -> State {
 }
 
 // advance finished streets
-fn advance(game: &mut State) -> Result<(), &'static str> {
+fn advance(game: &mut State) -> Result<Option<HandResult>, &'static str> {
     if game.fold_winner.is_some() {
-        game.settle().map_err(|_| "cannot settle hand")?;
-        return Ok(());
+        return settle(game).map(Some);
     }
 
     while game.round_complete && !game.settled {
         if game.street == Street::River {
-            game.settle().map_err(|_| "cannot settle hand")?;
+            return settle(game).map(Some);
         } else {
             game.advance_street().map_err(|_| "cannot advance hand")?;
         }
     }
 
-    Ok(())
+    Ok(None)
 }
 
 pub(super) fn replay_hand(
@@ -476,9 +498,10 @@ pub(super) fn replay_hand(
     dealer: usize,
     stacks: &[u32],
     actions: &[PlayedAction],
-) -> Result<(State, Vec<Facts>), &'static str> {
+) -> Result<(State, Option<HandResult>, Vec<Facts>), &'static str> {
     let mut game = State::new(seed, dealer, stacks, config.small_blind, config.big_blind);
     let mut facts = vec![empty_facts(); stacks.len()];
+    let mut result = None;
 
     for action in actions {
         let street = game.street;
@@ -505,7 +528,13 @@ pub(super) fn replay_hand(
             }
         }
 
-        advance(&mut game)?;
+        if let Some(settled) = advance(&mut game)? {
+            result = Some(settled);
+        }
+    }
+
+    if game.settled != result.is_some() {
+        return Err("settlement result missing");
     }
 
     if game.settled {
@@ -515,7 +544,30 @@ pub(super) fn replay_hand(
         }
     }
 
-    Ok((game, facts))
+    Ok((game, result, facts))
+}
+
+fn settle(game: &mut State) -> Result<HandResult, &'static str> {
+    let kind = if game.fold_winner.is_some() {
+        HandResultKind::Fold
+    } else {
+        HandResultKind::Showdown
+    };
+    let awards = game
+        .settle()
+        .map_err(|_| "cannot settle hand")?
+        .into_iter()
+        .map(|event| match event {
+            Event::Awarded { player, amount } => Ok(Award { player, amount }),
+            _ => Err("invalid settlement event"),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if awards.is_empty() {
+        return Err("settlement awards missing");
+    }
+
+    Ok(HandResult { kind, awards })
 }
 
 const fn empty_facts() -> Facts {
