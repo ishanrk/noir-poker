@@ -19,6 +19,27 @@ type SeatResponse = RoomSeat & {
   room: string;
 };
 
+export type ProofReceipt = {
+  protocol_version: number;
+  proof_system: string;
+  circuit_id: string;
+  bb_version: string;
+  artifact_sha256: string;
+  vk_sha256: string;
+  hand_tag: string;
+  seat: number;
+  commitment: string;
+  nonce: string;
+  facts_hash: string;
+  nullifier: string;
+  catalog_root: string;
+  points: number;
+  draw_proof: string;
+  draw_public_inputs: string;
+  completion_proof: string;
+  completion_public_inputs: string;
+};
+
 async function responseError(response: Response) {
   return (await response.text()).trim() || "request failed";
 }
@@ -41,6 +62,16 @@ export async function joinRoom(room: string): Promise<SeatResponse> {
   const response = await fetch(`${SERVER_URL}/rooms/${encodeURIComponent(room)}/join`, {
     method: "POST",
   });
+
+  if (!response.ok) {
+    throw new Error(await responseError(response));
+  }
+
+  return response.json();
+}
+
+export async function loadProofReceipt(nullifier: string): Promise<ProofReceipt> {
+  const response = await fetch(`${SERVER_URL}/proofs/${encodeURIComponent(nullifier)}`);
 
   if (!response.ok) {
     throw new Error(await responseError(response));

@@ -1,115 +1,111 @@
 import { blake2s } from "@noble/hashes/blake2.js";
 
-export const CHALLENGE_VERSION = 1;
-export const EASY_TIER = 0;
-export const HARD_TIER = 1;
+export const CHALLENGE_VERSION = 2;
+export const CHALLENGE_POINTS = 20;
 
 export type ChallengeSecret = {
   version: number;
-  tier: number;
   secret: string;
   commitment: string;
 };
 
 export type Objective = {
-  tier: number;
-  slot: number;
+  index: number;
   description: string;
   mustTrue: readonly number[];
   mustFalse: readonly number[];
 };
 
-const COMMITMENT_DOMAIN = Uint8Array.from([78, 80, 67, 79, 77, 77, 48, 49]);
-const SELECTOR_DOMAIN = Uint8Array.from([78, 80, 83, 69, 76, 69, 48, 49]);
-const FACTS_DOMAIN = Uint8Array.from([78, 80, 70, 65, 67, 84, 48, 49]);
-const NULLIFIER_DOMAIN = Uint8Array.from([78, 80, 78, 85, 76, 76, 48, 49]);
-const LEAF_DOMAIN = Uint8Array.from([78, 80, 76, 69, 65, 70, 48, 49]);
-const NODE_DOMAIN = Uint8Array.from([78, 80, 78, 79, 68, 69, 48, 49]);
+const HAND_DOMAIN = Uint8Array.from([78, 80, 72, 65, 78, 68, 48, 50]);
+const COMMITMENT_DOMAIN = Uint8Array.from([78, 80, 67, 79, 77, 77, 48, 50]);
+const SELECTOR_DOMAIN = Uint8Array.from([78, 80, 83, 69, 76, 69, 48, 50]);
+const FACTS_DOMAIN = Uint8Array.from([78, 80, 70, 65, 67, 84, 48, 50]);
+const NULLIFIER_DOMAIN = Uint8Array.from([78, 80, 78, 85, 76, 76, 48, 50]);
+const LEAF_DOMAIN = Uint8Array.from([78, 80, 76, 69, 65, 70, 48, 50]);
+const NODE_DOMAIN = Uint8Array.from([78, 80, 78, 79, 68, 69, 48, 50]);
 
 export const CATALOG: readonly Objective[] = [
-  objective(0, 0, "See the flop", [1, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]),
-  objective(0, 1, "Raise before the flop", [0, 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]),
-  objective(0, 2, "Call before the flop", [0, 0, 1, 0, 0, 0], [0, 0, 0, 0, 0, 0]),
-  objective(0, 3, "Check on the flop", [0, 0, 0, 1, 0, 0], [0, 0, 0, 0, 0, 0]),
-  objective(1, 0, "Reach showdown", [0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 0]),
-  objective(1, 1, "Finish the hand ahead", [0, 0, 0, 0, 0, 1], [0, 0, 0, 0, 0, 0]),
+  objective(0, "See the flop", [1, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]),
+  objective(1, "Raise before the flop", [0, 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]),
+  objective(2, "Call before the flop", [0, 0, 1, 0, 0, 0], [0, 0, 0, 0, 0, 0]),
+  objective(3, "Check on the flop", [0, 0, 0, 1, 0, 0], [0, 0, 0, 0, 0, 0]),
+  objective(4, "Reach showdown", [0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 0]),
+  objective(5, "Finish the hand ahead", [0, 0, 0, 0, 0, 1], [0, 0, 0, 0, 0, 0]),
   objective(
-    1,
-    2,
+    6,
     "Raise before the flop and finish ahead",
     [0, 1, 0, 0, 0, 1],
     [0, 0, 0, 0, 0, 0],
   ),
   objective(
-    1,
-    3,
+    7,
     "Reach showdown finish ahead and never raise before the flop",
     [0, 0, 0, 0, 1, 1],
     [0, 1, 0, 0, 0, 0],
   ),
 ] as const;
 
-export function commitment(
-  handTag: Uint8Array,
-  seat: number,
-  tier: number,
-  secret: Uint8Array,
-) {
-  return blake2s(join(COMMITMENT_DOMAIN, handTag, Uint8Array.of(seat, tier), secret));
+export function handTag(room: Uint8Array, handNo: bigint) {
+  const no = new Uint8Array(8);
+
+  new DataView(no.buffer).setBigUint64(0, handNo);
+  return blake2s(join(HAND_DOMAIN, room, no));
+}
+
+export function commitment(handTag: Uint8Array, seat: number, secret: Uint8Array) {
+  return blake2s(join(COMMITMENT_DOMAIN, handTag, Uint8Array.of(seat), secret));
 }
 
 export function selector(
   handTag: Uint8Array,
   seat: number,
-  tier: number,
   nonce: Uint8Array,
   secret: Uint8Array,
 ) {
-  return blake2s(
-    join(SELECTOR_DOMAIN, handTag, Uint8Array.of(seat, tier), nonce, secret),
-  );
+  return blake2s(join(SELECTOR_DOMAIN, handTag, Uint8Array.of(seat), nonce, secret));
 }
 
 export function objectiveIndex(
   handTag: Uint8Array,
   seat: number,
-  tier: number,
   nonce: Uint8Array,
   secret: Uint8Array,
 ) {
-  return selector(handTag, seat, tier, nonce, secret)[0] & 3;
+  return selector(handTag, seat, nonce, secret)[0] & 7;
 }
 
-export function nullifier(
+export function nullifier(handTag: Uint8Array, seat: number, secret: Uint8Array) {
+  return blake2s(join(NULLIFIER_DOMAIN, handTag, Uint8Array.of(seat), secret));
+}
+
+export function factsHash(
   handTag: Uint8Array,
   seat: number,
-  tier: number,
-  secret: Uint8Array,
+  salt: Uint8Array,
+  facts: readonly number[],
 ) {
-  return blake2s(join(NULLIFIER_DOMAIN, handTag, Uint8Array.of(seat, tier), secret));
+  return blake2s(
+    join(FACTS_DOMAIN, handTag, Uint8Array.of(seat), salt, Uint8Array.from(facts)),
+  );
 }
 
-export function factsHash(handTag: Uint8Array, seat: number, facts: readonly number[]) {
-  return blake2s(join(FACTS_DOMAIN, handTag, Uint8Array.of(seat), Uint8Array.from(facts)));
-}
+export function objectiveAt(index: number) {
+  const value = CATALOG[index];
 
-export function objectiveAt(tier: number, slot: number) {
-  const value = CATALOG[tier * 4 + slot];
-
-  if (!value || value.tier !== tier || value.slot !== slot) {
+  if (!value || value.index !== index) {
     throw new Error("invalid challenge objective");
   }
 
   return value;
 }
 
-export function leafHash(objective: Objective) {
+export function leafHash(value: Objective) {
   return blake2s(
     join(
       LEAF_DOMAIN,
-      Uint8Array.of(objective.tier, objective.slot),
-      Uint8Array.from(objective.mustTrue),
-      Uint8Array.from(objective.mustFalse),
+      Uint8Array.of(value.index),
+      Uint8Array.from(value.mustTrue),
+      Uint8Array.from(value.mustFalse),
     ),
   );
 }
@@ -128,10 +124,8 @@ export function catalogRoot() {
   return nodeHash(next[0], next[1]);
 }
 
-export function objectivePath(tier: number, slot: number) {
-  const index = tier * 4 + slot;
-
-  objectiveAt(tier, slot);
+export function objectivePath(index: number) {
+  objectiveAt(index);
 
   const leaves = CATALOG.map(leafHash);
   const level = Array.from({ length: 4 }, (_, i) =>
@@ -153,7 +147,7 @@ export function pathRoot(leaf: Uint8Array, index: number, siblings: Uint8Array[]
   return hash;
 }
 
-export function objectiveMet(objective: Objective, facts: readonly number[]) {
+export function objectiveMet(value: Objective, facts: readonly number[]) {
   if (facts.length !== 6 || facts.some((fact) => fact !== 0 && fact !== 1)) {
     return false;
   }
@@ -161,8 +155,8 @@ export function objectiveMet(objective: Objective, facts: readonly number[]) {
   let literals = 0;
 
   for (let i = 0; i < 6; i += 1) {
-    const yes = objective.mustTrue[i];
-    const no = objective.mustFalse[i];
+    const yes = value.mustTrue[i];
+    const no = value.mustFalse[i];
 
     if ((yes !== 0 && yes !== 1) || (no !== 0 && no !== 1) || yes + no > 1) {
       return false;
@@ -176,10 +170,6 @@ export function objectiveMet(objective: Objective, facts: readonly number[]) {
   }
 
   return literals > 0;
-}
-
-export function objectiveDescription(tier: number, index: number) {
-  return objectiveAt(tier, index).description;
 }
 
 export function encodeHex(bytes: Uint8Array) {
@@ -217,7 +207,6 @@ export function loadChallengeSecret(room: string, handNo: number, seat: number) 
 
     if (
       value.version === CHALLENGE_VERSION &&
-      (value.tier === EASY_TIER || value.tier === HARD_TIER) &&
       typeof value.secret === "string" &&
       /^[0-9a-f]{64}$/.test(value.secret) &&
       typeof value.commitment === "string" &&
@@ -241,13 +230,12 @@ function secretKey(room: string, handNo: number, seat: number) {
 }
 
 function objective(
-  tier: number,
-  slot: number,
+  index: number,
   description: string,
   mustTrue: readonly number[],
   mustFalse: readonly number[],
 ): Objective {
-  return { tier, slot, description, mustTrue, mustFalse };
+  return { index, description, mustTrue, mustFalse };
 }
 
 function join(...parts: Uint8Array[]) {

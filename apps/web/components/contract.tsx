@@ -1,4 +1,4 @@
-export type ClaimState =
+export type ProofState =
   | "idle"
   | "preparing"
   | "proving"
@@ -15,6 +15,8 @@ export type ContractAssignment =
       objective: string;
       reward: number;
       active: boolean;
+      drawVerified: boolean;
+      drawState: ProofState;
     };
 
 export type ContractClaim = {
@@ -22,7 +24,8 @@ export type ContractClaim = {
   objective?: string;
   reward: number;
   completed?: boolean;
-  state: ClaimState;
+  state: ProofState;
+  receipt?: string;
 };
 
 export type ContractView = {
@@ -34,12 +37,13 @@ export type ContractView = {
 type ContractProps = {
   view: ContractView;
   disabled?: boolean;
-  onChoose: (tier: number) => void;
+  onChoose: () => void;
+  onDraw: () => void;
   onProve: () => void;
 };
 
-function claimStatus(claim: ContractClaim) {
-  switch (claim.state) {
+function proofStatus(state: ProofState) {
+  switch (state) {
     case "preparing":
       return "Preparing witness";
     case "proving":
@@ -51,23 +55,36 @@ function claimStatus(claim: ContractClaim) {
     case "failed":
       return "Proof failed";
     case "idle":
-      return claim.completed
-        ? "Completed"
-        : claim.completed === false
-          ? "Missed"
-          : "Result unavailable";
+      return undefined;
   }
 }
 
-export function Contract({ view, disabled = false, onChoose, onProve }: ContractProps) {
+function claimStatus(claim: ContractClaim) {
+  return (
+    proofStatus(claim.state) ??
+    (claim.completed
+      ? "Completed"
+      : claim.completed === false
+        ? "Missed"
+        : "Result unavailable")
+  );
+}
+
+export function Contract({
+  view,
+  disabled = false,
+  onChoose,
+  onDraw,
+  onProve,
+}: ContractProps) {
   const claim = view.claim;
   const active =
     claim?.state === "preparing" ||
     claim?.state === "proving" ||
     claim?.state === "verifying";
   const assignment = view.assignment;
-  const handNo = claim?.handNo ??
-    (view.assignment.kind === "available" ? undefined : view.assignment.handNo);
+  const handNo =
+    claim?.handNo ?? (assignment.kind === "available" ? undefined : assignment.handNo);
   const verified = claim?.state === "verified";
 
   return (
@@ -84,7 +101,10 @@ export function Contract({ view, disabled = false, onChoose, onProve }: Contract
         <div className="contract-claim">
           <span className="contract-state">{claimStatus(claim)}</span>
           {verified ? (
-            <strong className="contract-reward">+{claim.reward} proof points</strong>
+            <>
+              <strong className="contract-reward">+{claim.reward} proof points</strong>
+              {claim.receipt && <a href={claim.receipt}>View proof receipt</a>}
+            </>
           ) : (
             <>
               {claim.objective && (
@@ -105,7 +125,7 @@ export function Contract({ view, disabled = false, onChoose, onProve }: Contract
         </div>
       )}
 
-      {view.claim && view.assignment.kind !== "available" && (
+      {view.claim && assignment.kind !== "available" && (
         <div className="contract-divider" />
       )}
 
@@ -115,26 +135,21 @@ export function Contract({ view, disabled = false, onChoose, onProve }: Contract
 
       {assignment.kind === "choose" && (
         <div className="contract-choice">
-          <strong>Choose your risk for Hand {assignment.handNo}</strong>
-          <div className="contract-tiers">
-            <button type="button" onClick={() => onChoose(0)} disabled={disabled}>
-              <span>Easy</span>
-              <strong>10</strong>
-              <small>proof points</small>
-            </button>
-            <button type="button" onClick={() => onChoose(1)} disabled={disabled}>
-              <span>Hard</span>
-              <strong>25</strong>
-              <small>proof points</small>
-            </button>
-          </div>
-          <span className="contract-private">tier public · exact objective private</span>
+          <strong>Draw a hidden objective for Hand {assignment.handNo}</strong>
+          <button type="button" onClick={onChoose} disabled={disabled}>
+            Draw objective
+          </button>
+          <span className="contract-private">commit first · server entropy second</span>
         </div>
       )}
 
       {assignment.kind === "assigned" && (
         <div className="contract-assigned">
-          <span className="contract-state">Private objective</span>
+          <span className="contract-state">
+            {assignment.drawVerified
+              ? "Fair draw verified"
+              : proofStatus(assignment.drawState) ?? "Draw proof required"}
+          </span>
           <strong className="contract-objective">{assignment.objective}</strong>
           <div className="contract-meta">
             <div>
@@ -146,6 +161,11 @@ export function Contract({ view, disabled = false, onChoose, onProve }: Contract
               <strong>{assignment.active ? "in play" : "ready for hand"}</strong>
             </div>
           </div>
+          {!assignment.drawVerified && assignment.drawState === "idle" && (
+            <button type="button" onClick={onDraw} disabled={disabled}>
+              Prove fair draw
+            </button>
+          )}
         </div>
       )}
 

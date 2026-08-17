@@ -1,4 +1,4 @@
-use challenge_core::{Facts, TIER_EASY, TIER_HARD, facts_hash, hand_tag};
+use challenge_core::{Facts, POINTS, facts_hash, hand_tag};
 use game_core::{Action, ActionError, Event, NextHandError, State, Street};
 use serde::Deserialize;
 use tokio::sync::broadcast;
@@ -103,13 +103,13 @@ impl Room {
             return Err("already ready");
         }
 
-        if self
+        if !self
             .next_challenges
             .get(seat)
             .and_then(Option::as_ref)
-            .is_none()
+            .is_some_and(|challenge| challenge.draw_verified)
         {
-            return Err("challenge required");
+            return Err("draw proof required");
         }
 
         let all = self
@@ -174,7 +174,6 @@ impl Room {
         room: Uuid,
         seat: usize,
         hand_no: u64,
-        tier: u8,
         commitment: [u8; 32],
     ) -> Result<PendingChallenge, &'static str> {
         let hand = self.hand.as_ref().ok_or("game not started")?;
@@ -189,10 +188,6 @@ impl Room {
             return Err("wrong challenge hand");
         }
 
-        if tier != TIER_EASY && tier != TIER_HARD {
-            return Err("invalid challenge tier");
-        }
-
         if self
             .next_challenges
             .get(seat)
@@ -205,7 +200,6 @@ impl Room {
         Ok(PendingChallenge {
             hand_no,
             seat,
-            tier,
             hand_tag: hand_tag(*room.as_bytes(), hand_no),
             commitment,
             rev: self.rev.checked_add(1).ok_or("revision limit reached")?,
@@ -217,6 +211,51 @@ impl Room {
 
         self.next_challenges[seat] = Some(challenge);
         self.changed(rev);
+    }
+
+    pub(super) fn stage_draw(
+        &self,
+        seat: usize,
+        hand_no: u64,
+    ) -> Result<PendingDraw, &'static str> {
+        let hand = self.hand.as_ref().ok_or("game not started")?;
+
+        if !hand.game.settled {
+            return Err("hand not settled");
+        }
+
+        if hand.no.checked_add(1).ok_or("hand limit reached")? != hand_no {
+            return Err("wrong challenge hand");
+        }
+
+        let challenge = self
+            .next_challenges
+            .get(seat)
+            .and_then(Option::as_ref)
+            .ok_or("challenge missing")?;
+
+        if challenge.draw_verified {
+            return Err("draw already verified");
+        }
+
+        Ok(PendingDraw {
+            hand_no,
+            seat,
+            hand_tag: challenge.hand_tag,
+            commitment: challenge.commitment,
+            nonce: challenge.nonce,
+            catalog_root: challenge.catalog_root,
+            rev: self.rev.checked_add(1).ok_or("revision limit reached")?,
+        })
+    }
+
+    pub(super) fn commit_draw(&mut self, draw: PendingDraw) {
+        let challenge = self.next_challenges[draw.seat]
+            .as_mut()
+            .expect("staged challenge");
+
+        challenge.draw_verified = true;
+        self.changed(draw.rev);
     }
 
     pub(super) fn stage_claim(
@@ -239,13 +278,18 @@ impl Room {
             .get(seat)
             .and_then(Option::as_ref)
             .ok_or("challenge missing")?;
+        let facts_salt = challenge.facts_salt.ok_or("challenge facts missing")?;
         let facts_hash = challenge.facts_hash.ok_or("challenge facts missing")?;
+
+        if !challenge.draw_verified {
+            return Err("draw proof missing");
+        }
 
         if challenge.nullifier.is_some() {
             return Err("challenge already claimed");
         }
 
-        let points = challenge_points(challenge.tier)?;
+        let points = u32::from(POINTS);
         let prior_points = self.seats[seat].proof_points;
         let next_points = prior_points
             .checked_add(u64::from(points))
@@ -254,11 +298,11 @@ impl Room {
         Ok(PendingClaim {
             hand_no,
             seat,
-            tier: challenge.tier,
             hand_tag: challenge.hand_tag,
             commitment: challenge.commitment,
             nonce: challenge.nonce,
             catalog_root: challenge.catalog_root,
+            facts_salt,
             facts_hash,
             points,
             prior_points,
@@ -313,11 +357,6 @@ impl Room {
         } else {
             None
         };
-        let fact_hashes = facts
-            .as_ref()
-            .map(|facts| challenge_hashes(&self.current_challenges, facts))
-            .transpose()?;
-
         Ok(PendingAction {
             hand: hand.id,
             seq: hand.next_seq,
@@ -329,7 +368,7 @@ impl Room {
             result,
             actions,
             facts,
-            fact_hashes,
+            fact_commitments: None,
         })
     }
 
@@ -341,13 +380,14 @@ impl Room {
         hand.next_seq = action.next_seq;
         hand.actions = action.actions;
 
-        if let Some(facts) = action.facts {
-            for (seat, facts) in facts.into_iter().enumerate() {
+        if let (Some(facts), Some(commits)) = (action.facts, action.fact_commitments) {
+            for ((seat, facts), commit) in facts.into_iter().enumerate().zip(commits) {
                 let challenge = self.current_challenges[seat]
                     .as_mut()
                     .expect("staged challenge");
 
-                challenge.facts_hash = Some(facts_hash(challenge.hand_tag, seat as u8, facts));
+                challenge.facts_salt = Some(commit.salt);
+                challenge.facts_hash = Some(commit.value);
                 challenge.facts = Some(facts);
             }
         }
@@ -388,11 +428,12 @@ pub(super) struct PlayedAction {
 pub(super) struct Challenge {
     pub(super) hand_no: u64,
     pub(super) seat: usize,
-    pub(super) tier: u8,
     pub(super) hand_tag: [u8; 32],
     pub(super) commitment: [u8; 32],
     pub(super) nonce: [u8; 32],
     pub(super) catalog_root: [u8; 32],
+    pub(super) draw_verified: bool,
+    pub(super) facts_salt: Option<[u8; 32]>,
     pub(super) facts_hash: Option<[u8; 32]>,
     pub(super) facts: Option<Facts>,
     pub(super) nullifier: Option<[u8; 32]>,
@@ -402,9 +443,19 @@ pub(super) struct Challenge {
 pub(super) struct PendingChallenge {
     pub(super) hand_no: u64,
     pub(super) seat: usize,
-    pub(super) tier: u8,
     pub(super) hand_tag: [u8; 32],
     pub(super) commitment: [u8; 32],
+    pub(super) rev: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct PendingDraw {
+    pub(super) hand_no: u64,
+    pub(super) seat: usize,
+    pub(super) hand_tag: [u8; 32],
+    pub(super) commitment: [u8; 32],
+    pub(super) nonce: [u8; 32],
+    pub(super) catalog_root: [u8; 32],
     pub(super) rev: u64,
 }
 
@@ -418,11 +469,11 @@ pub(super) struct PendingReady {
 pub(super) struct PendingClaim {
     pub(super) hand_no: u64,
     pub(super) seat: usize,
-    pub(super) tier: u8,
     pub(super) hand_tag: [u8; 32],
     pub(super) commitment: [u8; 32],
     pub(super) nonce: [u8; 32],
     pub(super) catalog_root: [u8; 32],
+    pub(super) facts_salt: [u8; 32],
     pub(super) facts_hash: [u8; 32],
     pub(super) points: u32,
     pub(super) prior_points: u64,
@@ -441,11 +492,12 @@ pub(super) struct PendingAction {
     pub(super) result: Option<HandResult>,
     pub(super) actions: Vec<PlayedAction>,
     pub(super) facts: Option<Vec<Facts>>,
-    pub(super) fact_hashes: Option<Vec<FactHash>>,
+    pub(super) fact_commitments: Option<Vec<FactCommitment>>,
 }
 
-pub(super) struct FactHash {
+pub(super) struct FactCommitment {
     pub(super) seat: usize,
+    pub(super) salt: [u8; 32],
     pub(super) value: [u8; 32],
 }
 
@@ -584,31 +636,39 @@ const fn empty_facts() -> Facts {
     }
 }
 
-fn challenge_hashes(
+pub(super) fn bind_facts(
+    action: &mut PendingAction,
     challenges: &[Option<Challenge>],
-    facts: &[Facts],
-) -> Result<Vec<FactHash>, &'static str> {
-    challenges
-        .iter()
-        .zip(facts)
-        .enumerate()
-        .map(|(seat, (challenge, facts))| {
-            let challenge = challenge.as_ref().ok_or("challenge missing")?;
+    salts: Vec<[u8; 32]>,
+) -> Result<(), &'static str> {
+    let facts = action.facts.as_ref().ok_or("challenge facts missing")?;
 
-            Ok(FactHash {
-                seat,
-                value: facts_hash(challenge.hand_tag, seat as u8, *facts),
-            })
-        })
-        .collect()
-}
-
-pub(super) fn challenge_points(tier: u8) -> Result<u32, &'static str> {
-    match tier {
-        TIER_EASY => Ok(10),
-        TIER_HARD => Ok(25),
-        _ => Err("invalid challenge tier"),
+    if salts.len() != facts.len() {
+        return Err("challenge facts mismatch");
     }
+
+    action.fact_commitments = Some(
+        challenges
+            .iter()
+            .zip(facts)
+            .zip(salts)
+            .enumerate()
+            .map(|(seat, ((challenge, facts), salt))| {
+                let challenge = challenge.as_ref().ok_or("challenge missing")?;
+
+                if !challenge.draw_verified {
+                    return Err("draw proof missing");
+                }
+
+                Ok(FactCommitment {
+                    seat,
+                    salt,
+                    value: facts_hash(challenge.hand_tag, seat as u8, salt, *facts),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    Ok(())
 }
 
 fn action_error(err: ActionError) -> &'static str {

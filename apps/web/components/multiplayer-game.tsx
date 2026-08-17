@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { ClaimState, ContractView } from "@/components/contract";
+import type { ContractView, ProofState } from "@/components/contract";
 import {
   Table,
   type ChallengeView,
@@ -12,7 +12,7 @@ import {
 } from "@/components/table";
 import {
   CHALLENGE_VERSION,
-  HARD_TIER,
+  CHALLENGE_POINTS,
   catalogRoot,
   commitment as challengeCommitment,
   decodeHex,
@@ -22,7 +22,6 @@ import {
   leafHash,
   nullifier as challengeNullifier,
   objectiveAt,
-  objectiveDescription,
   objectiveIndex,
   objectiveMet,
   objectivePath,
@@ -48,17 +47,18 @@ type ClientAction =
   | { type: "check" }
   | { type: "call" }
   | { type: "raise_to"; to: number }
-  | { type: "challenge_commit"; hand_no: number; tier: number; commitment: string }
+  | { type: "challenge_commit"; hand_no: number; commitment: string }
+  | { type: "challenge_draw"; hand_no: number; proof: string; public_inputs: string }
   | { type: "challenge_claim"; hand_no: number; proof: string; public_inputs: string }
   | { type: "ready" };
 
 type Assignment = {
   hand_no: number;
   hand_tag: string;
-  tier: number;
   commitment: string;
   nonce: string;
   catalog_root: string;
+  draw_verified: boolean;
 };
 
 type PrivateObjective = {
@@ -75,7 +75,6 @@ type ContractCompletion = {
 function challengeAssignment(challenge: ChallengeView | undefined): Assignment | undefined {
   if (
     challenge?.assigned &&
-    challenge.tier !== undefined &&
     challenge.commitment !== undefined &&
     challenge.nonce !== undefined &&
     challenge.catalog_root !== undefined
@@ -83,10 +82,10 @@ function challengeAssignment(challenge: ChallengeView | undefined): Assignment |
     return {
       hand_no: challenge.hand_no,
       hand_tag: challenge.hand_tag,
-      tier: challenge.tier,
       commitment: challenge.commitment,
       nonce: challenge.nonce,
       catalog_root: challenge.catalog_root,
+      draw_verified: challenge.draw_verified,
     };
   }
 
@@ -101,10 +100,10 @@ function claimAssignment(claim: ClaimView | undefined): Assignment | undefined {
   return {
     hand_no: claim.hand_no,
     hand_tag: claim.hand_tag,
-    tier: claim.tier,
     commitment: claim.commitment,
     nonce: claim.nonce,
     catalog_root: claim.catalog_root,
+    draw_verified: true,
   };
 }
 
@@ -126,7 +125,7 @@ function privateObjective(
   try {
     const secret = decodeHex(stored.secret);
     const handTag = decodeHex(assignment.hand_tag);
-    const expected = encodeHex(challengeCommitment(handTag, seat, assignment.tier, secret));
+    const expected = encodeHex(challengeCommitment(handTag, seat, secret));
     const root = encodeHex(catalogRoot());
 
     if (root !== assignment.catalog_root) {
@@ -134,7 +133,6 @@ function privateObjective(
     }
 
     if (
-      stored.tier !== assignment.tier ||
       stored.commitment !== assignment.commitment ||
       expected !== assignment.commitment
     ) {
@@ -144,12 +142,11 @@ function privateObjective(
     const index = objectiveIndex(
       handTag,
       seat,
-      assignment.tier,
       decodeHex(assignment.nonce),
       secret,
     );
 
-    return { objective: objectiveDescription(assignment.tier, index), index };
+    return { objective: objectiveAt(index).description, index };
   } catch {
     return { error: "Invalid contract assignment" };
   }
@@ -165,20 +162,18 @@ function contractCompletion(
   }
 
   try {
-    const hash = encodeHex(factsHash(decodeHex(claim.hand_tag), seat, claim.facts));
+    const hash = encodeHex(
+      factsHash(decodeHex(claim.hand_tag), seat, decodeHex(claim.facts_salt), claim.facts),
+    );
 
     if (hash !== claim.facts_hash) {
       return { error: "Contract facts mismatch" };
     }
 
-    return { completed: objectiveMet(objectiveAt(claim.tier, index), claim.facts) };
+    return { completed: objectiveMet(objectiveAt(index), claim.facts) };
   } catch {
     return { error: "Invalid contract facts" };
   }
-}
-
-function contractReward(tier: number) {
-  return tier === HARD_TIER ? 25 : 10;
 }
 
 function closeSocket(socket: WebSocket) {
@@ -200,6 +195,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
   const socket = useRef<WebSocket | undefined>(undefined);
   const auth = useRef<RoomSeat | undefined>(undefined);
   const rev = useRef(-1);
+  const drawing = useRef(false);
   const claiming = useRef(false);
   const [seat, setSeat] = useState<number | null>();
   const [waiting, setWaiting] = useState<Waiting>();
@@ -213,7 +209,8 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
   const [claimObjective, setClaimObjective] = useState<string>();
   const [claimCompleted, setClaimCompleted] = useState<boolean>();
   const [challengeError, setChallengeError] = useState<string>();
-  const [claimState, setClaimState] = useState<ClaimState>("idle");
+  const [drawState, setDrawState] = useState<ProofState>("idle");
+  const [claimState, setClaimState] = useState<ProofState>("idle");
 
   const connect = useCallback(() => {
     const current = auth.current;
@@ -292,6 +289,14 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
           current.seat,
           currentClaim.index,
         );
+        const drawVerified = message.view.challenge?.draw_verified === true;
+
+        if (drawVerified) {
+          drawing.current = false;
+          setDrawState("verified");
+        } else if (!drawing.current) {
+          setDrawState("idle");
+        }
 
         if (claimed && message.view.claim) {
           removeChallengeSecret(room, message.view.claim.hand_no, current.seat);
@@ -312,12 +317,17 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
         );
         setConnected(true);
         setConnecting(false);
-        setPending(claiming.current);
+        setPending(drawing.current || claiming.current);
         setError(undefined);
         return;
       }
 
       if (message.type === "error") {
+        if (drawing.current) {
+          drawing.current = false;
+          setDrawState("failed");
+        }
+
         if (claiming.current) {
           claiming.current = false;
           setClaimState("failed");
@@ -335,6 +345,11 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
 
     next.onerror = () => {
       if (socket.current === next) {
+        if (drawing.current) {
+          drawing.current = false;
+          setDrawState("failed");
+        }
+
         setConnecting(false);
         setError("Connection failed");
       }
@@ -397,14 +412,13 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
     current.send(JSON.stringify(action));
   }
 
-  function chooseChallenge(tier: number) {
+  function chooseChallenge() {
     const challenge = view?.challenge;
 
     if (
       !challenge ||
       challenge.assigned ||
-      typeof seat !== "number" ||
-      (tier !== 0 && tier !== 1)
+      typeof seat !== "number"
     ) {
       return;
     }
@@ -412,23 +426,111 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
     try {
       const secret = crypto.getRandomValues(new Uint8Array(32));
       const value = encodeHex(
-        challengeCommitment(decodeHex(challenge.hand_tag), seat, tier, secret),
+        challengeCommitment(decodeHex(challenge.hand_tag), seat, secret),
       );
 
       saveChallengeSecret(room, challenge.hand_no, seat, {
         version: CHALLENGE_VERSION,
-        tier,
         secret: encodeHex(secret),
         commitment: value,
       });
       send({
         type: "challenge_commit",
         hand_no: challenge.hand_no,
-        tier,
         commitment: value,
       });
     } catch {
       setChallengeError("Contract setup failed");
+    }
+  }
+
+  async function drawChallenge() {
+    const assignment = challengeAssignment(view?.challenge);
+    const current = socket.current;
+
+    if (
+      !assignment ||
+      assignment.draw_verified ||
+      typeof seat !== "number" ||
+      !current ||
+      current.readyState !== WebSocket.OPEN ||
+      !connected ||
+      pending ||
+      drawing.current
+    ) {
+      return;
+    }
+
+    const stored = loadChallengeSecret(room, assignment.hand_no, seat);
+
+    if (!stored) {
+      setChallengeError("Contract secret unavailable");
+      setDrawState("failed");
+      return;
+    }
+
+    try {
+      const handTag = decodeHex(assignment.hand_tag);
+      const secret = decodeHex(stored.secret);
+      const nonce = decodeHex(assignment.nonce);
+      const commitment = decodeHex(assignment.commitment);
+      const index = objectiveIndex(handTag, seat, nonce, secret);
+      const value = objectiveAt(index);
+      const siblings = objectivePath(index);
+      const root = decodeHex(assignment.catalog_root);
+
+      if (
+        stored.commitment !== assignment.commitment ||
+        encodeHex(challengeCommitment(handTag, seat, secret)) !== assignment.commitment ||
+        encodeHex(catalogRoot()) !== assignment.catalog_root ||
+        encodeHex(pathRoot(leafHash(value), index, siblings)) !== encodeHex(root)
+      ) {
+        throw new Error("challenge mismatch");
+      }
+
+      drawing.current = true;
+      setPending(true);
+      setError(undefined);
+      setChallengeError(undefined);
+
+      const result = await proveChallenge(
+        {
+          mode: 0,
+          handTag,
+          seat,
+          commitment,
+          nonce,
+          factsHash: new Uint8Array(32),
+          nullifier: new Uint8Array(32),
+          catalogRoot: root,
+          secret,
+          factsSalt: new Uint8Array(32),
+          facts: [0, 0, 0, 0, 0, 0],
+          mustTrue: value.mustTrue,
+          mustFalse: value.mustFalse,
+          siblings,
+        },
+        (status: ProofStatus) => setDrawState(status),
+      );
+
+      if (socket.current !== current || current.readyState !== WebSocket.OPEN) {
+        throw new Error("socket closed");
+      }
+
+      setDrawState("verifying");
+      current.send(
+        JSON.stringify({
+          type: "challenge_draw",
+          hand_no: assignment.hand_no,
+          proof: result.proof,
+          public_inputs: result.public_inputs,
+        } satisfies ClientAction),
+      );
+    } catch {
+      drawing.current = false;
+      setPending(false);
+      setDrawState("failed");
+      setChallengeError("Draw proof failed");
     }
   }
 
@@ -462,17 +564,17 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
       const secret = decodeHex(stored.secret);
       const nonce = decodeHex(claim.nonce);
       const commitment = decodeHex(claim.commitment);
-      const expectedCommitment = challengeCommitment(handTag, seat, claim.tier, secret);
-      const expectedFactsHash = factsHash(handTag, seat, claim.facts);
-      const index = objectiveIndex(handTag, seat, claim.tier, nonce, secret);
-      const objective = objectiveAt(claim.tier, index);
-      const siblings = objectivePath(claim.tier, index);
+      const salt = decodeHex(claim.facts_salt);
+      const expectedCommitment = challengeCommitment(handTag, seat, secret);
+      const expectedFactsHash = factsHash(handTag, seat, salt, claim.facts);
+      const index = objectiveIndex(handTag, seat, nonce, secret);
+      const objective = objectiveAt(index);
+      const siblings = objectivePath(index);
       const root = decodeHex(claim.catalog_root);
       const localRoot = catalogRoot();
-      const verifiedRoot = pathRoot(leafHash(objective), claim.tier * 4 + index, siblings);
+      const verifiedRoot = pathRoot(leafHash(objective), index, siblings);
 
       if (
-        stored.tier !== claim.tier ||
         stored.commitment !== claim.commitment ||
         encodeHex(expectedCommitment) !== claim.commitment ||
         encodeHex(expectedFactsHash) !== claim.facts_hash ||
@@ -495,15 +597,16 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
 
       const result = await proveChallenge(
         {
+          mode: 1,
           handTag,
           seat,
-          tier: claim.tier,
           commitment,
           nonce,
           factsHash: expectedFactsHash,
-          nullifier: challengeNullifier(handTag, seat, claim.tier, secret),
+          nullifier: challengeNullifier(handTag, seat, secret),
           catalogRoot: root,
           secret,
+          factsSalt: salt,
           facts: claim.facts,
           mustTrue: objective.mustTrue,
           mustFalse: objective.mustFalse,
@@ -589,16 +692,21 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
             kind: "assigned",
             handNo: view.challenge.hand_no,
             objective: objective ?? "Private objective unavailable",
-            reward: contractReward(view.challenge.tier ?? 0),
+            reward: CHALLENGE_POINTS,
             active: !view.settled,
+            drawVerified: view.challenge.draw_verified,
+            drawState,
           },
     claim: view.claim
       ? {
           handNo: view.claim.hand_no,
           objective: claimObjective,
-          reward: view.claim.points ?? contractReward(view.claim.tier),
+          reward: view.claim.points ?? CHALLENGE_POINTS,
           completed: claimCompleted,
           state: claimState,
+          receipt: view.claim.nullifier
+            ? `/proof/${view.claim.nullifier}`
+            : undefined,
         }
       : undefined,
     error: challengeError,
@@ -631,6 +739,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
         onReady={() => send({ type: "ready" })}
         contract={contract}
         onChooseContract={chooseChallenge}
+        onDrawContract={() => void drawChallenge()}
         onGenerateProof={() => void claimChallenge()}
       />
     </>

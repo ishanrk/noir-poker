@@ -51,11 +51,11 @@ WORKDIR /app
 
 COPY --from=builder --chown=app:app /src/target/release/server /app/server
 COPY --from=builder /usr/local/bin/bb /usr/local/bin/bb
-COPY --from=builder --chown=app:app /src/apps/server/zk/challenge_v1.vk /app/zk/challenge_v1.vk
+COPY --from=builder --chown=app:app /src/apps/server/zk/challenge_v2.vk /app/zk/challenge_v2.vk
 
 ENV HOME=/home/app \
     BB_PATH=/usr/local/bin/bb \
-    CHALLENGE_VK_PATH=/app/zk/challenge_v1.vk
+    CHALLENGE_VK_PATH=/app/zk/challenge_v2.vk
 
 EXPOSE 10000
 

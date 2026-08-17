@@ -7,7 +7,7 @@ use sqlx::postgres::{PgPoolOptions, PgQueryResult};
 use sqlx::{PgPool, Row, query};
 use uuid::Uuid;
 
-use crate::room::FactHash;
+use crate::room::FactCommitment;
 
 type DbResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -34,7 +34,14 @@ pub struct NewChallenge {
     pub room: Uuid,
     pub hand_no: u64,
     pub seat: usize,
-    pub tier: u8,
+    pub hand_tag: [u8; 32],
+    pub commitment: [u8; 32],
+}
+
+pub struct ChallengeEntropy {
+    pub room: Uuid,
+    pub hand_no: u64,
+    pub seat: usize,
     pub hand_tag: [u8; 32],
     pub commitment: [u8; 32],
     pub nonce: [u8; 32],
@@ -43,17 +50,42 @@ pub struct NewChallenge {
     pub next_rev: u64,
 }
 
-pub struct ClaimUpdate {
+pub struct PendingChallenge {
     pub room: Uuid,
     pub hand_no: u64,
     pub seat: usize,
-    pub tier: u8,
+    pub hand_tag: [u8; 32],
+    pub commitment: [u8; 32],
+    pub rev: u64,
+}
+
+pub struct DrawUpdate {
+    pub room: Uuid,
+    pub hand_no: u64,
+    pub seat: usize,
     pub hand_tag: [u8; 32],
     pub commitment: [u8; 32],
     pub nonce: [u8; 32],
     pub catalog_root: [u8; 32],
+    pub proof: Vec<u8>,
+    pub public_inputs: Vec<u8>,
+    pub rev: u64,
+    pub next_rev: u64,
+}
+
+pub struct ClaimUpdate {
+    pub room: Uuid,
+    pub hand_no: u64,
+    pub seat: usize,
+    pub hand_tag: [u8; 32],
+    pub commitment: [u8; 32],
+    pub nonce: [u8; 32],
+    pub catalog_root: [u8; 32],
+    pub facts_salt: [u8; 32],
     pub facts_hash: [u8; 32],
     pub nullifier: [u8; 32],
+    pub proof: Vec<u8>,
+    pub public_inputs: Vec<u8>,
     pub points: u32,
     pub prior_points: u64,
     pub next_points: u64,
@@ -68,7 +100,7 @@ pub struct NewAction<'a> {
     pub seq: u64,
     pub player: usize,
     pub action: Action,
-    pub facts: Option<&'a [FactHash]>,
+    pub facts: Option<&'a [FactCommitment]>,
     pub rev: u64,
     pub next_rev: u64,
 }
@@ -117,15 +149,35 @@ pub struct StoredChallenge {
     pub hand_no: i64,
     pub seat: i32,
     pub version: i32,
-    pub tier: i32,
     pub hand_tag: Vec<u8>,
     pub commitment: Vec<u8>,
     pub nonce: Vec<u8>,
     pub catalog_root: Vec<u8>,
+    pub draw_proof: Option<Vec<u8>>,
+    pub draw_public_inputs: Option<Vec<u8>>,
+    pub draw_verified: bool,
+    pub facts_salt: Option<Vec<u8>>,
     pub facts_hash: Option<Vec<u8>>,
     pub nullifier: Option<Vec<u8>>,
     pub points: Option<i64>,
+    pub completion_proof: Option<Vec<u8>>,
+    pub completion_public_inputs: Option<Vec<u8>>,
     pub claimed: bool,
+}
+
+pub struct ProofReceipt {
+    pub hand_tag: Vec<u8>,
+    pub seat: i32,
+    pub commitment: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub facts_hash: Vec<u8>,
+    pub nullifier: Vec<u8>,
+    pub catalog_root: Vec<u8>,
+    pub points: i64,
+    pub draw_proof: Vec<u8>,
+    pub draw_public_inputs: Vec<u8>,
+    pub completion_proof: Vec<u8>,
+    pub completion_public_inputs: Vec<u8>,
 }
 
 #[derive(Clone)]
@@ -269,25 +321,68 @@ impl Db {
         Ok(())
     }
 
-    pub async fn add_challenge(&self, challenge: NewChallenge) -> DbResult<()> {
-        let mut tx = self.pool.begin().await?;
-
-        query(
+    pub async fn commit_challenge(&self, challenge: NewChallenge) -> DbResult<()> {
+        let inserted = query(
             "INSERT INTO challenge_assignments \
-             (room_id, hand_no, seat, version, tier, hand_tag, commitment, nonce, catalog_root) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+             (room_id, hand_no, seat, version, hand_tag, commitment) \
+             VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING",
         )
         .bind(challenge.room)
         .bind(i64::try_from(challenge.hand_no)?)
         .bind(i32::try_from(challenge.seat)?)
         .bind(i32::from(PROTOCOL_VERSION))
-        .bind(i32::from(challenge.tier))
+        .bind(challenge.hand_tag.as_slice())
+        .bind(challenge.commitment.as_slice())
+        .execute(&self.pool)
+        .await?;
+
+        if inserted.rows_affected() == 1 {
+            return Ok(());
+        }
+
+        let row = query(
+            "SELECT version, hand_tag, commitment, nonce FROM challenge_assignments \
+             WHERE room_id = $1 AND hand_no = $2 AND seat = $3",
+        )
+        .bind(challenge.room)
+        .bind(i64::try_from(challenge.hand_no)?)
+        .bind(i32::try_from(challenge.seat)?)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if row.try_get::<i32, _>("version")? != i32::from(PROTOCOL_VERSION)
+            || row.try_get::<Vec<u8>, _>("hand_tag")? != challenge.hand_tag
+            || row.try_get::<Vec<u8>, _>("commitment")? != challenge.commitment
+            || row.try_get::<Option<Vec<u8>>, _>("nonce")?.is_some()
+        {
+            return Err(io::Error::other("challenge commitment mismatch").into());
+        }
+
+        Ok(())
+    }
+
+    pub async fn assign_challenge(&self, challenge: ChallengeEntropy) -> DbResult<()> {
+        let mut tx = self.pool.begin().await?;
+        let changed = query(
+            "UPDATE challenge_assignments SET nonce = $7, catalog_root = $8 \
+             WHERE room_id = $1 AND hand_no = $2 AND seat = $3 AND version = $4 \
+             AND hand_tag = $5 AND commitment = $6 AND nonce IS NULL",
+        )
+        .bind(challenge.room)
+        .bind(i64::try_from(challenge.hand_no)?)
+        .bind(i32::try_from(challenge.seat)?)
+        .bind(i32::from(PROTOCOL_VERSION))
         .bind(challenge.hand_tag.as_slice())
         .bind(challenge.commitment.as_slice())
         .bind(challenge.nonce.as_slice())
         .bind(challenge.catalog_root.as_slice())
         .execute(&mut *tx)
         .await?;
+
+        if changed.rows_affected() != 1 {
+            return Err(io::Error::other("challenge assignment mismatch").into());
+        }
+
         let changed = query("UPDATE rooms SET rev = $2 WHERE id = $1 AND rev = $3")
             .bind(challenge.room)
             .bind(i64::try_from(challenge.next_rev)?)
@@ -300,10 +395,88 @@ impl Db {
         Ok(())
     }
 
+    pub async fn pending_challenge(&self) -> DbResult<Option<PendingChallenge>> {
+        let row = query(
+            "SELECT assignment.room_id, assignment.hand_no, assignment.seat, \
+             assignment.hand_tag, assignment.commitment, rooms.rev \
+             FROM challenge_assignments assignment \
+             JOIN rooms ON rooms.id = assignment.room_id \
+             WHERE assignment.nonce IS NULL \
+             AND assignment.hand_no = ( \
+                 SELECT MAX(hands.hand_no) + 1 FROM hands \
+                 WHERE hands.room_id = assignment.room_id \
+             ) \
+             ORDER BY assignment.room_id, assignment.hand_no, assignment.seat LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            let hand_tag = row
+                .try_get::<Vec<u8>, _>("hand_tag")?
+                .try_into()
+                .map_err(|_| io::Error::other("invalid pending challenge"))?;
+            let commitment = row
+                .try_get::<Vec<u8>, _>("commitment")?
+                .try_into()
+                .map_err(|_| io::Error::other("invalid pending challenge"))?;
+
+            Ok(PendingChallenge {
+                room: row.try_get("room_id")?,
+                hand_no: u64::try_from(row.try_get::<i64, _>("hand_no")?)?,
+                seat: usize::try_from(row.try_get::<i32, _>("seat")?)?,
+                hand_tag,
+                commitment,
+                rev: u64::try_from(row.try_get::<i64, _>("rev")?)?,
+            })
+        })
+        .transpose()
+    }
+
+    pub async fn draw(&self, draw: DrawUpdate) -> DbResult<()> {
+        let mut tx = self.pool.begin().await?;
+        let changed = query(
+            "UPDATE challenge_assignments \
+             SET draw_proof = $4, draw_public_inputs = $5, draw_verified_at = now() \
+             WHERE room_id = $1 AND hand_no = $2 AND seat = $3 \
+             AND version = $6 AND hand_tag = $7 AND commitment = $8 \
+             AND nonce = $9 AND catalog_root = $10 AND draw_verified_at IS NULL",
+        )
+        .bind(draw.room)
+        .bind(i64::try_from(draw.hand_no)?)
+        .bind(i32::try_from(draw.seat)?)
+        .bind(draw.proof)
+        .bind(draw.public_inputs)
+        .bind(i32::from(PROTOCOL_VERSION))
+        .bind(draw.hand_tag.as_slice())
+        .bind(draw.commitment.as_slice())
+        .bind(draw.nonce.as_slice())
+        .bind(draw.catalog_root.as_slice())
+        .execute(&mut *tx)
+        .await?;
+
+        if changed.rows_affected() != 1 {
+            return Err(io::Error::other("challenge draw mismatch").into());
+        }
+
+        let changed = query("UPDATE rooms SET rev = $2 WHERE id = $1 AND rev = $3")
+            .bind(draw.room)
+            .bind(i64::try_from(draw.next_rev)?)
+            .bind(i64::try_from(draw.rev)?)
+            .execute(&mut *tx)
+            .await?;
+
+        one_row(changed)?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn claim(&self, claim: ClaimUpdate) -> DbResult<()> {
         let mut tx = self.pool.begin().await?;
         let row = query(
-            "SELECT version, tier, hand_tag, commitment, nonce, catalog_root, facts_hash, nullifier \
+            "SELECT version, hand_tag, commitment, nonce, catalog_root, \
+             draw_verified_at IS NOT NULL AS draw_verified, \
+             facts_salt, facts_hash, nullifier \
              FROM challenge_assignments \
              WHERE room_id = $1 AND hand_no = $2 AND seat = $3 FOR UPDATE",
         )
@@ -314,11 +487,12 @@ impl Db {
         .await?;
 
         if row.try_get::<i32, _>("version")? != i32::from(PROTOCOL_VERSION)
-            || row.try_get::<i32, _>("tier")? != i32::from(claim.tier)
             || row.try_get::<Vec<u8>, _>("hand_tag")? != claim.hand_tag
             || row.try_get::<Vec<u8>, _>("commitment")? != claim.commitment
             || row.try_get::<Vec<u8>, _>("nonce")? != claim.nonce
             || row.try_get::<Vec<u8>, _>("catalog_root")? != claim.catalog_root
+            || !row.try_get::<bool, _>("draw_verified")?
+            || row.try_get::<Option<Vec<u8>>, _>("facts_salt")? != Some(claim.facts_salt.to_vec())
             || row.try_get::<Option<Vec<u8>>, _>("facts_hash")? != Some(claim.facts_hash.to_vec())
             || row.try_get::<Option<Vec<u8>>, _>("nullifier")?.is_some()
         {
@@ -327,7 +501,8 @@ impl Db {
 
         let changed = query(
             "UPDATE challenge_assignments \
-             SET nullifier = $4, points = $5, claimed_at = now() \
+             SET nullifier = $4, points = $5, completion_proof = $6, \
+             completion_public_inputs = $7, claimed_at = now() \
              WHERE room_id = $1 AND hand_no = $2 AND seat = $3 AND nullifier IS NULL",
         )
         .bind(claim.room)
@@ -335,6 +510,8 @@ impl Db {
         .bind(i32::try_from(claim.seat)?)
         .bind(claim.nullifier.as_slice())
         .bind(i64::from(claim.points))
+        .bind(claim.proof)
+        .bind(claim.public_inputs)
         .execute(&mut *tx)
         .await?;
 
@@ -386,13 +563,14 @@ impl Db {
         if let Some(facts) = action.facts {
             for fact in facts {
                 let changed = query(
-                    "UPDATE challenge_assignments SET facts_hash = $4 \
+                    "UPDATE challenge_assignments SET facts_salt = $4, facts_hash = $5 \
                      WHERE room_id = $1 AND hand_no = $2 AND seat = $3 \
                      AND facts_hash IS NULL",
                 )
                 .bind(action.room)
                 .bind(i64::try_from(action.hand_no)?)
                 .bind(i32::try_from(fact.seat)?)
+                .bind(fact.salt.as_slice())
                 .bind(fact.value.as_slice())
                 .execute(&mut *tx)
                 .await?;
@@ -508,8 +686,10 @@ impl Db {
 
     async fn load_challenges(&self, room: Uuid) -> DbResult<Vec<StoredChallenge>> {
         let rows = query(
-            "SELECT hand_no, seat, version, tier, hand_tag, commitment, nonce, catalog_root, facts_hash, \
-             nullifier, points, claimed_at IS NOT NULL AS claimed \
+            "SELECT hand_no, seat, version, hand_tag, commitment, nonce, catalog_root, \
+             draw_proof, draw_public_inputs, draw_verified_at IS NOT NULL AS draw_verified, \
+             facts_salt, facts_hash, nullifier, points, completion_proof, completion_public_inputs, \
+             claimed_at IS NOT NULL AS claimed \
              FROM challenge_assignments WHERE room_id = $1 ORDER BY hand_no, seat",
         )
         .bind(room)
@@ -522,18 +702,52 @@ impl Db {
                     hand_no: row.try_get("hand_no")?,
                     seat: row.try_get("seat")?,
                     version: row.try_get("version")?,
-                    tier: row.try_get("tier")?,
                     hand_tag: row.try_get("hand_tag")?,
                     commitment: row.try_get("commitment")?,
                     nonce: row.try_get("nonce")?,
                     catalog_root: row.try_get("catalog_root")?,
+                    draw_proof: row.try_get("draw_proof")?,
+                    draw_public_inputs: row.try_get("draw_public_inputs")?,
+                    draw_verified: row.try_get("draw_verified")?,
+                    facts_salt: row.try_get("facts_salt")?,
                     facts_hash: row.try_get("facts_hash")?,
                     nullifier: row.try_get("nullifier")?,
                     points: row.try_get("points")?,
+                    completion_proof: row.try_get("completion_proof")?,
+                    completion_public_inputs: row.try_get("completion_public_inputs")?,
                     claimed: row.try_get("claimed")?,
                 })
             })
             .collect()
+    }
+
+    pub async fn proof_receipt(&self, nullifier: &[u8; 32]) -> DbResult<Option<ProofReceipt>> {
+        let row = query(
+            "SELECT hand_tag, seat, commitment, nonce, facts_hash, nullifier, catalog_root, points, \
+             draw_proof, draw_public_inputs, completion_proof, completion_public_inputs \
+             FROM challenge_assignments WHERE nullifier = $1",
+        )
+        .bind(nullifier.as_slice())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            Ok(ProofReceipt {
+                hand_tag: row.try_get("hand_tag")?,
+                seat: row.try_get("seat")?,
+                commitment: row.try_get("commitment")?,
+                nonce: row.try_get("nonce")?,
+                facts_hash: row.try_get("facts_hash")?,
+                nullifier: row.try_get("nullifier")?,
+                catalog_root: row.try_get("catalog_root")?,
+                points: row.try_get("points")?,
+                draw_proof: row.try_get("draw_proof")?,
+                draw_public_inputs: row.try_get("draw_public_inputs")?,
+                completion_proof: row.try_get("completion_proof")?,
+                completion_public_inputs: row.try_get("completion_public_inputs")?,
+            })
+        })
+        .transpose()
     }
 
     #[cfg(test)]

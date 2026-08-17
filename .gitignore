@@ -1,7 +1,7 @@
 .local/
 /target/
-/crates/game-wasm/pkg/
-/circuits/challenge-v1/target/
-/apps/server/zk/
+/circuits/challenge-v2/target/
+/apps/server/zk/*
+!/apps/server/zk/challenge_v2.vk
 /apps/web/zk/*
-!/apps/web/zk/challenge_v1.json
+!/apps/web/zk/challenge_v2.json

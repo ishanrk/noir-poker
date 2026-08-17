@@ -4,12 +4,8 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 nargo="${NARGO_PATH:-nargo}"
 bb="${BB_PATH:-bb}"
-wasm_pack="${WASM_PACK_PATH:-wasm-pack}"
 assets=(
-    "apps/web/zk/challenge_v1.json"
-    "apps/web/wasm/game_wasm.js"
-    "apps/web/wasm/game_wasm_bg.wasm"
-    "apps/web/wasm/game_wasm.d.ts"
+    "apps/web/zk/challenge_v2.json"
 )
 
 resolve_tool() {
@@ -26,14 +22,11 @@ resolve_tool() {
 verify_tools() {
     local nargo_version
     local bb_version
-    local wasm_pack_version
 
     nargo="$(resolve_tool "$nargo")"
     bb="$(resolve_tool "$bb")"
-    wasm_pack="$(resolve_tool "$wasm_pack")"
     nargo_version="$("$nargo" --version | sed -n '1s/nargo version = //p')"
     bb_version="$("$bb" --version | sed -n '1p')"
-    wasm_pack_version="$("$wasm_pack" --version | sed -n '1s/wasm-pack //p')"
 
     if test "$nargo_version" != "1.0.0-beta.26"; then
         echo "expected nargo 1.0.0-beta.26 got ${nargo_version:-unknown} using $nargo" >&2
@@ -45,24 +38,10 @@ verify_tools() {
         exit 1
     fi
 
-    if test "$wasm_pack_version" != "0.15.0"; then
-        echo "expected wasm-pack 0.15.0 got ${wasm_pack_version:-unknown} using $wasm_pack" >&2
-        exit 1
-    fi
 }
 
 update() {
-    local cargo_home="${CARGO_HOME:-$HOME/.cargo}"
-    local rustflags="--remap-path-prefix=$root=/repo --remap-path-prefix=$cargo_home=/cargo"
-
     NARGO_PATH="$nargo" BB_PATH="$bb" "$root/scripts/build-zk.sh"
-    RUSTFLAGS="$rustflags" "$wasm_pack" build "$root/crates/game-wasm" \
-        --target web \
-        --out-dir "$root/apps/web/wasm"
-    rm -f \
-        "$root/apps/web/wasm/.gitignore" \
-        "$root/apps/web/wasm/game_wasm_bg.wasm.d.ts" \
-        "$root/apps/web/wasm/package.json"
 }
 
 check() {

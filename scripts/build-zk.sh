@@ -32,7 +32,7 @@ if test "$bb_version" != "5.2.0"; then
 fi
 
 (
-    cd "$root/circuits/challenge-v1"
+    cd "$root/circuits/challenge-v2"
     "$nargo" compile --force
 )
 
@@ -40,30 +40,30 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 "$bb" write_vk \
-    -b "$root/circuits/challenge-v1/target/challenge_v1.json" \
+    -b "$root/circuits/challenge-v2/target/challenge_v2.json" \
     -o "$tmp/vk" \
     -t noir-recursive
 
 mkdir -p "$root/apps/web/zk" "$root/apps/server/zk"
-cp "$tmp/vk/vk" "$root/apps/server/zk/challenge_v1.vk"
+cp "$tmp/vk/vk" "$root/apps/server/zk/challenge_v2.vk"
 
 # remove checkout path from debug metadata
-sed -E 's#"path":"[^"]*/circuits/challenge-v1/src/main.nr"#"path":"/repo/circuits/challenge-v1/src/main.nr"#g' \
-    "$root/circuits/challenge-v1/target/challenge_v1.json" > "$tmp/challenge_v1.json"
-cp "$tmp/challenge_v1.json" "$root/apps/web/zk/challenge_v1.json"
+sed -E 's#"path":"[^"]*/circuits/challenge-v2/src/main.nr"#"path":"/repo/circuits/challenge-v2/src/main.nr"#g' \
+    "$root/circuits/challenge-v2/target/challenge_v2.json" > "$tmp/challenge_v2.json"
+cp "$tmp/challenge_v2.json" "$root/apps/web/zk/challenge_v2.json"
 
-artifact_digest="$(sha256sum "$root/apps/web/zk/challenge_v1.json" | awk '{print $1}')"
-vk_digest="$(sha256sum "$root/apps/server/zk/challenge_v1.vk" | awk '{print $1}')"
+artifact_digest="$(sha256sum "$root/apps/web/zk/challenge_v2.json" | awk '{print $1}')"
+vk_digest="$(sha256sum "$root/apps/server/zk/challenge_v2.vk" | awk '{print $1}')"
 
-if test "$artifact_digest" != "94125fd41b87a412605169b5839ad9d7c9022d4009e795ba63ff1efcf8adc28d"; then
+if test "$artifact_digest" != "83a9a72327d42546fe6449306b916c993d1df820717f8bccd2dd6c9659b3f171"; then
     echo "challenge artifact digest mismatch" >&2
     exit 1
 fi
 
-if test "$vk_digest" != "5a70d3d6e804c894ee334ef0cb324c5d062a116ca73bb564fb040acc30fbfaa0"; then
+if test "$vk_digest" != "b435db9d240683e181d8bad47203bf85d57ca27982bc676cf2686b5cf3de1d67"; then
     echo "challenge verification key digest mismatch" >&2
     exit 1
 fi
 
-echo "$artifact_digest  $root/apps/web/zk/challenge_v1.json"
-echo "$vk_digest  $root/apps/server/zk/challenge_v1.vk"
+echo "$artifact_digest  $root/apps/web/zk/challenge_v2.json"
+echo "$vk_digest  $root/apps/server/zk/challenge_v2.vk"

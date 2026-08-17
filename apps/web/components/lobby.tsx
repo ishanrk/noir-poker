@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
@@ -101,9 +100,6 @@ export function Lobby() {
 
       {error && <p className="lobby-error">{error}</p>}
 
-      <p className="demo-link">
-        <Link href="/demo">Open local demo</Link>
-      </p>
     </section>
   );
 }

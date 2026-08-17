@@ -46,8 +46,8 @@ type ReadyView = {
 export type ChallengeView = {
   hand_no: number;
   assigned: boolean;
+  draw_verified: boolean;
   hand_tag: string;
-  tier?: number;
   commitment?: string;
   nonce?: string;
   catalog_root?: string;
@@ -56,14 +56,15 @@ export type ChallengeView = {
 export type ClaimView = {
   hand_no: number;
   hand_tag: string;
-  tier: number;
   commitment: string;
   nonce: string;
   catalog_root: string;
+  facts_salt: string;
   facts_hash: string;
   facts: [number, number, number, number, number, number];
   status: "claimable" | "claimed";
   points?: number;
+  nullifier?: string;
 };
 
 export type View = {
@@ -98,7 +99,8 @@ type TableProps = {
   onNewHand?: () => void;
   onReady?: () => void;
   contract?: ContractView;
-  onChooseContract?: (tier: number) => void;
+  onChooseContract?: () => void;
+  onDrawContract?: () => void;
   onGenerateProof?: () => void;
 };
 
@@ -124,6 +126,7 @@ export function Table({
   onReady,
   contract,
   onChooseContract,
+  onDrawContract,
   onGenerateProof,
 }: TableProps) {
   const hole = [view.hole[0].value, view.hole[1].value] as const;
@@ -225,11 +228,12 @@ export function Table({
         })}
       </div>
 
-      {contract && onChooseContract && onGenerateProof && (
+      {contract && onChooseContract && onDrawContract && onGenerateProof && (
         <Contract
           view={contract}
           disabled={disabled}
           onChoose={onChooseContract}
+          onDraw={onDrawContract}
           onProve={onGenerateProof}
         />
       )}
@@ -292,7 +296,7 @@ export function Table({
                 disabled ||
                 view.ready.mine ||
                 view.ready.complete ||
-                !view.challenge?.assigned
+                !view.challenge?.draw_verified
               }
             >
               {view.ready.complete

@@ -14,8 +14,11 @@ use axum::http::{HeaderValue, Method, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use challenge_core::{
-    FACT_COUNT, Facts, PROTOCOL_VERSION, TIER_EASY, TIER_HARD, catalog_root, facts_hash, hand_tag,
+    FACT_COUNT, Facts, MODE_COMPLETE, MODE_DRAW, POINTS, PROTOCOL_VERSION, catalog_root,
+    facts_hash, hand_tag,
 };
 use game_core::{Action, Card, LegalActions, Rank, State, Street, Suit};
 use serde::{Deserialize, Serialize};
@@ -26,13 +29,17 @@ use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
 use crate::db::{
-    ClaimUpdate, Db, NewAction, NewChallenge, NewHand, ReadyUpdate, StoredAction, StoredChallenge,
-    StoredHand, StoredRoom,
+    ChallengeEntropy, ClaimUpdate, Db, DrawUpdate, NewAction, NewChallenge, NewHand, ProofReceipt,
+    ReadyUpdate, StoredAction, StoredChallenge, StoredHand, StoredRoom,
 };
-use crate::proof::{ClaimInputs, ProofVerifier, decode_claim};
+use crate::proof::{
+    ARTIFACT_SHA256, BB_VERSION, CIRCUIT_ID, PROOF_SYSTEM, ProofInputs, ProofVerifier, VK_SHA256,
+    decode_bytes, decode_proof,
+};
 use crate::room::{
     Challenge, Challenges, HandResult, HandResultKind, JoinError, LiveHand, PendingClaim,
-    PlayedAction, Room, RoomConfig, Seat, TokenHash, challenge_points, replay_hand, start_game,
+    PendingDraw, PlayedAction, Room, RoomConfig, Seat, TokenHash, bind_facts, replay_hand,
+    start_game,
 };
 
 type HttpError = (StatusCode, &'static str);
@@ -86,8 +93,12 @@ enum ClientMessage {
     },
     ChallengeCommit {
         hand_no: u64,
-        tier: u8,
         commitment: String,
+    },
+    ChallengeDraw {
+        hand_no: u64,
+        proof: String,
+        public_inputs: String,
     },
     ChallengeClaim {
         hand_no: u64,
@@ -146,9 +157,8 @@ struct AwardView {
 struct ChallengeView {
     hand_no: u64,
     assigned: bool,
+    draw_verified: bool,
     hand_tag: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tier: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     commitment: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -161,15 +171,39 @@ struct ChallengeView {
 struct ClaimView {
     hand_no: u64,
     hand_tag: String,
-    tier: u8,
     commitment: String,
     nonce: String,
     catalog_root: String,
+    facts_salt: String,
     facts_hash: String,
     facts: [u8; FACT_COUNT],
     status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     points: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nullifier: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ReceiptView {
+    protocol_version: u8,
+    proof_system: &'static str,
+    circuit_id: &'static str,
+    bb_version: &'static str,
+    artifact_sha256: &'static str,
+    vk_sha256: &'static str,
+    hand_tag: String,
+    seat: usize,
+    commitment: String,
+    nonce: String,
+    facts_hash: String,
+    nullifier: String,
+    catalog_root: String,
+    points: u32,
+    draw_proof: String,
+    draw_public_inputs: String,
+    completion_proof: String,
+    completion_public_inputs: String,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -221,8 +255,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         env::var("DATABASE_URL").map_err(|_| io::Error::other("DATABASE_URL missing"))?;
     let bb = env::var("BB_PATH").map_err(|_| io::Error::other("BB_PATH missing"))?;
     let vk = env::var("CHALLENGE_VK_PATH")
-        .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/zk/challenge_v1.vk").to_owned());
+        .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/zk/challenge_v2.vk").to_owned());
     let db = Db::connect(&database_url).await?;
+    finish_pending_challenges(&db).await?;
     let proof = ProofVerifier::load(bb, vk)?;
     let rooms = restore_rooms(db.load_rooms().await?)?;
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
@@ -237,17 +272,72 @@ fn app(state: AppState, origin: HeaderValue) -> Router {
         .route("/rooms", post(create_room))
         .route("/rooms/{room}/join", post(join_room))
         .route("/rooms/{room}/ws", get(room_ws))
+        .route("/proofs/{nullifier}", get(proof_receipt))
         .with_state(state)
         .layer(
             CorsLayer::new()
                 .allow_origin(origin)
-                .allow_methods([Method::POST])
+                .allow_methods([Method::GET, Method::POST])
                 .allow_headers([CONTENT_TYPE]),
         )
 }
 
 async fn health() -> &'static str {
     "ok"
+}
+
+async fn proof_receipt(
+    AxumState(state): AxumState<AppState>,
+    Path(nullifier): Path<String>,
+) -> Result<Json<ReceiptView>, HttpError> {
+    let nullifier =
+        decode_hex(&nullifier).ok_or((StatusCode::BAD_REQUEST, "invalid proof nullifier"))?;
+    let receipt = state
+        .db
+        .proof_receipt(&nullifier)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot load proof"))?
+        .ok_or((StatusCode::NOT_FOUND, "proof not found"))?;
+
+    receipt_view(receipt)
+        .map(Json)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "invalid proof receipt"))
+}
+
+fn receipt_view(receipt: ProofReceipt) -> Result<ReceiptView, ()> {
+    let hand_tag = receipt.hand_tag.try_into().map_err(|_| ())?;
+    let commitment = receipt.commitment.try_into().map_err(|_| ())?;
+    let nonce = receipt.nonce.try_into().map_err(|_| ())?;
+    let facts_hash = receipt.facts_hash.try_into().map_err(|_| ())?;
+    let nullifier = receipt.nullifier.try_into().map_err(|_| ())?;
+    let catalog_root = receipt.catalog_root.try_into().map_err(|_| ())?;
+    let seat = usize::try_from(receipt.seat).map_err(|_| ())?;
+    let points = u32::try_from(receipt.points).map_err(|_| ())?;
+
+    if seat >= 6 || points != u32::from(POINTS) {
+        return Err(());
+    }
+
+    Ok(ReceiptView {
+        protocol_version: PROTOCOL_VERSION,
+        proof_system: PROOF_SYSTEM,
+        circuit_id: CIRCUIT_ID,
+        bb_version: BB_VERSION,
+        artifact_sha256: ARTIFACT_SHA256,
+        vk_sha256: VK_SHA256,
+        hand_tag: encode_hex(hand_tag),
+        seat,
+        commitment: encode_hex(commitment),
+        nonce: encode_hex(nonce),
+        facts_hash: encode_hex(facts_hash),
+        nullifier: encode_hex(nullifier),
+        catalog_root: encode_hex(catalog_root),
+        points,
+        draw_proof: STANDARD.encode(receipt.draw_proof),
+        draw_public_inputs: STANDARD.encode(receipt.draw_public_inputs),
+        completion_proof: STANDARD.encode(receipt.completion_proof),
+        completion_public_inputs: STANDARD.encode(receipt.completion_public_inputs),
+    })
 }
 
 async fn create_room(
@@ -413,10 +503,16 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                     }
                     ClientMessage::ChallengeCommit {
                         hand_no,
-                        tier,
                         commitment,
                     } => {
-                        challenge_room(&state, id, seat, hand_no, tier, &commitment).await
+                        challenge_room(&state, id, seat, hand_no, &commitment).await
+                    }
+                    ClientMessage::ChallengeDraw {
+                        hand_no,
+                        proof,
+                        public_inputs,
+                    } => {
+                        draw_room(&state, id, seat, hand_no, &proof, &public_inputs).await
                     }
                     ClientMessage::ChallengeClaim {
                         hand_no,
@@ -490,7 +586,15 @@ async fn apply_action(
 ) -> Result<(), &'static str> {
     let room = find_room(state, id).await.ok_or("room not found")?;
     let mut room = room.lock().await;
-    let next = room.stage_action(seat, action)?;
+    let mut next = room.stage_action(seat, action)?;
+
+    if next.facts.is_some() {
+        let salts = (0..room.config.players)
+            .map(|_| secure_nonce().map_err(|_| "cannot commit challenge facts"))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        bind_facts(&mut next, &room.current_challenges, salts)?;
+    }
 
     // command commit before state swap
     state
@@ -502,7 +606,7 @@ async fn apply_action(
             seq: next.seq,
             player: next.player,
             action: next.action,
-            facts: next.fact_hashes.as_deref(),
+            facts: next.fact_commitments.as_deref(),
             rev: room.rev,
             next_rev: next.rev,
         })
@@ -517,25 +621,37 @@ async fn challenge_room(
     id: Uuid,
     seat: usize,
     hand_no: u64,
-    tier: u8,
     commitment: &str,
 ) -> Result<(), &'static str> {
     let commitment = decode_hex(commitment).ok_or("invalid challenge commitment")?;
     let room = find_room(state, id).await.ok_or("room not found")?;
     let mut room = room.lock().await;
-    let pending = room.stage_challenge(id, seat, hand_no, tier, commitment)?;
+    let pending = room.stage_challenge(id, seat, hand_no, commitment)?;
 
-    // nonce after commitment validation
+    state
+        .db
+        .commit_challenge(NewChallenge {
+            room: id,
+            hand_no: pending.hand_no,
+            seat: pending.seat,
+            hand_tag: pending.hand_tag,
+            commitment: pending.commitment,
+        })
+        .await
+        .map_err(|_| "cannot persist challenge commitment")?;
+
+    // nonce after durable commitment
     let nonce = secure_nonce().map_err(|_| "cannot assign challenge")?;
     let root = catalog_root();
     let challenge = Challenge {
         hand_no: pending.hand_no,
         seat: pending.seat,
-        tier: pending.tier,
         hand_tag: pending.hand_tag,
         commitment: pending.commitment,
         nonce,
         catalog_root: root,
+        draw_verified: false,
+        facts_salt: None,
         facts_hash: None,
         facts: None,
         nullifier: None,
@@ -544,11 +660,10 @@ async fn challenge_room(
 
     state
         .db
-        .add_challenge(NewChallenge {
+        .assign_challenge(ChallengeEntropy {
             room: id,
             hand_no: pending.hand_no,
             seat: pending.seat,
-            tier: pending.tier,
             hand_tag: pending.hand_tag,
             commitment: pending.commitment,
             nonce,
@@ -570,7 +685,7 @@ async fn claim_room(
     proof: &str,
     public_inputs: &str,
 ) -> Result<(), &'static str> {
-    let proof = decode_claim(proof, public_inputs)?;
+    let proof = decode_proof(proof, public_inputs)?;
     let inputs = proof.inputs;
     let room = find_room(state, id).await.ok_or("room not found")?;
 
@@ -584,7 +699,7 @@ async fn claim_room(
     }
 
     let verifier = state.proof.as_ref().ok_or("proof verifier unavailable")?;
-    let verified = match verifier.verify(proof).await {
+    let verified = match verifier.verify(&proof).await {
         Ok(verified) => verified,
         Err(err) => {
             eprintln!("challenge verify error: {err:?}");
@@ -609,13 +724,15 @@ async fn claim_room(
             room: id,
             hand_no: pending.hand_no,
             seat: pending.seat,
-            tier: pending.tier,
             hand_tag: pending.hand_tag,
             commitment: pending.commitment,
             nonce: pending.nonce,
             catalog_root: pending.catalog_root,
+            facts_salt: pending.facts_salt,
             facts_hash: pending.facts_hash,
             nullifier: inputs.nullifier,
+            proof: proof.proof_bytes,
+            public_inputs: proof.public_input_bytes,
             points: pending.points,
             prior_points: pending.prior_points,
             next_points: pending.next_points,
@@ -628,14 +745,88 @@ async fn claim_room(
     Ok(())
 }
 
-fn claim_matches(inputs: ClaimInputs, claim: PendingClaim) -> bool {
-    usize::from(inputs.seat) == claim.seat
-        && inputs.tier == claim.tier
+async fn draw_room(
+    state: &AppState,
+    id: Uuid,
+    seat: usize,
+    hand_no: u64,
+    proof: &str,
+    public_inputs: &str,
+) -> Result<(), &'static str> {
+    let proof = decode_proof(proof, public_inputs)?;
+    let inputs = proof.inputs;
+    let room = find_room(state, id).await.ok_or("room not found")?;
+
+    {
+        let room = room.lock().await;
+        let pending = room.stage_draw(seat, hand_no)?;
+
+        if !draw_matches(inputs, pending) {
+            return Err("draw proof mismatch");
+        }
+    }
+
+    let verifier = state.proof.as_ref().ok_or("proof verifier unavailable")?;
+    let verified = match verifier.verify(&proof).await {
+        Ok(verified) => verified,
+        Err(err) => {
+            eprintln!("challenge verify error: {err:?}");
+            return Err("cannot verify challenge");
+        }
+    };
+
+    if !verified {
+        return Err("draw proof failed");
+    }
+
+    let mut room = room.lock().await;
+    let pending = room.stage_draw(seat, hand_no)?;
+
+    if !draw_matches(inputs, pending) {
+        return Err("draw proof mismatch");
+    }
+
+    state
+        .db
+        .draw(DrawUpdate {
+            room: id,
+            hand_no: pending.hand_no,
+            seat: pending.seat,
+            hand_tag: pending.hand_tag,
+            commitment: pending.commitment,
+            nonce: pending.nonce,
+            catalog_root: pending.catalog_root,
+            proof: proof.proof_bytes,
+            public_inputs: proof.public_input_bytes,
+            rev: room.rev,
+            next_rev: pending.rev,
+        })
+        .await
+        .map_err(|_| "cannot persist draw proof")?;
+    room.commit_draw(pending);
+    Ok(())
+}
+
+fn draw_matches(inputs: ProofInputs, draw: PendingDraw) -> bool {
+    inputs.mode == MODE_DRAW
+        && usize::from(inputs.seat) == draw.seat
+        && inputs.hand_tag == draw.hand_tag
+        && inputs.commitment == draw.commitment
+        && inputs.nonce == draw.nonce
+        && inputs.catalog_root == draw.catalog_root
+        && inputs.facts_hash == [0; 32]
+        && inputs.nullifier == [0; 32]
+}
+
+fn claim_matches(inputs: ProofInputs, claim: PendingClaim) -> bool {
+    inputs.mode == MODE_COMPLETE
+        && usize::from(inputs.seat) == claim.seat
         && inputs.hand_tag == claim.hand_tag
         && inputs.commitment == claim.commitment
         && inputs.nonce == claim.nonce
         && inputs.catalog_root == claim.catalog_root
         && inputs.facts_hash == claim.facts_hash
+        && inputs.nullifier != [0; 32]
 }
 
 async fn ready_room(state: &AppState, id: Uuid, seat: usize) -> Result<(), &'static str> {
@@ -741,14 +932,15 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
         if let Some(challenge) = room.current_challenges[seat].as_ref() {
             view.claim = challenge
                 .facts
+                .zip(challenge.facts_salt)
                 .zip(challenge.facts_hash)
-                .map(|(facts, hash)| ClaimView {
+                .map(|((facts, salt), hash)| ClaimView {
                     hand_no: challenge.hand_no,
                     hand_tag: encode_hex(challenge.hand_tag),
-                    tier: challenge.tier,
                     commitment: encode_hex(challenge.commitment),
                     nonce: encode_hex(challenge.nonce),
                     catalog_root: encode_hex(challenge.catalog_root),
+                    facts_salt: encode_hex(salt),
                     facts_hash: encode_hex(hash),
                     facts: facts.bytes(),
                     status: if challenge.nullifier.is_some() {
@@ -757,6 +949,7 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
                         "claimable"
                     },
                     points: challenge.points,
+                    nullifier: challenge.nullifier.map(encode_hex),
                 });
         }
     } else if let Some(challenge) = room.current_challenges[seat].as_ref() {
@@ -778,8 +971,8 @@ fn challenge_view(
     ChallengeView {
         hand_no,
         assigned: challenge.is_some(),
+        draw_verified: challenge.is_some_and(|challenge| challenge.draw_verified),
         hand_tag: encode_hex(hand_tag),
-        tier: challenge.map(|challenge| challenge.tier),
         commitment: challenge.map(|challenge| encode_hex(challenge.commitment)),
         nonce: challenge.map(|challenge| encode_hex(challenge.nonce)),
         catalog_root: challenge.map(|challenge| encode_hex(challenge.catalog_root)),
@@ -834,6 +1027,33 @@ fn secure_nonce() -> Result<[u8; 32], getrandom::Error> {
 
     getrandom::fill(&mut nonce)?;
     Ok(nonce)
+}
+
+async fn finish_pending_challenges(
+    db: &Db,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    while let Some(pending) = db.pending_challenge().await? {
+        let nonce = secure_nonce()?;
+        let next_rev = pending
+            .rev
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("revision limit reached"))?;
+
+        db.assign_challenge(ChallengeEntropy {
+            room: pending.room,
+            hand_no: pending.hand_no,
+            seat: pending.seat,
+            hand_tag: pending.hand_tag,
+            commitment: pending.commitment,
+            nonce,
+            catalog_root: catalog_root(),
+            rev: pending.rev,
+            next_rev,
+        })
+        .await?;
+    }
+
+    Ok(())
 }
 
 fn encode_hex(bytes: [u8; 32]) -> String {
@@ -1007,6 +1227,19 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
                         .iter()
                         .chain(&next_challenges)
                         .flatten()
+                        .filter(|challenge| challenge.draw_verified)
+                        .count(),
+                )
+                .ok()?,
+            )
+        })
+        .and_then(|rev| {
+            rev.checked_add(
+                u64::try_from(
+                    current_challenges
+                        .iter()
+                        .chain(&next_challenges)
+                        .flatten()
                         .filter(|challenge| challenge.nullifier.is_some())
                         .count(),
                 )
@@ -1129,13 +1362,8 @@ fn restore_challenges(
 
         let seat = usize::try_from(stored.seat)
             .map_err(|_| recovery_error(id, "invalid challenge seat"))?;
-        let tier =
-            u8::try_from(stored.tier).map_err(|_| recovery_error(id, "invalid challenge tier"))?;
 
-        if seat >= players
-            || stored.version != i32::from(PROTOCOL_VERSION)
-            || (tier != TIER_EASY && tier != TIER_HARD)
-        {
+        if seat >= players || stored.version != i32::from(PROTOCOL_VERSION) {
             return Err(recovery_error(id, "invalid challenge assignment"));
         }
 
@@ -1155,45 +1383,104 @@ fn restore_challenges(
             .catalog_root
             .try_into()
             .map_err(|_| recovery_error(id, "invalid challenge catalog root"))?;
+        let salt = stored
+            .facts_salt
+            .as_deref()
+            .map(|salt| {
+                salt.try_into()
+                    .map_err(|_| recovery_error(id, "invalid challenge facts salt"))
+            })
+            .transpose()?;
         let stored_hash = stored
             .facts_hash
+            .as_deref()
             .map(|hash| {
                 hash.try_into()
                     .map_err(|_| recovery_error(id, "invalid challenge facts hash"))
             })
             .transpose()?;
 
-        if tag != hand_tag(*id.as_bytes(), no) {
+        if tag != hand_tag(*id.as_bytes(), no) || root != catalog_root() {
             return Err(recovery_error(id, "challenge hand tag mismatch"));
+        }
+
+        let draw = match (
+            &stored.draw_proof,
+            &stored.draw_public_inputs,
+            stored.draw_verified,
+        ) {
+            (Some(proof), Some(public), true) => {
+                let proof = decode_bytes(proof.clone(), public.clone())
+                    .map_err(|_| recovery_error(id, "invalid draw proof"))?;
+                let inputs = proof.inputs;
+
+                if inputs.mode != MODE_DRAW
+                    || usize::from(inputs.seat) != seat
+                    || inputs.hand_tag != tag
+                    || inputs.commitment != commitment
+                    || inputs.nonce != nonce
+                    || inputs.catalog_root != root
+                    || inputs.facts_hash != [0; 32]
+                    || inputs.nullifier != [0; 32]
+                {
+                    return Err(recovery_error(id, "draw proof mismatch"));
+                }
+
+                true
+            }
+            (None, None, false) => false,
+            _ => return Err(recovery_error(id, "invalid draw proof")),
+        };
+
+        if salt.is_some() != stored_hash.is_some() {
+            return Err(recovery_error(id, "invalid challenge facts"));
         }
 
         let mut challenge = Challenge {
             hand_no: no,
             seat,
-            tier,
             hand_tag: tag,
             commitment,
             nonce,
             catalog_root: root,
+            draw_verified: draw,
+            facts_salt: salt,
             facts_hash: stored_hash,
             facts: None,
             nullifier: None,
             points: None,
         };
 
-        match (stored.nullifier, stored.points, stored.claimed) {
-            (Some(nullifier), Some(points), true) => {
-                let nullifier = nullifier
+        match (
+            &stored.nullifier,
+            stored.points,
+            &stored.completion_proof,
+            &stored.completion_public_inputs,
+            stored.claimed,
+        ) {
+            (Some(nullifier), Some(points), Some(proof), Some(public), true) => {
+                let nullifier: [u8; 32] = nullifier
+                    .as_slice()
                     .try_into()
                     .map_err(|_| recovery_error(id, "invalid challenge nullifier"))?;
                 let points = u32::try_from(points)
                     .map_err(|_| recovery_error(id, "invalid challenge points"))?;
+                let proof = decode_bytes(proof.clone(), public.clone())
+                    .map_err(|_| recovery_error(id, "invalid completion proof"))?;
+                let inputs = proof.inputs;
 
-                if points
-                    != challenge_points(tier)
-                        .map_err(|_| recovery_error(id, "invalid challenge tier"))?
+                if !draw
+                    || points != u32::from(POINTS)
+                    || inputs.mode != MODE_COMPLETE
+                    || usize::from(inputs.seat) != seat
+                    || inputs.hand_tag != tag
+                    || inputs.commitment != commitment
+                    || inputs.nonce != nonce
+                    || inputs.catalog_root != root
+                    || Some(inputs.facts_hash) != stored_hash
+                    || inputs.nullifier != nullifier
                 {
-                    return Err(recovery_error(id, "invalid challenge points"));
+                    return Err(recovery_error(id, "completion proof mismatch"));
                 }
 
                 challenge.nullifier = Some(nullifier);
@@ -1202,12 +1489,12 @@ fn restore_challenges(
                     .checked_add(u64::from(points))
                     .ok_or_else(|| recovery_error(id, "proof points limit reached"))?;
             }
-            (None, None, false) => {}
+            (None, None, None, None, false) => {}
             _ => return Err(recovery_error(id, "invalid challenge claim")),
         }
 
         if no < hand.no {
-            if stored_hash.is_none() {
+            if !draw || salt.is_none() || stored_hash.is_none() {
                 return Err(recovery_error(id, "invalid historical challenge"));
             }
 
@@ -1215,13 +1502,13 @@ fn restore_challenges(
         }
 
         if no == hand.no {
-            if hand.no == 0 || current[seat].is_some() {
+            if hand.no == 0 || !draw || current[seat].is_some() {
                 return Err(recovery_error(id, "invalid current challenge"));
             }
 
-            match (hand.game.settled, facts, stored_hash) {
-                (true, Some(facts), Some(stored_hash)) => {
-                    let expected = facts_hash(tag, seat as u8, facts[seat]);
+            match (hand.game.settled, facts, salt, stored_hash) {
+                (true, Some(facts), Some(salt), Some(stored_hash)) => {
+                    let expected = facts_hash(tag, seat as u8, salt, facts[seat]);
 
                     if stored_hash != expected {
                         return Err(recovery_error(id, "challenge facts hash mismatch"));
@@ -1229,13 +1516,14 @@ fn restore_challenges(
 
                     challenge.facts = Some(facts[seat]);
                 }
-                (false, _, None) if challenge.nullifier.is_none() => {}
+                (false, _, None, None) if challenge.nullifier.is_none() => {}
                 _ => return Err(recovery_error(id, "invalid challenge facts")),
             }
 
             current[seat] = Some(challenge);
         } else {
             if !hand.game.settled
+                || salt.is_some()
                 || stored_hash.is_some()
                 || challenge.nullifier.is_some()
                 || next[seat].is_some()
@@ -1451,19 +1739,20 @@ mod tests {
         }
     }
 
-    fn assign(room: &mut Room, id: Uuid, seat: usize, tier: u8) {
+    fn assign(room: &mut Room, id: Uuid, seat: usize) {
         let hand_no = room.hand.as_ref().unwrap().no + 1;
         let pending = room
-            .stage_challenge(id, seat, hand_no, tier, [seat as u8 + 1; 32])
+            .stage_challenge(id, seat, hand_no, [seat as u8 + 1; 32])
             .unwrap();
         let challenge = Challenge {
             hand_no,
             seat,
-            tier,
             hand_tag: pending.hand_tag,
             commitment: pending.commitment,
             nonce: [seat as u8 + 7; 32],
             catalog_root: catalog_root(),
+            draw_verified: true,
+            facts_salt: None,
             facts_hash: None,
             facts: None,
             nullifier: None,
@@ -1475,7 +1764,7 @@ mod tests {
 
     fn assign_all(room: &mut Room, id: Uuid) {
         for seat in 0..room.seats.len() {
-            assign(room, id, seat, TIER_EASY);
+            assign(room, id, seat);
         }
     }
 
@@ -1489,11 +1778,12 @@ mod tests {
             room.current_challenges[seat] = Some(Challenge {
                 hand_no: 1,
                 seat,
-                tier: if seat == 0 { TIER_EASY } else { TIER_HARD },
                 hand_tag: hand_tag(*TEST_ROOM.as_bytes(), 1),
                 commitment: [seat as u8 + 1; 32],
                 nonce: [seat as u8 + 7; 32],
                 catalog_root: catalog_root(),
+                draw_verified: true,
+                facts_salt: None,
                 facts_hash: None,
                 facts: None,
                 nullifier: None,
@@ -1506,7 +1796,15 @@ mod tests {
     }
 
     fn apply(room: &mut Room, seat: usize, action: Action) -> Result<(), &'static str> {
-        let next = room.stage_action(seat, action)?;
+        let mut next = room.stage_action(seat, action)?;
+
+        if next.facts.is_some() {
+            bind_facts(
+                &mut next,
+                &room.current_challenges,
+                vec![[0x55; 32]; room.config.players],
+            )?;
+        }
 
         room.commit_action(next);
         Ok(())
@@ -1546,6 +1844,58 @@ mod tests {
         }
     }
 
+    fn proof_parts(inputs: ProofInputs) -> (Vec<u8>, Vec<u8>) {
+        let mut public = Vec::with_capacity(crate::proof::PUBLIC_BYTES);
+
+        for byte in [inputs.mode]
+            .into_iter()
+            .chain(inputs.hand_tag)
+            .chain([inputs.seat])
+            .chain(inputs.commitment)
+            .chain(inputs.nonce)
+            .chain(inputs.facts_hash)
+            .chain(inputs.nullifier)
+            .chain(inputs.catalog_root)
+        {
+            public.extend_from_slice(&[0; 31]);
+            public.push(byte);
+        }
+
+        (vec![0; 32], public)
+    }
+
+    async fn persist_draw(db: &Db, room_id: Uuid, room: &mut Room, seat: usize) {
+        let hand_no = room.hand.as_ref().unwrap().no + 1;
+        let draw = room.stage_draw(seat, hand_no).unwrap();
+        let (proof, public_inputs) = proof_parts(ProofInputs {
+            mode: MODE_DRAW,
+            hand_tag: draw.hand_tag,
+            seat: draw.seat as u8,
+            commitment: draw.commitment,
+            nonce: draw.nonce,
+            facts_hash: [0; 32],
+            nullifier: [0; 32],
+            catalog_root: draw.catalog_root,
+        });
+
+        db.draw(DrawUpdate {
+            room: room_id,
+            hand_no: draw.hand_no,
+            seat: draw.seat,
+            hand_tag: draw.hand_tag,
+            commitment: draw.commitment,
+            nonce: draw.nonce,
+            catalog_root: draw.catalog_root,
+            proof,
+            public_inputs,
+            rev: room.rev,
+            next_rev: draw.rev,
+        })
+        .await
+        .unwrap();
+        room.commit_draw(draw);
+    }
+
     fn same_game(actual: &State, expected: &State) {
         assert_eq!(actual.players, expected.players);
         assert_eq!(actual.hole, expected.hole);
@@ -1580,7 +1930,16 @@ mod tests {
     }
 
     async fn persist(db: &Db, id: Uuid, room: &mut Room, seat: usize, action: Action) {
-        let next = room.stage_action(seat, action).unwrap();
+        let mut next = room.stage_action(seat, action).unwrap();
+
+        if next.facts.is_some() {
+            bind_facts(
+                &mut next,
+                &room.current_challenges,
+                vec![[0x55; 32]; room.config.players],
+            )
+            .unwrap();
+        }
 
         db.append_action(NewAction {
             room: id,
@@ -1589,7 +1948,7 @@ mod tests {
             seq: next.seq,
             player: next.player,
             action: next.action,
-            facts: next.fact_hashes.as_deref(),
+            facts: next.fact_commitments.as_deref(),
             rev: room.rev,
             next_rev: next.rev,
         })
@@ -2003,7 +2362,7 @@ mod tests {
 
         assert_eq!(room.stage_ready(0).err(), Some("hand not settled"));
         apply(&mut room, 0, Action::Fold).unwrap();
-        assert_eq!(room.stage_ready(0).err(), Some("challenge required"));
+        assert_eq!(room.stage_ready(0).err(), Some("draw proof required"));
         assign_all(&mut room, TEST_ROOM);
 
         let ready = room.stage_ready(0).unwrap();
@@ -2030,27 +2389,19 @@ mod tests {
         let mut room = started(100);
 
         assert_eq!(
-            room.stage_challenge(TEST_ROOM, 0, 1, TIER_EASY, [1; 32])
-                .err(),
+            room.stage_challenge(TEST_ROOM, 0, 1, [1; 32]).err(),
             Some("hand not settled")
         );
         apply(&mut room, 0, Action::Fold).unwrap();
         assert_eq!(
-            room.stage_challenge(TEST_ROOM, 0, 2, TIER_EASY, [1; 32])
-                .err(),
+            room.stage_challenge(TEST_ROOM, 0, 2, [1; 32]).err(),
             Some("wrong challenge hand")
         );
-        assert_eq!(
-            room.stage_challenge(TEST_ROOM, 0, 1, 2, [1; 32]).err(),
-            Some("invalid challenge tier")
-        );
-
-        assign(&mut room, TEST_ROOM, 0, TIER_EASY);
-        assign(&mut room, TEST_ROOM, 1, TIER_HARD);
+        assign(&mut room, TEST_ROOM, 0);
+        assign(&mut room, TEST_ROOM, 1);
 
         assert_eq!(
-            room.stage_challenge(TEST_ROOM, 0, 1, TIER_HARD, [9; 32])
-                .err(),
+            room.stage_challenge(TEST_ROOM, 0, 1, [9; 32]).err(),
             Some("challenge already assigned")
         );
 
@@ -2063,8 +2414,8 @@ mod tests {
 
         assert!(first.assigned);
         assert!(second.assigned);
-        assert_eq!(first.tier, Some(TIER_EASY));
-        assert_eq!(second.tier, Some(TIER_HARD));
+        assert!(first.draw_verified);
+        assert!(second.draw_verified);
         assert_eq!(first.catalog_root, Some(encode_hex(catalog_root())));
         assert_eq!(second.catalog_root, Some(encode_hex(catalog_root())));
         assert_ne!(first.commitment, second.commitment);
@@ -2078,14 +2429,13 @@ mod tests {
     #[test]
     fn challenge_message() {
         let value = "11".repeat(32);
-        let valid = format!(
-            "{{\"type\":\"challenge_commit\",\"hand_no\":1,\"tier\":0,\"commitment\":\"{value}\"}}"
-        );
+        let valid =
+            format!("{{\"type\":\"challenge_commit\",\"hand_no\":1,\"commitment\":\"{value}\"}}");
         let secret = format!(
-            "{{\"type\":\"challenge_commit\",\"hand_no\":1,\"tier\":0,\"commitment\":\"{value}\",\"secret\":\"{value}\"}}"
+            "{{\"type\":\"challenge_commit\",\"hand_no\":1,\"commitment\":\"{value}\",\"secret\":\"{value}\"}}"
         );
         let index = format!(
-            "{{\"type\":\"challenge_commit\",\"hand_no\":1,\"tier\":0,\"commitment\":\"{value}\",\"objective_index\":2}}"
+            "{{\"type\":\"challenge_commit\",\"hand_no\":1,\"commitment\":\"{value}\",\"objective_index\":2}}"
         );
 
         assert!(serde_json::from_str::<ClientMessage>(&valid).is_ok());
@@ -2096,14 +2446,60 @@ mod tests {
         assert!(decode_hex(&"aa".repeat(32).to_uppercase()).is_none());
 
         let claim = "{\"type\":\"challenge_claim\",\"hand_no\":1,\"proof\":\"AA==\",\"public_inputs\":\"AA==\"}";
+        let draw = "{\"type\":\"challenge_draw\",\"hand_no\":1,\"proof\":\"AA==\",\"public_inputs\":\"AA==\"}";
         let facts = "{\"type\":\"challenge_claim\",\"hand_no\":1,\"proof\":\"AA==\",\"public_inputs\":\"AA==\",\"facts\":[1,0,0,0,0,0]}";
         let secret = format!(
             "{{\"type\":\"challenge_claim\",\"hand_no\":1,\"proof\":\"AA==\",\"public_inputs\":\"AA==\",\"secret\":\"{value}\"}}"
         );
 
         assert!(serde_json::from_str::<ClientMessage>(claim).is_ok());
+        assert!(serde_json::from_str::<ClientMessage>(draw).is_ok());
         assert!(serde_json::from_str::<ClientMessage>(facts).is_err());
         assert!(serde_json::from_str::<ClientMessage>(&secret).is_err());
+    }
+
+    #[test]
+    fn draw_rules() {
+        let mut room = started(100);
+
+        apply(&mut room, 0, Action::Fold).unwrap();
+        let pending = room.stage_challenge(TEST_ROOM, 0, 1, [1; 32]).unwrap();
+        room.commit_challenge(
+            Challenge {
+                hand_no: 1,
+                seat: 0,
+                hand_tag: pending.hand_tag,
+                commitment: pending.commitment,
+                nonce: [7; 32],
+                catalog_root: catalog_root(),
+                draw_verified: false,
+                facts_salt: None,
+                facts_hash: None,
+                facts: None,
+                nullifier: None,
+                points: None,
+            },
+            pending.rev,
+        );
+
+        assert_eq!(room.stage_ready(0).err(), Some("draw proof required"));
+        let draw = room.stage_draw(0, 1).unwrap();
+        let mut inputs = ProofInputs {
+            mode: MODE_DRAW,
+            hand_tag: draw.hand_tag,
+            seat: 0,
+            commitment: draw.commitment,
+            nonce: draw.nonce,
+            facts_hash: [0; 32],
+            nullifier: [0; 32],
+            catalog_root: draw.catalog_root,
+        };
+
+        assert!(draw_matches(inputs, draw));
+        inputs.facts_hash[0] = 1;
+        assert!(!draw_matches(inputs, draw));
+        room.commit_draw(draw);
+        assert_eq!(room.stage_draw(0, 1).err(), Some("draw already verified"));
     }
 
     #[test]
@@ -2115,10 +2511,10 @@ mod tests {
         let mut room = claimable_room();
         let claim = room.stage_claim(0, 1).unwrap();
         let challenge = room.current_challenges[0].as_ref().unwrap();
-        let inputs = ClaimInputs {
+        let inputs = ProofInputs {
+            mode: MODE_COMPLETE,
             hand_tag: challenge.hand_tag,
             seat: 0,
-            tier: challenge.tier,
             commitment: challenge.commitment,
             nonce: challenge.nonce,
             facts_hash: challenge.facts_hash.unwrap(),
@@ -2127,9 +2523,9 @@ mod tests {
         };
 
         assert!(claim_matches(inputs, claim));
-        assert_eq!(claim.points, 10);
+        assert_eq!(claim.points, u32::from(POINTS));
         room.commit_claim(claim, inputs.nullifier);
-        assert_eq!(room.seats[0].proof_points, 10);
+        assert_eq!(room.seats[0].proof_points, u64::from(POINTS));
         assert_eq!(room.seats[1].proof_points, 0);
         assert_eq!(
             room.stage_claim(0, 1).err(),
@@ -2143,18 +2539,18 @@ mod tests {
             view.claim.as_ref().unwrap().catalog_root,
             encode_hex(catalog_root())
         );
-        assert_eq!(view.claim.unwrap().points, Some(10));
-        assert_eq!(view.players[0].proof_points, 10);
+        assert_eq!(view.claim.unwrap().points, Some(u32::from(POINTS)));
+        assert_eq!(view.players[0].proof_points, u64::from(POINTS));
     }
 
     #[test]
     fn claim_metadata() {
         let room = claimable_room();
         let claim = room.stage_claim(0, 1).unwrap();
-        let mut inputs = ClaimInputs {
+        let mut inputs = ProofInputs {
+            mode: MODE_COMPLETE,
             hand_tag: claim.hand_tag,
             seat: 0,
-            tier: claim.tier,
             commitment: claim.commitment,
             nonce: claim.nonce,
             facts_hash: claim.facts_hash,
@@ -2170,9 +2566,9 @@ mod tests {
         inputs.seat = 1;
         assert!(!claim_matches(inputs, claim));
         inputs.seat = 0;
-        inputs.tier ^= 1;
+        inputs.mode = MODE_DRAW;
         assert!(!claim_matches(inputs, claim));
-        inputs.tier = claim.tier;
+        inputs.mode = MODE_COMPLETE;
         inputs.commitment[0] ^= 1;
         assert!(!claim_matches(inputs, claim));
         inputs.commitment = claim.commitment;
@@ -2307,7 +2703,7 @@ mod tests {
             action: "fold".to_owned(),
             raise_to: None,
         });
-        stored.rev = 4;
+        stored.rev = 6;
         let (_, result, facts) = replay_hand(
             config(2),
             SEED,
@@ -2322,18 +2718,38 @@ mod tests {
         let tag = hand_tag(*TEST_ROOM.as_bytes(), 1);
 
         for seat in 0..2 {
+            let commitment = [seat as u8 + 1; 32];
+            let nonce = [seat as u8 + 7; 32];
+            let salt = [0x55; 32];
+            let hash = facts_hash(tag, seat as u8, salt, facts[seat as usize]);
+            let (draw_proof, draw_public_inputs) = proof_parts(ProofInputs {
+                mode: MODE_DRAW,
+                hand_tag: tag,
+                seat: seat as u8,
+                commitment,
+                nonce,
+                facts_hash: [0; 32],
+                nullifier: [0; 32],
+                catalog_root: catalog_root(),
+            });
+
             stored.challenges.push(StoredChallenge {
                 hand_no: 1,
                 seat,
                 version: i32::from(PROTOCOL_VERSION),
-                tier: i32::from(TIER_EASY),
                 hand_tag: tag.to_vec(),
-                commitment: vec![seat as u8 + 1; 32],
-                nonce: vec![seat as u8 + 7; 32],
+                commitment: commitment.to_vec(),
+                nonce: nonce.to_vec(),
                 catalog_root: catalog_root().to_vec(),
-                facts_hash: Some(facts_hash(tag, seat as u8, facts[seat as usize]).to_vec()),
+                draw_proof: Some(draw_proof),
+                draw_public_inputs: Some(draw_public_inputs),
+                draw_verified: true,
+                facts_salt: Some(salt.to_vec()),
+                facts_hash: Some(hash.to_vec()),
                 nullifier: None,
                 points: None,
+                completion_proof: None,
+                completion_public_inputs: None,
                 claimed: false,
             });
         }
@@ -2648,7 +3064,7 @@ mod tests {
                 seq: next.seq,
                 player: next.player,
                 action: next.action,
-                facts: next.fact_hashes.as_deref(),
+                facts: next.fact_commitments.as_deref(),
                 rev: rev + 1,
                 next_rev: next.rev,
             })
@@ -2881,25 +3297,6 @@ mod tests {
         .await
         .unwrap();
 
-        let latest_tag = hand_tag(*all_in_id.as_bytes(), 1);
-
-        for seat in 0..2i32 {
-            sqlx::query(
-                "INSERT INTO challenge_assignments \
-                 (room_id, hand_no, seat, version, tier, hand_tag, commitment, nonce, catalog_root) \
-                 VALUES ($1, 1, $2, 1, 0, $3, $4, $5, $6)",
-            )
-            .bind(all_in_id)
-            .bind(seat)
-            .bind(latest_tag.as_slice())
-            .bind(vec![seat as u8 + 1; 32])
-            .bind(vec![seat as u8 + 7; 32])
-            .bind(catalog_root().as_slice())
-            .execute(db.pool())
-            .await
-            .unwrap();
-        }
-
         let restored = reload(&db, all_in_id).await;
         let restored_hand = restored.hand.as_ref().unwrap();
         let expected = State::new(latest_seed, 1, &[100, 100], 5, 10);
@@ -2973,29 +3370,28 @@ mod tests {
             .unwrap();
         assert_eq!(
             ready_room(&ready_state, ready_id, 0).await,
-            Err("challenge required")
+            Err("draw proof required")
         );
         let first_commitment = encode_hex([1; 32]);
         let second_commitment = encode_hex([2; 32]);
 
-        challenge_room(&ready_state, ready_id, 0, 1, TIER_EASY, &first_commitment)
+        challenge_room(&ready_state, ready_id, 0, 1, &first_commitment)
             .await
             .unwrap();
-        challenge_room(&ready_state, ready_id, 1, 1, TIER_HARD, &second_commitment)
+        challenge_room(&ready_state, ready_id, 1, 1, &second_commitment)
             .await
             .unwrap();
         assert_eq!(
-            challenge_room(
-                &ready_state,
-                ready_id,
-                0,
-                1,
-                TIER_HARD,
-                &encode_hex([9; 32]),
-            )
-            .await,
+            challenge_room(&ready_state, ready_id, 0, 1, &encode_hex([9; 32]),).await,
             Err("challenge already assigned")
         );
+        {
+            let live = find_room(&ready_state, ready_id).await.unwrap();
+            let mut room = live.lock().await;
+
+            persist_draw(&db, ready_id, &mut room, 0).await;
+            persist_draw(&db, ready_id, &mut room, 1).await;
+        }
         ready_room(&ready_state, ready_id, 0).await.unwrap();
 
         let rev = sqlx::query("SELECT rev FROM rooms WHERE id = $1")
@@ -3005,9 +3401,9 @@ mod tests {
             .unwrap()
             .get::<i64, _>("rev");
 
-        assert_eq!(rev, 5);
+        assert_eq!(rev, 7);
         let assignments = sqlx::query(
-            "SELECT hand_no, seat, version, tier, hand_tag, commitment, nonce, catalog_root, facts_hash \
+            "SELECT hand_no, seat, version, hand_tag, commitment, nonce, catalog_root, facts_hash \
              FROM challenge_assignments WHERE room_id = $1 ORDER BY seat",
         )
         .bind(ready_id)
@@ -3018,8 +3414,7 @@ mod tests {
         assert_eq!(assignments.len(), 2);
         assert_eq!(assignments[0].get::<i64, _>("hand_no"), 1);
         assert_eq!(assignments[0].get::<i32, _>("seat"), 0);
-        assert_eq!(assignments[1].get::<i32, _>("tier"), i32::from(TIER_HARD));
-        assert_eq!(assignments[0].get::<i32, _>("version"), 1);
+        assert_eq!(assignments[0].get::<i32, _>("version"), 2);
         assert_eq!(
             assignments[0].get::<Vec<u8>, _>("hand_tag"),
             hand_tag(*ready_id.as_bytes(), 1)
@@ -3070,7 +3465,7 @@ mod tests {
         assert!(first_ready.mine);
         assert!(!second_ready.mine);
         assert_eq!(first_ready.count, 1);
-        assert_eq!(restored.rev, 5);
+        assert_eq!(restored.rev, 7);
         assert_eq!(
             restored.next_challenges[0].as_ref().unwrap().nonce,
             first_nonce.as_slice()
@@ -3214,18 +3609,30 @@ mod tests {
         let mut room = live.lock().await;
         let claim = room.stage_claim(0, 1).unwrap();
         let nullifier = [0x91; 32];
+        let (proof, public_inputs) = proof_parts(ProofInputs {
+            mode: MODE_COMPLETE,
+            hand_tag: claim.hand_tag,
+            seat: claim.seat as u8,
+            commitment: claim.commitment,
+            nonce: claim.nonce,
+            facts_hash: claim.facts_hash,
+            nullifier,
+            catalog_root: claim.catalog_root,
+        });
 
         db.claim(ClaimUpdate {
             room: ready_id,
             hand_no: claim.hand_no,
             seat: claim.seat,
-            tier: claim.tier,
             hand_tag: claim.hand_tag,
             commitment: claim.commitment,
             nonce: claim.nonce,
             catalog_root: claim.catalog_root,
+            facts_salt: claim.facts_salt,
             facts_hash: claim.facts_hash,
             nullifier,
+            proof,
+            public_inputs,
             points: claim.points,
             prior_points: claim.prior_points,
             next_points: claim.next_points,
@@ -3236,26 +3643,38 @@ mod tests {
         .unwrap();
         room.commit_claim(claim, nullifier);
 
-        assert_eq!(room.seats[0].proof_points, 10);
+        assert_eq!(room.seats[0].proof_points, u64::from(POINTS));
         assert_eq!(
             room.stage_claim(0, 1).err(),
             Some("challenge already claimed")
         );
         let other = room.stage_claim(1, 1).unwrap();
         let rev = room.rev;
+        let (proof, public_inputs) = proof_parts(ProofInputs {
+            mode: MODE_COMPLETE,
+            hand_tag: other.hand_tag,
+            seat: other.seat as u8,
+            commitment: other.commitment,
+            nonce: other.nonce,
+            facts_hash: other.facts_hash,
+            nullifier,
+            catalog_root: other.catalog_root,
+        });
 
         assert!(
             db.claim(ClaimUpdate {
                 room: ready_id,
                 hand_no: other.hand_no,
                 seat: other.seat,
-                tier: other.tier,
                 hand_tag: other.hand_tag,
                 commitment: other.commitment,
                 nonce: other.nonce,
                 catalog_root: other.catalog_root,
+                facts_salt: other.facts_salt,
                 facts_hash: other.facts_hash,
                 nullifier,
+                proof,
+                public_inputs,
                 points: other.points,
                 prior_points: other.prior_points,
                 next_points: other.next_points,
@@ -3279,7 +3698,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(row.get::<Vec<u8>, _>("nullifier"), nullifier);
-        assert_eq!(row.get::<i64, _>("points"), 10);
+        assert_eq!(row.get::<i64, _>("points"), i64::from(POINTS));
         assert!(row.get::<bool, _>("claimed"));
         assert!(
             sqlx::query(
@@ -3300,12 +3719,12 @@ mod tests {
                 .await
                 .unwrap()
                 .get::<i64, _>("proof_points"),
-            10
+            i64::from(POINTS)
         );
 
         let restored = reload(&db, ready_id).await;
 
-        assert_eq!(restored.seats[0].proof_points, 10);
+        assert_eq!(restored.seats[0].proof_points, u64::from(POINTS));
         assert_eq!(
             restored.current_challenges[0].as_ref().unwrap().nullifier,
             Some(nullifier)
@@ -3352,26 +3771,19 @@ mod tests {
         .await
         .unwrap();
 
-        challenge_room(
-            &ready_state,
-            ready_id,
-            0,
-            2,
-            TIER_EASY,
-            &encode_hex([3; 32]),
-        )
-        .await
-        .unwrap();
-        challenge_room(
-            &ready_state,
-            ready_id,
-            1,
-            2,
-            TIER_HARD,
-            &encode_hex([4; 32]),
-        )
-        .await
-        .unwrap();
+        challenge_room(&ready_state, ready_id, 0, 2, &encode_hex([3; 32]))
+            .await
+            .unwrap();
+        challenge_room(&ready_state, ready_id, 1, 2, &encode_hex([4; 32]))
+            .await
+            .unwrap();
+        {
+            let live = find_room(&ready_state, ready_id).await.unwrap();
+            let mut room = live.lock().await;
+
+            persist_draw(&db, ready_id, &mut room, 0).await;
+            persist_draw(&db, ready_id, &mut room, 1).await;
+        }
         let (first, second) = tokio::join!(
             ready_room(&ready_state, ready_id, 0),
             ready_room(&ready_state, ready_id, 1)
@@ -3439,26 +3851,19 @@ mod tests {
         apply_action(&short_state, short_id, 0, Action::Fold)
             .await
             .unwrap();
-        challenge_room(
-            &short_state,
-            short_id,
-            0,
-            1,
-            TIER_EASY,
-            &encode_hex([5; 32]),
-        )
-        .await
-        .unwrap();
-        challenge_room(
-            &short_state,
-            short_id,
-            1,
-            1,
-            TIER_HARD,
-            &encode_hex([6; 32]),
-        )
-        .await
-        .unwrap();
+        challenge_room(&short_state, short_id, 0, 1, &encode_hex([5; 32]))
+            .await
+            .unwrap();
+        challenge_room(&short_state, short_id, 1, 1, &encode_hex([6; 32]))
+            .await
+            .unwrap();
+        {
+            let live = find_room(&short_state, short_id).await.unwrap();
+            let mut room = live.lock().await;
+
+            persist_draw(&db, short_id, &mut room, 0).await;
+            persist_draw(&db, short_id, &mut room, 1).await;
+        }
         ready_room(&short_state, short_id, 0).await.unwrap();
         ready_room(&short_state, short_id, 1).await.unwrap();
 
@@ -3520,6 +3925,8 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         let proof = value["proof"].as_str().unwrap();
         let public = value["public_inputs"].as_str().unwrap();
+        let draw_proof = value["draw"]["proof"].as_str().unwrap();
+        let draw_public = value["draw"]["public_inputs"].as_str().unwrap();
         let config = config(3);
         let id = Uuid::new_v4();
         let hand_id = Uuid::new_v4();
@@ -3558,16 +3965,36 @@ mod tests {
 
         let tag = [0x11; 32];
         let commitment =
-            decode_hex("8db3780236f50489de3c16f2a7a06996f5239ffef4572abdf0234e89aefda674").unwrap();
+            decode_hex("2bc670e96587a294cd84d516fc5bca12c27475f24acfbd265c92fc1cde2c98b6").unwrap();
         let nonce = [0x33; 32];
+        let salt = [0x44; 32];
         let fact_hash =
-            decode_hex("cdc4ad0d044f42a722aca8076bd3d8cdcacae3c49df34d84f45f481683592a23").unwrap();
+            decode_hex("219fdf285ea291ee6e2c065fca84f58eac0bbe38c6f87614df3e5db01d753104").unwrap();
 
-        db.add_challenge(NewChallenge {
+        db.commit_challenge(NewChallenge {
             room: id,
             hand_no: 1,
             seat: 2,
-            tier: TIER_EASY,
+            hand_tag: tag,
+            commitment,
+        })
+        .await
+        .unwrap();
+        assert!(
+            sqlx::query(
+                "SELECT nonce IS NULL AS pending FROM challenge_assignments \
+                 WHERE room_id = $1 AND hand_no = 1 AND seat = 2",
+            )
+            .bind(id)
+            .fetch_one(db.pool())
+            .await
+            .unwrap()
+            .get::<bool, _>("pending")
+        );
+        db.assign_challenge(ChallengeEntropy {
+            room: id,
+            hand_no: 1,
+            seat: 2,
             hand_tag: tag,
             commitment,
             nonce,
@@ -3577,13 +4004,31 @@ mod tests {
         })
         .await
         .unwrap();
+        let draw = decode_proof(draw_proof, draw_public).unwrap();
+
+        db.draw(DrawUpdate {
+            room: id,
+            hand_no: 1,
+            seat: 2,
+            hand_tag: tag,
+            commitment,
+            nonce,
+            catalog_root: catalog_root(),
+            proof: draw.proof_bytes,
+            public_inputs: draw.public_input_bytes,
+            rev: 3,
+            next_rev: 4,
+        })
+        .await
+        .unwrap();
         sqlx::query(
-            "UPDATE challenge_assignments SET facts_hash = $4 \
+            "UPDATE challenge_assignments SET facts_salt = $4, facts_hash = $5 \
              WHERE room_id = $1 AND hand_no = $2 AND seat = $3",
         )
         .bind(id)
         .bind(1i64)
         .bind(2i32)
+        .bind(salt.as_slice())
         .bind(fact_hash.as_slice())
         .execute(db.pool())
         .await
@@ -3598,11 +4043,12 @@ mod tests {
         room.current_challenges[2] = Some(Challenge {
             hand_no: 1,
             seat: 2,
-            tier: TIER_EASY,
             hand_tag: tag,
             commitment,
             nonce,
             catalog_root: catalog_root(),
+            draw_verified: true,
+            facts_salt: Some(salt),
             facts_hash: Some(fact_hash),
             facts: Some(Facts {
                 saw_flop: true,
@@ -3615,11 +4061,11 @@ mod tests {
             nullifier: None,
             points: None,
         });
-        room.rev = 3;
+        room.rev = 4;
 
         let verifier = ProofVerifier::load(
             bb,
-            concat!(env!("CARGO_MANIFEST_DIR"), "/zk/challenge_v1.vk"),
+            concat!(env!("CARGO_MANIFEST_DIR"), "/zk/challenge_v2.vk"),
         )
         .unwrap();
         let mut rooms = HashMap::new();
@@ -3627,7 +4073,7 @@ mod tests {
         let state = AppState::new(db.clone(), rooms, verifier);
         let mut wrong_public = STANDARD.decode(public).unwrap();
 
-        wrong_public[31] ^= 1;
+        wrong_public[32 + 31] ^= 1;
 
         assert_eq!(
             claim_room(&state, id, 2, 1, proof, &STANDARD.encode(wrong_public)).await,
@@ -3664,7 +4110,7 @@ mod tests {
                 .await
                 .unwrap()
                 .get::<i64, _>("rev"),
-            3
+            4
         );
         assert!(
             sqlx::query(
@@ -3684,8 +4130,8 @@ mod tests {
         let room = find_room(&state, id).await.unwrap();
         let room = room.lock().await;
 
-        assert_eq!(room.rev, 4);
-        assert_eq!(room.seats[2].proof_points, 10);
+        assert_eq!(room.rev, 5);
+        assert_eq!(room.seats[2].proof_points, u64::from(POINTS));
         drop(room);
         assert_eq!(
             claim_room(&state, id, 2, 1, proof, public).await,
@@ -3698,8 +4144,19 @@ mod tests {
                 .await
                 .unwrap()
                 .get::<i64, _>("proof_points"),
-            10
+            i64::from(POINTS)
         );
+        let nullifier =
+            decode_hex("15978f5f3c49bc3521ee3e1dc8d43ab00428ad899aa105db3a4ec825cc26d77a").unwrap();
+        let receipt = receipt_view(db.proof_receipt(&nullifier).await.unwrap().unwrap()).unwrap();
+        let receipt = serde_json::to_value(receipt).unwrap();
+
+        assert_eq!(receipt["points"], u32::from(POINTS));
+        assert!(receipt["draw_proof"].as_str().unwrap().len() > 100);
+        assert!(receipt["completion_proof"].as_str().unwrap().len() > 100);
+        assert!(receipt.get("secret").is_none());
+        assert!(receipt.get("facts_salt").is_none());
+        assert!(receipt.get("facts").is_none());
         assert_eq!(
             sqlx::query(
                 "SELECT COUNT(*) AS count FROM information_schema.columns \

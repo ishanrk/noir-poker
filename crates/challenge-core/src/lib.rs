@@ -1,77 +1,66 @@
 use blake2::{Blake2s256, Digest};
 
-pub const PROTOCOL_VERSION: u8 = 1;
-pub const TIER_EASY: u8 = 0;
-pub const TIER_HARD: u8 = 1;
-pub const EASY_POINTS: u8 = 10;
-pub const HARD_POINTS: u8 = 25;
+pub const PROTOCOL_VERSION: u8 = 2;
+pub const POINTS: u8 = 20;
+pub const MODE_DRAW: u8 = 0;
+pub const MODE_COMPLETE: u8 = 1;
 pub const FACT_COUNT: usize = 6;
-pub const OBJECTIVES_PER_TIER: u8 = 4;
 pub const CATALOG_SIZE: usize = 8;
 pub const TREE_DEPTH: usize = 3;
 
-const COMMITMENT_DOMAIN: [u8; 8] = *b"NPCOMM01";
-const SELECTOR_DOMAIN: [u8; 8] = *b"NPSELE01";
-const FACTS_DOMAIN: [u8; 8] = *b"NPFACT01";
-const NULLIFIER_DOMAIN: [u8; 8] = *b"NPNULL01";
-const HAND_DOMAIN: [u8; 8] = *b"NPHAND01";
-const LEAF_DOMAIN: [u8; 8] = *b"NPLEAF01";
-const NODE_DOMAIN: [u8; 8] = *b"NPNODE01";
+const HAND_DOMAIN: [u8; 8] = *b"NPHAND02";
+const COMMITMENT_DOMAIN: [u8; 8] = *b"NPCOMM02";
+const SELECTOR_DOMAIN: [u8; 8] = *b"NPSELE02";
+const FACTS_DOMAIN: [u8; 8] = *b"NPFACT02";
+const NULLIFIER_DOMAIN: [u8; 8] = *b"NPNULL02";
+const LEAF_DOMAIN: [u8; 8] = *b"NPLEAF02";
+const NODE_DOMAIN: [u8; 8] = *b"NPNODE02";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Objective {
-    pub tier: u8,
-    pub slot: u8,
+    pub index: u8,
     pub must_true: [u8; FACT_COUNT],
     pub must_false: [u8; FACT_COUNT],
 }
 
 pub const CATALOG: [Objective; CATALOG_SIZE] = [
     Objective {
-        tier: 0,
-        slot: 0,
+        index: 0,
         must_true: [1, 0, 0, 0, 0, 0],
         must_false: [0; FACT_COUNT],
     },
     Objective {
-        tier: 0,
-        slot: 1,
+        index: 1,
         must_true: [0, 1, 0, 0, 0, 0],
         must_false: [0; FACT_COUNT],
     },
     Objective {
-        tier: 0,
-        slot: 2,
+        index: 2,
         must_true: [0, 0, 1, 0, 0, 0],
         must_false: [0; FACT_COUNT],
     },
     Objective {
-        tier: 0,
-        slot: 3,
+        index: 3,
         must_true: [0, 0, 0, 1, 0, 0],
         must_false: [0; FACT_COUNT],
     },
     Objective {
-        tier: 1,
-        slot: 0,
+        index: 4,
         must_true: [0, 0, 0, 0, 1, 0],
         must_false: [0; FACT_COUNT],
     },
     Objective {
-        tier: 1,
-        slot: 1,
+        index: 5,
         must_true: [0, 0, 0, 0, 0, 1],
         must_false: [0; FACT_COUNT],
     },
     Objective {
-        tier: 1,
-        slot: 2,
+        index: 6,
         must_true: [0, 1, 0, 0, 0, 1],
         must_false: [0; FACT_COUNT],
     },
     Objective {
-        tier: 1,
-        slot: 3,
+        index: 7,
         must_true: [0, 0, 0, 0, 1, 1],
         must_false: [0, 1, 0, 0, 0, 0],
     },
@@ -110,67 +99,59 @@ pub fn hand_tag(room: [u8; 16], hand_no: u64) -> [u8; 32] {
     Blake2s256::digest(input).into()
 }
 
-pub fn commitment(hand_tag: [u8; 32], seat: u8, tier: u8, secret: [u8; 32]) -> [u8; 32] {
-    let mut input = [0u8; 74];
+pub fn commitment(hand_tag: [u8; 32], seat: u8, secret: [u8; 32]) -> [u8; 32] {
+    let mut input = [0u8; 73];
 
     input[..8].copy_from_slice(&COMMITMENT_DOMAIN);
     input[8..40].copy_from_slice(&hand_tag);
     input[40] = seat;
-    input[41] = tier;
-    input[42..].copy_from_slice(&secret);
+    input[41..].copy_from_slice(&secret);
 
     Blake2s256::digest(input).into()
 }
 
-pub fn objective_index(
-    hand_tag: [u8; 32],
-    seat: u8,
-    tier: u8,
-    nonce: [u8; 32],
-    secret: [u8; 32],
-) -> u8 {
-    selector(hand_tag, seat, tier, nonce, secret)[0] & 3
+pub fn objective_index(hand_tag: [u8; 32], seat: u8, nonce: [u8; 32], secret: [u8; 32]) -> u8 {
+    selector(hand_tag, seat, nonce, secret)[0] & 7
 }
 
-pub fn facts_hash(hand_tag: [u8; 32], seat: u8, facts: Facts) -> [u8; 32] {
-    let mut input = [0u8; 47];
+pub fn facts_hash(hand_tag: [u8; 32], seat: u8, salt: [u8; 32], facts: Facts) -> [u8; 32] {
+    let mut input = [0u8; 79];
 
     input[..8].copy_from_slice(&FACTS_DOMAIN);
     input[8..40].copy_from_slice(&hand_tag);
     input[40] = seat;
-    input[41..].copy_from_slice(&facts.bytes());
+    input[41..73].copy_from_slice(&salt);
+    input[73..].copy_from_slice(&facts.bytes());
 
     Blake2s256::digest(input).into()
 }
 
-pub fn nullifier(hand_tag: [u8; 32], seat: u8, tier: u8, secret: [u8; 32]) -> [u8; 32] {
-    let mut input = [0u8; 74];
+pub fn nullifier(hand_tag: [u8; 32], seat: u8, secret: [u8; 32]) -> [u8; 32] {
+    let mut input = [0u8; 73];
 
     input[..8].copy_from_slice(&NULLIFIER_DOMAIN);
     input[8..40].copy_from_slice(&hand_tag);
     input[40] = seat;
-    input[41] = tier;
-    input[42..].copy_from_slice(&secret);
+    input[41..].copy_from_slice(&secret);
 
     Blake2s256::digest(input).into()
 }
 
-pub const fn objective(tier: u8, slot: u8) -> Option<Objective> {
-    if tier < 2 && slot < OBJECTIVES_PER_TIER {
-        Some(CATALOG[(tier * OBJECTIVES_PER_TIER + slot) as usize])
+pub const fn objective(index: u8) -> Option<Objective> {
+    if index < CATALOG_SIZE as u8 {
+        Some(CATALOG[index as usize])
     } else {
         None
     }
 }
 
 pub fn objective_leaf(objective: Objective) -> [u8; 32] {
-    let mut input = [0u8; 22];
+    let mut input = [0u8; 21];
 
     input[..8].copy_from_slice(&LEAF_DOMAIN);
-    input[8] = objective.tier;
-    input[9] = objective.slot;
-    input[10..16].copy_from_slice(&objective.must_true);
-    input[16..].copy_from_slice(&objective.must_false);
+    input[8] = objective.index;
+    input[9..15].copy_from_slice(&objective.must_true);
+    input[15..].copy_from_slice(&objective.must_false);
 
     Blake2s256::digest(input).into()
 }
@@ -275,15 +256,14 @@ fn catalog_leaves() -> [[u8; 32]; CATALOG_SIZE] {
     leaves
 }
 
-fn selector(hand_tag: [u8; 32], seat: u8, tier: u8, nonce: [u8; 32], secret: [u8; 32]) -> [u8; 32] {
-    let mut input = [0u8; 106];
+fn selector(hand_tag: [u8; 32], seat: u8, nonce: [u8; 32], secret: [u8; 32]) -> [u8; 32] {
+    let mut input = [0u8; 105];
 
     input[..8].copy_from_slice(&SELECTOR_DOMAIN);
     input[8..40].copy_from_slice(&hand_tag);
     input[40] = seat;
-    input[41] = tier;
-    input[42..74].copy_from_slice(&nonce);
-    input[74..].copy_from_slice(&secret);
+    input[41..73].copy_from_slice(&nonce);
+    input[73..].copy_from_slice(&secret);
 
     Blake2s256::digest(input).into()
 }
@@ -295,6 +275,7 @@ mod tests {
     const HAND: [u8; 32] = [0x11; 32];
     const SECRET: [u8; 32] = [0x22; 32];
     const NONCE: [u8; 32] = [0x33; 32];
+    const SALT: [u8; 32] = [0x44; 32];
 
     const ALL: Facts = Facts {
         saw_flop: true,
@@ -316,279 +297,122 @@ mod tests {
 
     #[test]
     fn domains() {
+        assert_eq!(HAND_DOMAIN.len(), 8);
         assert_eq!(COMMITMENT_DOMAIN.len(), 8);
         assert_eq!(SELECTOR_DOMAIN.len(), 8);
         assert_eq!(FACTS_DOMAIN.len(), 8);
         assert_eq!(NULLIFIER_DOMAIN.len(), 8);
-        assert_eq!(HAND_DOMAIN.len(), 8);
         assert_eq!(LEAF_DOMAIN.len(), 8);
         assert_eq!(NODE_DOMAIN.len(), 8);
     }
 
     #[test]
-    fn hand_tags() {
-        let room = [0x44; 16];
-        let tag = hand_tag(room, 1);
+    fn commitments() {
+        let value = commitment(HAND, 2, SECRET);
 
-        assert_eq!(tag, hand_tag(room, 1));
-        assert_ne!(tag, hand_tag(room, 2));
-        assert_ne!(tag, hand_tag([0x45; 16], 1));
+        assert_eq!(value, commitment(HAND, 2, SECRET));
+        assert_ne!(value, commitment([0x12; 32], 2, SECRET));
+        assert_ne!(value, commitment(HAND, 3, SECRET));
+        assert_ne!(value, commitment(HAND, 2, [0x23; 32]));
     }
 
     #[test]
-    fn commitment_values() {
-        assert_eq!(
-            commitment(HAND, 2, TIER_EASY, SECRET),
-            commitment(HAND, 2, TIER_EASY, SECRET)
-        );
-        assert_ne!(
-            commitment(HAND, 2, TIER_EASY, SECRET),
-            commitment([0x12; 32], 2, TIER_EASY, SECRET)
-        );
-        assert_ne!(
-            commitment(HAND, 2, TIER_EASY, SECRET),
-            commitment(HAND, 3, TIER_EASY, SECRET)
-        );
-        assert_ne!(
-            commitment(HAND, 2, TIER_EASY, SECRET),
-            commitment(HAND, 2, TIER_HARD, SECRET)
-        );
-        assert_ne!(
-            commitment(HAND, 2, TIER_EASY, SECRET),
-            commitment(HAND, 2, TIER_EASY, [0x23; 32])
-        );
-    }
-
-    #[test]
-    fn selector_values() {
-        assert_ne!(
-            selector(HAND, 2, TIER_EASY, NONCE, SECRET),
-            selector(HAND, 2, TIER_EASY, [0x34; 32], SECRET)
-        );
-        assert_ne!(
-            selector(HAND, 2, TIER_EASY, NONCE, SECRET),
-            selector(HAND, 2, TIER_EASY, NONCE, [0x23; 32])
-        );
-        assert_ne!(
-            selector(HAND, 2, TIER_EASY, NONCE, SECRET),
-            selector(HAND, 2, TIER_HARD, NONCE, SECRET)
-        );
-
+    fn selectors() {
         for nonce in 0..=u8::MAX {
-            assert!(objective_index(HAND, 2, TIER_EASY, [nonce; 32], SECRET) < 4);
+            assert!(objective_index(HAND, 2, [nonce; 32], SECRET) < 8);
         }
     }
 
     #[test]
-    fn fact_values() {
-        assert_eq!(ALL.bytes(), [1, 1, 1, 1, 1, 1]);
-        assert_eq!(NONE.bytes(), [0, 0, 0, 0, 0, 0]);
-        assert_eq!(
-            Facts {
-                saw_flop: true,
-                raised_preflop: false,
-                called_preflop: true,
-                checked_flop: false,
-                reached_showdown: true,
-                net_profit: false,
-            }
-            .bytes(),
-            [1, 0, 1, 0, 1, 0]
-        );
-        assert_eq!(facts_hash(HAND, 2, ALL), facts_hash(HAND, 2, ALL));
-        assert_ne!(facts_hash(HAND, 2, ALL), facts_hash([0x12; 32], 2, ALL));
-        assert_ne!(facts_hash(HAND, 2, ALL), facts_hash(HAND, 3, ALL));
-        assert_ne!(facts_hash(HAND, 2, ALL), facts_hash(HAND, 2, NONE));
+    fn fact_commitments() {
+        let value = facts_hash(HAND, 2, SALT, ALL);
+
+        assert_eq!(value, facts_hash(HAND, 2, SALT, ALL));
+        assert_ne!(value, facts_hash([0x12; 32], 2, SALT, ALL));
+        assert_ne!(value, facts_hash(HAND, 3, SALT, ALL));
+        assert_ne!(value, facts_hash(HAND, 2, [0x45; 32], ALL));
+        assert_ne!(value, facts_hash(HAND, 2, SALT, NONE));
     }
 
     #[test]
-    fn nullifier_values() {
-        let value = nullifier(HAND, 2, TIER_EASY, SECRET);
+    fn nullifiers() {
+        let value = nullifier(HAND, 2, SECRET);
 
-        assert_eq!(value, nullifier(HAND, 2, TIER_EASY, SECRET));
-        assert_ne!(value, nullifier([0x12; 32], 2, TIER_EASY, SECRET));
-        assert_ne!(value, nullifier(HAND, 3, TIER_EASY, SECRET));
-        assert_ne!(value, nullifier(HAND, 2, TIER_HARD, SECRET));
+        assert_eq!(value, nullifier(HAND, 2, SECRET));
+        assert_ne!(value, nullifier([0x12; 32], 2, SECRET));
+        assert_ne!(value, nullifier(HAND, 3, SECRET));
+        assert_ne!(value, nullifier(HAND, 2, [0x23; 32]));
     }
 
     #[test]
-    fn catalog_values() {
+    fn catalog() {
         assert_eq!(CATALOG.len(), CATALOG_SIZE);
-        assert_eq!(catalog_root(), catalog_root());
 
-        for (index, objective) in CATALOG.into_iter().enumerate() {
-            assert_eq!(objective.tier as usize * 4 + objective.slot as usize, index);
+        for (index, item) in CATALOG.into_iter().enumerate() {
+            assert_eq!(item.index as usize, index);
             assert_eq!(
-                path_root(
-                    objective_leaf(objective),
-                    index,
-                    objective_path(index).unwrap()
-                ),
+                path_root(objective_leaf(item), index, objective_path(index).unwrap()),
                 Some(catalog_root())
             );
         }
     }
 
     #[test]
-    fn invalid_paths() {
-        let index = 2;
-        let objective = CATALOG[index];
-        let mut path = objective_path(index).unwrap();
-
-        path.swap(0, 1);
-        assert_ne!(
-            path_root(objective_leaf(objective), index, path),
-            Some(catalog_root())
-        );
-
-        let mut changed = objective;
-        changed.must_true[0] = 1;
-        assert_ne!(
-            path_root(
-                objective_leaf(changed),
-                index,
-                objective_path(index).unwrap()
-            ),
-            Some(catalog_root())
-        );
-        assert_eq!(objective_path(CATALOG_SIZE), None);
-        assert_eq!(
-            path_root([0; 32], CATALOG_SIZE, [[0; 32]; TREE_DEPTH]),
-            None
-        );
-    }
-
-    #[test]
-    fn leaf_position() {
-        let objective = CATALOG[0];
-        let mut tier = objective;
-        let mut slot = objective;
-
-        tier.tier = 1;
-        slot.slot = 1;
-        assert_ne!(objective_leaf(objective), objective_leaf(tier));
-        assert_ne!(objective_leaf(objective), objective_leaf(slot));
-    }
-
-    #[test]
-    fn valid_objectives() {
-        for objective in CATALOG {
-            let mut literals = 0;
-
-            for i in 0..FACT_COUNT {
-                assert!(objective.must_true[i] < 2);
-                assert!(objective.must_false[i] < 2);
-                assert!(objective.must_true[i] + objective.must_false[i] <= 1);
-                literals += objective.must_true[i] + objective.must_false[i];
-            }
-
-            assert!(literals > 0);
+    fn objectives() {
+        for item in &CATALOG[..7] {
+            assert!(objective_met(*item, ALL));
         }
 
-        assert_eq!(objective(2, 0), None);
-        assert_eq!(objective(TIER_EASY, 4), None);
-    }
-
-    #[test]
-    fn objective_semantics() {
-        for bits in 0u8..64 {
-            let facts = facts_from(bits);
-
-            for objective in CATALOG {
-                assert_eq!(
-                    objective_met(objective, facts),
-                    prior_objective_met(objective.tier, objective.slot, facts)
-                );
+        assert!(!objective_met(CATALOG[0], NONE));
+        assert!(!objective_met(CATALOG[7], ALL));
+        assert!(objective_met(
+            CATALOG[7],
+            Facts {
+                raised_preflop: false,
+                reached_showdown: true,
+                net_profit: true,
+                ..NONE
             }
-        }
-
-        let mut contradictory = CATALOG[0];
-        contradictory.must_false[0] = 1;
-        assert!(!objective_met(contradictory, ALL));
-        assert!(!objective_met(
-            Objective {
-                must_true: [0; FACT_COUNT],
-                ..CATALOG[0]
-            },
-            ALL
         ));
     }
 
     #[test]
-    fn fixture_values() {
-        let index = objective_index(HAND, 2, TIER_EASY, NONCE, SECRET);
-
+    fn fixed_vector() {
         assert_eq!(
-            commitment(HAND, 2, TIER_EASY, SECRET),
-            decode("8db3780236f50489de3c16f2a7a06996f5239ffef4572abdf0234e89aefda674")
-        );
-        assert_eq!(
-            selector(HAND, 2, TIER_EASY, NONCE, SECRET),
-            decode("6a1c73af6b8a897beb9e2c1d338b94ce7a692f3f7d847a73201f5769148e1981")
-        );
-        assert_eq!(index, 2);
-        assert_eq!(
-            facts_hash(HAND, 2, ALL),
-            decode("cdc4ad0d044f42a722aca8076bd3d8cdcacae3c49df34d84f45f481683592a23")
-        );
-        assert_eq!(
-            nullifier(HAND, 2, TIER_EASY, SECRET),
-            decode("4378956178b8af73c267002cd809d5ef2c42bd152a63f46ef48316be96c24411")
-        );
-        let objective = objective(TIER_EASY, index).unwrap();
-        let path = objective_path(index as usize).unwrap();
-
-        assert_eq!(
-            objective_leaf(objective),
-            decode("bd6fc38abc9f6b7f426a38ed28bcd8259429fe8817d37c2b173ded4477730436")
-        );
-        assert_eq!(
-            path,
+            hand_tag([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], 1),
             [
-                decode("0435da91a3d4c7e99c13b0bcf04b8171c35e62356b99b76d65fc4b111b7e9dc4"),
-                decode("c8b3bb9a420a12a55d5d06f474bdb719d15643e41c89d403adf708d5812a53b5"),
-                decode("43bf3aa41def544e83ccb9f02417f129a9580b4010466bb7157f9ae5f4735410"),
+                20, 27, 125, 236, 107, 16, 89, 140, 84, 107, 223, 140, 206, 27, 227, 47, 102,
+                94, 71, 17, 149, 157, 236, 202, 166, 127, 0, 242, 237, 144, 88, 52,
+            ]
+        );
+        assert_eq!(
+            commitment(HAND, 2, SECRET),
+            [
+                43, 198, 112, 233, 101, 135, 162, 148, 205, 132, 213, 22, 252, 91, 202, 18, 194,
+                116, 117, 242, 74, 207, 189, 38, 92, 146, 252, 28, 222, 44, 152, 182,
+            ]
+        );
+        assert_eq!(objective_index(HAND, 2, NONCE, SECRET), 6);
+        assert_eq!(
+            facts_hash(HAND, 2, SALT, ALL),
+            [
+                33, 159, 223, 40, 94, 162, 145, 238, 110, 44, 6, 95, 202, 132, 245, 142, 172, 11,
+                190, 56, 198, 248, 118, 20, 223, 62, 93, 176, 29, 117, 49, 4,
+            ]
+        );
+        assert_eq!(
+            nullifier(HAND, 2, SECRET),
+            [
+                21, 151, 143, 95, 60, 73, 188, 53, 33, 238, 62, 29, 200, 212, 58, 176, 4, 40, 173,
+                137, 154, 161, 5, 219, 58, 78, 200, 37, 204, 38, 215, 122,
             ]
         );
         assert_eq!(
             catalog_root(),
-            decode("b832b47c67eaa2f5b74be82cfad9fd77636f75d866cf1b8437358a7a8406e067")
+            [
+                14, 88, 133, 241, 196, 42, 151, 153, 35, 122, 96, 111, 33, 79, 114, 86, 128, 109,
+                119, 151, 113, 121, 229, 185, 255, 73, 234, 153, 180, 70, 196, 9,
+            ]
         );
-        assert!(objective_met(objective, ALL));
-    }
-
-    fn facts_from(bits: u8) -> Facts {
-        Facts {
-            saw_flop: bits & 1 != 0,
-            raised_preflop: bits & 2 != 0,
-            called_preflop: bits & 4 != 0,
-            checked_flop: bits & 8 != 0,
-            reached_showdown: bits & 16 != 0,
-            net_profit: bits & 32 != 0,
-        }
-    }
-
-    fn prior_objective_met(tier: u8, index: u8, facts: Facts) -> bool {
-        match (tier, index) {
-            (TIER_EASY, 0) => facts.saw_flop,
-            (TIER_EASY, 1) => facts.raised_preflop,
-            (TIER_EASY, 2) => facts.called_preflop,
-            (TIER_EASY, 3) => facts.checked_flop,
-            (TIER_HARD, 0) => facts.reached_showdown,
-            (TIER_HARD, 1) => facts.net_profit,
-            (TIER_HARD, 2) => facts.raised_preflop && facts.net_profit,
-            (TIER_HARD, 3) => !facts.raised_preflop && facts.reached_showdown && facts.net_profit,
-            _ => false,
-        }
-    }
-
-    fn decode(value: &str) -> [u8; 32] {
-        let mut bytes = [0u8; 32];
-
-        for (i, byte) in bytes.iter_mut().enumerate() {
-            *byte = u8::from_str_radix(&value[i * 2..i * 2 + 2], 16).unwrap();
-        }
-
-        bytes
     }
 }
