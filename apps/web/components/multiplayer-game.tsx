@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { ClaimState, ContractView } from "@/components/contract";
 import {
   Table,
   type ChallengeView,
@@ -11,6 +12,7 @@ import {
 } from "@/components/table";
 import {
   CHALLENGE_VERSION,
+  HARD_TIER,
   commitment as challengeCommitment,
   decodeHex,
   encodeHex,
@@ -53,6 +55,17 @@ type Assignment = {
   nonce: string;
 };
 
+type PrivateObjective = {
+  objective?: string;
+  index?: number;
+  error?: string;
+};
+
+type ContractCompletion = {
+  completed?: boolean;
+  error?: string;
+};
+
 function challengeAssignment(challenge: ChallengeView | undefined): Assignment | undefined {
   if (
     challenge?.assigned &&
@@ -86,7 +99,11 @@ function claimAssignment(claim: ClaimView | undefined): Assignment | undefined {
   };
 }
 
-function privateObjective(room: string, seat: number, assignment: Assignment | undefined) {
+function privateObjective(
+  room: string,
+  seat: number,
+  assignment: Assignment | undefined,
+): PrivateObjective {
   if (!assignment) {
     return {};
   }
@@ -94,7 +111,7 @@ function privateObjective(room: string, seat: number, assignment: Assignment | u
   const stored = loadChallengeSecret(room, assignment.hand_no, seat);
 
   if (!stored) {
-    return { error: "Challenge secret unavailable" };
+    return { error: "Contract secret unavailable" };
   }
 
   try {
@@ -107,7 +124,7 @@ function privateObjective(room: string, seat: number, assignment: Assignment | u
       stored.commitment !== assignment.commitment ||
       expected !== assignment.commitment
     ) {
-      return { error: "Challenge commitment mismatch" };
+      return { error: "Contract commitment mismatch" };
     }
 
     const index = objectiveIndex(
@@ -118,10 +135,36 @@ function privateObjective(room: string, seat: number, assignment: Assignment | u
       secret,
     );
 
-    return { objective: objectiveDescription(assignment.tier, index) };
+    return { objective: objectiveDescription(assignment.tier, index), index };
   } catch {
-    return { error: "Invalid challenge assignment" };
+    return { error: "Invalid contract assignment" };
   }
+}
+
+function contractCompletion(
+  claim: ClaimView | undefined,
+  seat: number,
+  index: number | undefined,
+): ContractCompletion {
+  if (!claim || claim.status === "claimed" || index === undefined) {
+    return {};
+  }
+
+  try {
+    const hash = encodeHex(factsHash(decodeHex(claim.hand_tag), seat, claim.facts));
+
+    if (hash !== claim.facts_hash) {
+      return { error: "Contract facts mismatch" };
+    }
+
+    return { completed: objectiveMet(claim.tier, index, claim.facts) };
+  } catch {
+    return { error: "Invalid contract facts" };
+  }
+}
+
+function contractReward(tier: number) {
+  return tier === HARD_TIER ? 25 : 10;
 }
 
 function closeSocket(socket: WebSocket) {
@@ -154,8 +197,9 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
   const [raiseTo, setRaiseTo] = useState(0);
   const [objective, setObjective] = useState<string>();
   const [claimObjective, setClaimObjective] = useState<string>();
+  const [claimCompleted, setClaimCompleted] = useState<boolean>();
   const [challengeError, setChallengeError] = useState<string>();
-  const [claimStatus, setClaimStatus] = useState<string>();
+  const [claimState, setClaimState] = useState<ClaimState>("idle");
 
   const connect = useCallback(() => {
     const current = auth.current;
@@ -226,27 +270,35 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
           challengeAssignment(message.view.challenge),
         );
         const claimed = message.view.claim?.status === "claimed";
-        const currentClaim = claimed
+        const currentClaim: PrivateObjective = claimed
           ? {}
           : privateObjective(room, current.seat, claimAssignment(message.view.claim));
+        const completion = contractCompletion(
+          message.view.claim,
+          current.seat,
+          currentClaim.index,
+        );
 
         if (claimed && message.view.claim) {
           removeChallengeSecret(room, message.view.claim.hand_no, current.seat);
-          setClaimStatus("Verified");
-        } else if (!message.view.claim) {
-          setClaimStatus(undefined);
+          claiming.current = false;
+          setClaimState("verified");
+        } else if (!claiming.current) {
+          setClaimState("idle");
         }
 
-        claiming.current = false;
         setWaiting(undefined);
         setView(message.view);
         setRaiseTo(message.view.actions?.raise?.min_to ?? 0);
         setObjective(currentChallenge.objective);
         setClaimObjective(currentClaim.objective);
-        setChallengeError(currentChallenge.error ?? currentClaim.error);
+        setClaimCompleted(completion.completed);
+        setChallengeError(
+          currentChallenge.error ?? currentClaim.error ?? completion.error,
+        );
         setConnected(true);
         setConnecting(false);
-        setPending(false);
+        setPending(claiming.current);
         setError(undefined);
         return;
       }
@@ -254,7 +306,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
       if (message.type === "error") {
         if (claiming.current) {
           claiming.current = false;
-          setClaimStatus("Failed");
+          setClaimState("failed");
         }
 
         setConnecting(false);
@@ -276,6 +328,11 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
 
     next.onclose = () => {
       if (socket.current === next) {
+        if (claiming.current) {
+          claiming.current = false;
+          setClaimState("failed");
+        }
+
         socket.current = undefined;
         setConnecting(false);
         setConnected(false);
@@ -357,7 +414,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
         commitment: value,
       });
     } catch {
-      setChallengeError("Challenge setup failed");
+      setChallengeError("Contract setup failed");
     }
   }
 
@@ -372,7 +429,8 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
       !current ||
       current.readyState !== WebSocket.OPEN ||
       !connected ||
-      pending
+      pending ||
+      claiming.current
     ) {
       return;
     }
@@ -380,8 +438,8 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
     const stored = loadChallengeSecret(room, claim.hand_no, seat);
 
     if (!stored) {
-      setChallengeError("Challenge secret unavailable");
-      setClaimStatus("Failed");
+      setChallengeError("Contract secret unavailable");
+      setClaimState("failed");
       return;
     }
 
@@ -404,8 +462,8 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
       }
 
       if (!objectiveMet(claim.tier, index, claim.facts)) {
-        setChallengeError("Challenge not completed");
-        setClaimStatus("Failed");
+        setClaimCompleted(false);
+        setChallengeError("Contract not completed");
         return;
       }
 
@@ -427,7 +485,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
           facts: claim.facts,
         },
         (status: ProofStatus) => {
-          setClaimStatus(status === "preparing" ? "Preparing proof" : "Proving");
+          setClaimState(status);
         },
       );
 
@@ -435,7 +493,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
         throw new Error("socket closed");
       }
 
-      setClaimStatus("Submitting");
+      setClaimState("verifying");
       current.send(
         JSON.stringify({
           type: "challenge_claim",
@@ -447,8 +505,8 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
     } catch {
       claiming.current = false;
       setPending(false);
-      setClaimStatus("Failed");
-      setChallengeError("Challenge proof failed");
+      setClaimState("failed");
+      setChallengeError("Contract proof failed");
     }
   }
 
@@ -497,6 +555,30 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
     );
   }
 
+  const contract: ContractView = {
+    assignment: !view.challenge
+      ? { kind: "available" }
+      : !view.challenge.assigned
+        ? { kind: "choose", handNo: view.challenge.hand_no }
+        : {
+            kind: "assigned",
+            handNo: view.challenge.hand_no,
+            objective: objective ?? "Private objective unavailable",
+            reward: contractReward(view.challenge.tier ?? 0),
+            active: !view.settled,
+          },
+    claim: view.claim
+      ? {
+          handNo: view.claim.hand_no,
+          objective: claimObjective,
+          reward: view.claim.points ?? contractReward(view.claim.tier),
+          completed: claimCompleted,
+          state: claimState,
+        }
+      : undefined,
+    error: challengeError,
+  };
+
   return (
     <>
       {!connected && (
@@ -522,12 +604,9 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
         onCall={() => send({ type: "call" })}
         onRaise={() => send({ type: "raise_to", to: raiseTo })}
         onReady={() => send({ type: "ready" })}
-        onChallenge={chooseChallenge}
-        onClaim={() => void claimChallenge()}
-        objective={objective}
-        claimObjective={claimObjective}
-        challengeError={challengeError}
-        claimStatus={claimStatus}
+        contract={contract}
+        onChooseContract={chooseChallenge}
+        onGenerateProof={() => void claimChallenge()}
       />
     </>
   );

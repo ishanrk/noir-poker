@@ -6,7 +6,7 @@ export default function Home() {
       <header className="page-header">
         <p className="eyebrow">Private tables</p>
         <h1>Noir Poker</h1>
-        <p>Server authoritative No-Limit Hold&apos;em</p>
+        <p>Private poker with secret contracts proved in zero knowledge</p>
       </header>
 
       <Lobby />

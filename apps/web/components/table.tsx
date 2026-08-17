@@ -1,4 +1,5 @@
 import { Card } from "@/components/card";
+import { Contract, type ContractView } from "@/components/contract";
 import { Seat } from "@/components/seat";
 
 type CardView = {
@@ -94,12 +95,9 @@ type TableProps = {
   onRaise: () => void;
   onNewHand?: () => void;
   onReady?: () => void;
-  onChallenge?: (tier: number) => void;
-  onClaim?: () => void;
-  objective?: string;
-  claimObjective?: string;
-  challengeError?: string;
-  claimStatus?: string;
+  contract?: ContractView;
+  onChooseContract?: (tier: number) => void;
+  onGenerateProof?: () => void;
 };
 
 const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
@@ -122,12 +120,9 @@ export function Table({
   onRaise,
   onNewHand,
   onReady,
-  onChallenge,
-  onClaim,
-  objective,
-  claimObjective,
-  challengeError,
-  claimStatus,
+  contract,
+  onChooseContract,
+  onGenerateProof,
 }: TableProps) {
   const hole = [view.hole[0].value, view.hole[1].value] as const;
   const actions = view.actions;
@@ -228,46 +223,13 @@ export function Table({
         })}
       </div>
 
-      {onChallenge && view.challenge && (
-        <div className="challenge-panel">
-          <div>
-            <span>Hidden challenge</span>
-            <strong>
-              {view.challenge.assigned
-                ? (objective ?? "Challenge assigned")
-                : `Choose for hand ${view.challenge.hand_no}`}
-            </strong>
-          </div>
-          {!view.challenge.assigned && (
-            <div className="challenge-tiers">
-              <button type="button" onClick={() => onChallenge(0)} disabled={disabled}>
-                Easy 10 points
-              </button>
-              <button type="button" onClick={() => onChallenge(1)} disabled={disabled}>
-                Hard 25 points
-              </button>
-            </div>
-          )}
-          {view.claim?.status === "claimable" && (
-            <div className="challenge-tiers">
-              <span>
-                {claimObjective
-                  ? `Previous challenge ${claimObjective}`
-                  : "Previous challenge ready to prove"}
-              </span>
-              {onClaim && (
-                <button type="button" onClick={onClaim} disabled={disabled}>
-                  Claim
-                </button>
-              )}
-            </div>
-          )}
-          {view.claim?.status === "claimed" && (
-            <strong>Verified +{view.claim.points} proof points</strong>
-          )}
-          {claimStatus && <span>{claimStatus}</span>}
-          {challengeError && <span className="room-error">{challengeError}</span>}
-        </div>
+      {contract && onChooseContract && onGenerateProof && (
+        <Contract
+          view={contract}
+          disabled={disabled}
+          onChoose={onChooseContract}
+          onProve={onGenerateProof}
+        />
       )}
 
       <div className="action-bar" aria-label="Player actions">
