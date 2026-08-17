@@ -3,7 +3,7 @@ use std::io;
 
 use game_core::Action;
 use sqlx::postgres::{PgPoolOptions, PgQueryResult};
-use sqlx::{PgPool, query};
+use sqlx::{PgPool, Row, query};
 use uuid::Uuid;
 
 type DbResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
@@ -25,6 +25,38 @@ pub struct NewAction {
     pub action: Action,
     pub rev: u64,
     pub next_rev: u64,
+}
+
+pub struct StoredRoom {
+    pub id: Uuid,
+    pub players: i32,
+    pub stack: i64,
+    pub small_blind: i64,
+    pub big_blind: i64,
+    pub rev: i64,
+    pub seats: Vec<StoredSeat>,
+    pub hand: Option<StoredHand>,
+}
+
+pub struct StoredSeat {
+    pub seat: i32,
+    pub token_hash: Vec<u8>,
+}
+
+pub struct StoredHand {
+    pub id: Uuid,
+    pub hand_no: i64,
+    pub seed: Vec<u8>,
+    pub dealer: i32,
+    pub stacks: Vec<i64>,
+    pub actions: Vec<StoredAction>,
+}
+
+pub struct StoredAction {
+    pub seq: i64,
+    pub player: i32,
+    pub action: String,
+    pub raise_to: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -143,6 +175,90 @@ impl Db {
         one_row(changed)?;
         tx.commit().await?;
         Ok(())
+    }
+
+    pub async fn load_rooms(&self) -> DbResult<Vec<StoredRoom>> {
+        let rows =
+            query("SELECT id, players, stack, small_blind, big_blind, rev FROM rooms ORDER BY id")
+                .fetch_all(&self.pool)
+                .await?;
+        let mut rooms = Vec::with_capacity(rows.len());
+
+        for row in rows {
+            let id = row.try_get("id")?;
+            let seats = self.load_seats(id).await?;
+            let hand = self.load_hand(id).await?;
+
+            rooms.push(StoredRoom {
+                id,
+                players: row.try_get("players")?,
+                stack: row.try_get("stack")?,
+                small_blind: row.try_get("small_blind")?,
+                big_blind: row.try_get("big_blind")?,
+                rev: row.try_get("rev")?,
+                seats,
+                hand,
+            });
+        }
+
+        Ok(rooms)
+    }
+
+    async fn load_seats(&self, room: Uuid) -> DbResult<Vec<StoredSeat>> {
+        let rows = query("SELECT seat, token_hash FROM seats WHERE room_id = $1 ORDER BY seat")
+            .bind(room)
+            .fetch_all(&self.pool)
+            .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(StoredSeat {
+                    seat: row.try_get("seat")?,
+                    token_hash: row.try_get("token_hash")?,
+                })
+            })
+            .collect()
+    }
+
+    async fn load_hand(&self, room: Uuid) -> DbResult<Option<StoredHand>> {
+        let Some(row) = query(
+            "SELECT id, hand_no, seed, dealer, starting_stacks FROM hands \
+             WHERE room_id = $1 ORDER BY hand_no DESC LIMIT 1",
+        )
+        .bind(room)
+        .fetch_optional(&self.pool)
+        .await?
+        else {
+            return Ok(None);
+        };
+        let id = row.try_get("id")?;
+        let rows = query(
+            "SELECT seq, player, action, raise_to FROM hand_actions \
+             WHERE hand_id = $1 ORDER BY seq",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?;
+        let actions = rows
+            .into_iter()
+            .map(|row| {
+                Ok(StoredAction {
+                    seq: row.try_get("seq")?,
+                    player: row.try_get("player")?,
+                    action: row.try_get("action")?,
+                    raise_to: row.try_get("raise_to")?,
+                })
+            })
+            .collect::<DbResult<Vec<_>>>()?;
+
+        Ok(Some(StoredHand {
+            id,
+            hand_no: row.try_get("hand_no")?,
+            seed: row.try_get("seed")?,
+            dealer: row.try_get("dealer")?,
+            stacks: row.try_get("starting_stacks")?,
+            actions,
+        }))
     }
 
     #[cfg(test)]

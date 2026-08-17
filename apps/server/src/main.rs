@@ -20,7 +20,7 @@ use tokio::sync::{Mutex, broadcast};
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
-use crate::db::{Db, NewAction, NewHand};
+use crate::db::{Db, NewAction, NewHand, StoredAction, StoredHand, StoredRoom};
 
 type HttpError = (StatusCode, &'static str);
 type TokenHash = [u8; 32];
@@ -33,10 +33,10 @@ struct AppState {
 }
 
 impl AppState {
-    fn new(db: Db) -> Self {
+    fn new(db: Db, rooms: HashMap<Uuid, Arc<Mutex<Room>>>) -> Self {
         Self {
             db,
-            rooms: Arc::new(Mutex::new(HashMap::new())),
+            rooms: Arc::new(Mutex::new(rooms)),
         }
     }
 }
@@ -252,9 +252,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let database_url =
         env::var("DATABASE_URL").map_err(|_| io::Error::other("DATABASE_URL missing"))?;
     let db = Db::connect(&database_url).await?;
+    let rooms = restore_rooms(db.load_rooms().await?)?;
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
 
-    axum::serve(listener, app(AppState::new(db), origin)).await?;
+    axum::serve(listener, app(AppState::new(db, rooms), origin)).await?;
     Ok(())
 }
 
@@ -380,16 +381,11 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
             return;
         }
     };
-    let token_hash = hash_token(token);
     let session = match find_room(&state, id).await {
         Some(room) => {
             let room = room.lock().await;
 
-            match room
-                .seats
-                .iter()
-                .position(|seat| seat.token_hash == token_hash)
-            {
+            match seat_for_token(&room, token) {
                 Some(seat) => Ok((seat, room.notify.subscribe(), room_message(&room, seat))),
                 None => Err("unknown token"),
             }
@@ -564,6 +560,14 @@ fn hash_token(token: Uuid) -> TokenHash {
     Sha256::digest(token.as_bytes()).into()
 }
 
+fn seat_for_token(room: &Room, token: Uuid) -> Option<usize> {
+    let token_hash = hash_token(token);
+
+    room.seats
+        .iter()
+        .position(|seat| seat.token_hash == token_hash)
+}
+
 // server seed for new hand
 fn secure_seed() -> Result<[u8; 32], getrandom::Error> {
     let mut seed = [0u8; 32];
@@ -594,6 +598,166 @@ fn advance(game: &mut State) -> Result<(), &'static str> {
     }
 
     Ok(())
+}
+
+fn restore_rooms(stored: Vec<StoredRoom>) -> Result<HashMap<Uuid, Arc<Mutex<Room>>>, io::Error> {
+    let mut rooms = HashMap::with_capacity(stored.len());
+
+    for stored in stored {
+        let id = stored.id;
+        let room = restore_room(stored)?;
+
+        if rooms.insert(id, Arc::new(Mutex::new(room))).is_some() {
+            return Err(recovery_error(id, "duplicate room"));
+        }
+    }
+
+    Ok(rooms)
+}
+
+fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
+    let id = stored.id;
+    let config = RoomConfig {
+        players: usize::try_from(stored.players)
+            .map_err(|_| recovery_error(id, "invalid player count"))?,
+        stack: u32::try_from(stored.stack).map_err(|_| recovery_error(id, "invalid stack"))?,
+        small_blind: u32::try_from(stored.small_blind)
+            .map_err(|_| recovery_error(id, "invalid small blind"))?,
+        big_blind: u32::try_from(stored.big_blind)
+            .map_err(|_| recovery_error(id, "invalid big blind"))?,
+    };
+    let rev = u64::try_from(stored.rev).map_err(|_| recovery_error(id, "invalid revision"))?;
+
+    config
+        .validate()
+        .map_err(|_| recovery_error(id, "invalid room config"))?;
+
+    if stored.seats.is_empty() || stored.seats.len() > config.players {
+        return Err(recovery_error(id, "invalid seat count"));
+    }
+
+    let mut seats = Vec::with_capacity(stored.seats.len());
+
+    for (expected, seat) in stored.seats.into_iter().enumerate() {
+        let index =
+            usize::try_from(seat.seat).map_err(|_| recovery_error(id, "invalid seat index"))?;
+        let token_hash = seat
+            .token_hash
+            .try_into()
+            .map_err(|_| recovery_error(id, "invalid token hash"))?;
+
+        if index != expected {
+            return Err(recovery_error(id, "seat sequence gap"));
+        }
+
+        seats.push(Seat { token_hash });
+    }
+
+    let hand = match stored.hand {
+        Some(hand) if seats.len() == config.players => Some(restore_hand(id, config, hand)?),
+        Some(_) => return Err(recovery_error(id, "hand before room full")),
+        None if seats.len() == config.players => {
+            return Err(recovery_error(id, "full room without hand"));
+        }
+        None => None,
+    };
+    let action_count = hand.as_ref().map_or(0, |hand| hand.next_seq);
+    let seat_revs =
+        u64::try_from(seats.len() - 1).map_err(|_| recovery_error(id, "revision limit reached"))?;
+    let min_rev = seat_revs
+        .checked_add(action_count)
+        .ok_or_else(|| recovery_error(id, "revision limit reached"))?;
+
+    if rev < min_rev {
+        return Err(recovery_error(id, "revision behind room state"));
+    }
+
+    let (notify, _) = broadcast::channel(16);
+
+    Ok(Room {
+        config,
+        seats,
+        hand,
+        rev,
+        notify,
+    })
+}
+
+fn restore_hand(id: Uuid, config: RoomConfig, stored: StoredHand) -> Result<LiveHand, io::Error> {
+    u64::try_from(stored.hand_no).map_err(|_| recovery_error(id, "invalid hand number"))?;
+    let seed = stored
+        .seed
+        .try_into()
+        .map_err(|_| recovery_error(id, "invalid hand seed"))?;
+    let dealer =
+        usize::try_from(stored.dealer).map_err(|_| recovery_error(id, "invalid dealer"))?;
+    let stacks = stored
+        .stacks
+        .into_iter()
+        .map(|stack| u32::try_from(stack).map_err(|_| recovery_error(id, "invalid hand stack")))
+        .collect::<Result<Vec<_>, _>>()?;
+    let total: u64 = stacks.iter().map(|&stack| u64::from(stack)).sum();
+
+    if stacks.len() != config.players
+        || dealer >= config.players
+        || stacks.iter().any(|&stack| stack < config.big_blind)
+        || total > u64::from(u32::MAX)
+    {
+        return Err(recovery_error(id, "invalid hand inputs"));
+    }
+
+    let mut game = State::new(seed, dealer, &stacks, config.small_blind, config.big_blind);
+    let next_seq = u64::try_from(stored.actions.len())
+        .map_err(|_| recovery_error(id, "action limit reached"))?;
+
+    // replay persisted actions
+    for (expected, stored) in stored.actions.into_iter().enumerate() {
+        let expected =
+            u64::try_from(expected).map_err(|_| recovery_error(id, "action limit reached"))?;
+        let seq =
+            u64::try_from(stored.seq).map_err(|_| recovery_error(id, "invalid action sequence"))?;
+        let player = usize::try_from(stored.player)
+            .map_err(|_| recovery_error(id, "invalid action player"))?;
+        let action = restore_action(&stored).map_err(|err| recovery_error(id, err))?;
+
+        if seq != expected {
+            return Err(recovery_error(id, "action sequence gap"));
+        }
+
+        if player >= config.players {
+            return Err(recovery_error(id, "invalid action player"));
+        }
+
+        game.apply(player, action)
+            .map_err(|_| recovery_error(id, "action replay rejected"))?;
+        advance(&mut game).map_err(|_| recovery_error(id, "action replay failed"))?;
+    }
+
+    Ok(LiveHand {
+        id: stored.id,
+        game,
+        next_seq,
+    })
+}
+
+fn restore_action(stored: &StoredAction) -> Result<Action, &'static str> {
+    match (stored.action.as_str(), stored.raise_to) {
+        ("fold", None) => Ok(Action::Fold),
+        ("check", None) => Ok(Action::Check),
+        ("call", None) => Ok(Action::Call),
+        ("raise_to", Some(to)) => u32::try_from(to)
+            .map(Action::RaiseTo)
+            .map_err(|_| "invalid raise target"),
+        ("fold" | "check" | "call" | "raise_to", _) => Err("invalid action value"),
+        _ => Err("unknown action"),
+    }
+}
+
+fn recovery_error(room: Uuid, message: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("cannot restore room {room}: {message}"),
+    )
 }
 
 fn seat_view(game: &State, seat: usize) -> SeatView {
@@ -686,6 +850,7 @@ fn action_error(err: ActionError) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use crate::db::StoredSeat;
     use sqlx::Row;
 
     use super::*;
@@ -738,6 +903,68 @@ mod tests {
         Ok(())
     }
 
+    fn stored_room() -> StoredRoom {
+        StoredRoom {
+            id: Uuid::from_u128(10),
+            players: 2,
+            stack: 1000,
+            small_blind: 5,
+            big_blind: 10,
+            rev: 1,
+            seats: vec![
+                StoredSeat {
+                    seat: 0,
+                    token_hash: hash_token(Uuid::from_u128(1)).to_vec(),
+                },
+                StoredSeat {
+                    seat: 1,
+                    token_hash: hash_token(Uuid::from_u128(2)).to_vec(),
+                },
+            ],
+            hand: Some(StoredHand {
+                id: Uuid::from_u128(11),
+                hand_no: 0,
+                seed: SEED.to_vec(),
+                dealer: 0,
+                stacks: vec![1000, 1000],
+                actions: Vec::new(),
+            }),
+        }
+    }
+
+    fn same_game(actual: &State, expected: &State) {
+        assert_eq!(actual.players, expected.players);
+        assert_eq!(actual.hole, expected.hole);
+        assert_eq!(actual.board, expected.board);
+        assert_eq!(actual.pot, expected.pot);
+        assert_eq!(actual.min_raise, expected.min_raise);
+        assert_eq!(actual.small_blind, expected.small_blind);
+        assert_eq!(actual.big_blind, expected.big_blind);
+        assert_eq!(actual.dealer, expected.dealer);
+        assert_eq!(actual.turn, expected.turn);
+        assert_eq!(actual.next_card, expected.next_card);
+        assert_eq!(actual.street, expected.street);
+        assert_eq!(actual.round_complete, expected.round_complete);
+        assert_eq!(actual.fold_winner, expected.fold_winner);
+        assert_eq!(actual.settled, expected.settled);
+
+        for player in 0..actual.players.len() {
+            assert_eq!(actual.legal_actions(player), expected.legal_actions(player));
+        }
+    }
+
+    async fn reload(db: &Db, id: Uuid) -> Room {
+        let stored = db
+            .load_rooms()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|room| room.id == id)
+            .unwrap();
+
+        restore_room(stored).unwrap()
+    }
+
     async fn persist(db: &Db, id: Uuid, room: &mut Room, seat: usize, action: Action) {
         let next = room.stage_action(seat, action).unwrap();
 
@@ -774,6 +1001,80 @@ mod tests {
 
         assert_eq!(hash_token(first), hash_token(first));
         assert_ne!(hash_token(first), hash_token(second));
+    }
+
+    #[test]
+    fn restored_token() {
+        let room = restore_room(stored_room()).unwrap();
+
+        assert_eq!(seat_for_token(&room, Uuid::from_u128(1)), Some(0));
+        assert_eq!(seat_for_token(&room, Uuid::from_u128(2)), Some(1));
+        assert_eq!(seat_for_token(&room, Uuid::from_u128(3)), None);
+    }
+
+    #[test]
+    fn corrupt_recovery() {
+        let mut room = stored_room();
+        room.hand.as_mut().unwrap().seed.pop();
+        assert!(restore_room(room).is_err());
+
+        let mut room = stored_room();
+        room.hand.as_mut().unwrap().dealer = 2;
+        assert!(restore_room(room).is_err());
+
+        let mut room = stored_room();
+        room.hand.as_mut().unwrap().stacks[0] = i64::from(u32::MAX) + 1;
+        assert!(restore_room(room).is_err());
+
+        let mut room = stored_room();
+        room.rev = 2;
+        room.hand.as_mut().unwrap().actions.push(StoredAction {
+            seq: 1,
+            player: 0,
+            action: "call".to_owned(),
+            raise_to: None,
+        });
+        assert!(restore_room(room).is_err());
+
+        let mut room = stored_room();
+        room.rev = 2;
+        room.hand.as_mut().unwrap().actions.push(StoredAction {
+            seq: 0,
+            player: 0,
+            action: "bet".to_owned(),
+            raise_to: None,
+        });
+        assert!(restore_room(room).is_err());
+
+        let mut room = stored_room();
+        room.rev = 2;
+        room.hand.as_mut().unwrap().actions.push(StoredAction {
+            seq: 0,
+            player: 2,
+            action: "fold".to_owned(),
+            raise_to: None,
+        });
+        assert!(restore_room(room).is_err());
+
+        let mut room = stored_room();
+        room.rev = 2;
+        room.hand.as_mut().unwrap().actions.push(StoredAction {
+            seq: 0,
+            player: 1,
+            action: "check".to_owned(),
+            raise_to: None,
+        });
+        assert!(restore_room(room).is_err());
+
+        let mut room = stored_room();
+        room.rev = 2;
+        room.hand.as_mut().unwrap().actions.push(StoredAction {
+            seq: 0,
+            player: 0,
+            action: "fold".to_owned(),
+            raise_to: Some(20),
+        });
+        assert!(restore_room(room).is_err());
     }
 
     #[test]
@@ -1027,6 +1328,41 @@ mod tests {
             .await
             .unwrap();
 
+        let waiting_config = config(3);
+        let waiting_id = Uuid::new_v4();
+        let waiting_first = Uuid::new_v4();
+        let waiting_second = Uuid::new_v4();
+
+        db.create_room(
+            waiting_id,
+            waiting_config.players,
+            waiting_config.stack,
+            waiting_config.small_blind,
+            waiting_config.big_blind,
+            &hash_token(waiting_first),
+        )
+        .await
+        .unwrap();
+        db.join_room(waiting_id, 1, &hash_token(waiting_second), 0, 1, None)
+            .await
+            .unwrap();
+
+        let waiting = reload(&db, waiting_id).await;
+
+        assert_eq!(waiting.seats.len(), 2);
+        assert!(waiting.hand.is_none());
+        assert_eq!(waiting.rev, 1);
+        assert_eq!(waiting.next_seat(), Ok(2));
+        assert_eq!(seat_for_token(&waiting, waiting_first), Some(0));
+        assert_eq!(seat_for_token(&waiting, waiting_second), Some(1));
+        assert_eq!(
+            room_message(&waiting, 0),
+            ServerMessage::Waiting {
+                joined: 2,
+                players: 3
+            }
+        );
+
         let config = config(2);
         let id = Uuid::new_v4();
         let first = Uuid::new_v4();
@@ -1116,7 +1452,30 @@ mod tests {
         assert_eq!(row.get::<Vec<i64>, _>("starting_stacks"), [1000, 1000]);
 
         persist(&db, id, &mut room, 0, Action::RaiseTo(20)).await;
+
+        let expected = room.hand.as_ref().unwrap().game.clone();
+        let restored = reload(&db, id).await;
+        let restored_hand = restored.hand.as_ref().unwrap();
+
+        same_game(&restored_hand.game, &expected);
+        assert_eq!(restored.rev, 2);
+        assert_eq!(restored_hand.next_seq, 1);
+        assert_eq!(seat_for_token(&restored, first), Some(0));
+        assert_eq!(seat_for_token(&restored, second), Some(1));
+        room = restored;
+
         persist(&db, id, &mut room, 1, Action::Call).await;
+
+        let expected = room.hand.as_ref().unwrap().game.clone();
+        let restored = reload(&db, id).await;
+        let restored_hand = restored.hand.as_ref().unwrap();
+
+        same_game(&restored_hand.game, &expected);
+        assert_eq!(restored_hand.game.street, Street::Flop);
+        assert_eq!(restored_hand.game.board.len(), 3);
+        assert_eq!(restored_hand.next_seq, 2);
+        room = restored;
+
         persist(&db, id, &mut room, 1, Action::Check).await;
 
         let state = room.hand.as_ref().unwrap().game.clone();
@@ -1203,6 +1562,41 @@ mod tests {
             4
         );
 
+        persist(&db, id, &mut room, 0, Action::Check).await;
+        persist(&db, id, &mut room, 1, Action::Check).await;
+        persist(&db, id, &mut room, 0, Action::Check).await;
+        persist(&db, id, &mut room, 1, Action::Check).await;
+        persist(&db, id, &mut room, 0, Action::Check).await;
+
+        let expected = room.hand.as_ref().unwrap().game.clone();
+        let restored = reload(&db, id).await;
+        let restored_hand = restored.hand.as_ref().unwrap();
+
+        same_game(&restored_hand.game, &expected);
+        assert!(restored_hand.game.settled);
+        assert_eq!(restored_hand.game.street, Street::River);
+        assert_eq!(restored_hand.game.board.len(), 5);
+        assert_eq!(restored_hand.game.pot, 0);
+        assert_eq!(restored_hand.next_seq, 8);
+        assert_eq!(restored.rev, 9);
+        assert!(
+            restored_hand
+                .game
+                .players
+                .iter()
+                .enumerate()
+                .all(|(player, _)| restored_hand.game.legal_actions(player).is_none())
+        );
+
+        let rows = sqlx::query("SELECT seq FROM hand_actions WHERE hand_id = $1 ORDER BY seq")
+            .bind(hand_id)
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+        let seqs: Vec<i64> = rows.iter().map(|row| row.get("seq")).collect();
+
+        assert_eq!(seqs, (0..8).collect::<Vec<_>>());
+
         let other_id = Uuid::new_v4();
         let other_first = hash_token(Uuid::new_v4());
         let other_second = hash_token(Uuid::new_v4());
@@ -1245,6 +1639,15 @@ mod tests {
         );
         persist(&db, other_id, &mut other, 0, Action::Fold).await;
 
+        let expected = other.hand.as_ref().unwrap().game.clone();
+        let restored = reload(&db, other_id).await;
+        let restored_hand = restored.hand.as_ref().unwrap();
+
+        same_game(&restored_hand.game, &expected);
+        assert!(restored_hand.game.settled);
+        assert_eq!(restored_hand.game.fold_winner, Some(1));
+        assert_eq!(restored_hand.game.pot, 0);
+
         let other_count = sqlx::query(
             "SELECT COUNT(*) AS count FROM hand_actions actions \
              JOIN hands ON hands.id = actions.hand_id WHERE hands.room_id = $1",
@@ -1264,7 +1667,86 @@ mod tests {
         .unwrap()
         .get::<i64, _>("count");
 
-        assert_eq!(first_count, 3);
+        assert_eq!(first_count, 8);
         assert_eq!(other_count, 1);
+
+        let mut all_in_config = config;
+        all_in_config.stack = 100;
+        let all_in_id = Uuid::new_v4();
+        let all_in_first = hash_token(Uuid::new_v4());
+        let all_in_second = hash_token(Uuid::new_v4());
+        let all_in_hand = Uuid::new_v4();
+        let all_in_stacks = vec![100, 100];
+        let mut all_in = Room::new(all_in_config, all_in_first).unwrap();
+
+        db.create_room(
+            all_in_id,
+            all_in_config.players,
+            all_in_config.stack,
+            all_in_config.small_blind,
+            all_in_config.big_blind,
+            &all_in_first,
+        )
+        .await
+        .unwrap();
+        db.join_room(
+            all_in_id,
+            1,
+            &all_in_second,
+            0,
+            1,
+            Some(NewHand {
+                id: all_in_hand,
+                seed: &SEED,
+                dealer: 0,
+                stacks: &all_in_stacks,
+            }),
+        )
+        .await
+        .unwrap();
+        all_in.commit_join(
+            all_in_second,
+            Some(LiveHand {
+                id: all_in_hand,
+                game: State::new(SEED, 0, &all_in_stacks, 5, 10),
+                next_seq: 0,
+            }),
+            1,
+        );
+        persist(&db, all_in_id, &mut all_in, 0, Action::RaiseTo(100)).await;
+        persist(&db, all_in_id, &mut all_in, 1, Action::Call).await;
+
+        let expected = all_in.hand.as_ref().unwrap().game.clone();
+        let restored = reload(&db, all_in_id).await;
+        let restored_hand = restored.hand.as_ref().unwrap();
+
+        same_game(&restored_hand.game, &expected);
+        assert!(restored_hand.game.settled);
+        assert_eq!(restored_hand.game.street, Street::River);
+        assert_eq!(restored_hand.game.board.len(), 5);
+        assert_eq!(restored_hand.game.pot, 0);
+
+        let latest_id = Uuid::new_v4();
+        let latest_seed = [0x24; 32];
+
+        sqlx::query(
+            "INSERT INTO hands (id, room_id, hand_no, seed, dealer, starting_stacks) \
+             VALUES ($1, $2, 1, $3, 1, $4)",
+        )
+        .bind(latest_id)
+        .bind(all_in_id)
+        .bind(latest_seed.as_slice())
+        .bind(vec![100i64, 100])
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        let restored = reload(&db, all_in_id).await;
+        let restored_hand = restored.hand.as_ref().unwrap();
+        let expected = State::new(latest_seed, 1, &[100, 100], 5, 10);
+
+        assert_eq!(restored_hand.id, latest_id);
+        assert_eq!(restored_hand.next_seq, 0);
+        same_game(&restored_hand.game, &expected);
     }
 }
