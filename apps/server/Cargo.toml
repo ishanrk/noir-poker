@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 axum = { version = "=0.8.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
+challenge-core = { path = "../../crates/challenge-core" }
 game-core = { path = "../../crates/game-core" }
 getrandom = "0.4.3"
 serde = { version = "1.0.229", features = ["derive"] }

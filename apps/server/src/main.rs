@@ -12,6 +12,9 @@ use axum::http::{HeaderValue, Method, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use challenge_core::{
+    FACT_COUNT, Facts, PROTOCOL_VERSION, TIER_EASY, TIER_HARD, facts_hash, hand_tag,
+};
 use game_core::{
     Action, ActionError, Card, LegalActions, NextHandError, Rank, State, Street, Suit,
 };
@@ -22,11 +25,15 @@ use tokio::sync::{Mutex, broadcast};
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
-use crate::db::{Db, NewAction, NewHand, ReadyUpdate, StoredAction, StoredHand, StoredRoom};
+use crate::db::{
+    Db, FactHash, NewAction, NewChallenge, NewHand, ReadyUpdate, StoredAction, StoredChallenge,
+    StoredHand, StoredRoom,
+};
 
 type HttpError = (StatusCode, &'static str);
 type TokenHash = [u8; 32];
 type Rooms = Arc<Mutex<HashMap<Uuid, Arc<Mutex<Room>>>>>;
+type Challenges = Vec<Option<Challenge>>;
 
 #[derive(Clone)]
 struct AppState {
@@ -83,6 +90,8 @@ struct Room {
     config: RoomConfig,
     seats: Vec<Seat>,
     hand: Option<LiveHand>,
+    current_challenges: Challenges,
+    next_challenges: Challenges,
     rev: u64,
     notify: broadcast::Sender<u64>,
 }
@@ -99,6 +108,8 @@ impl Room {
                 ready_hand: None,
             }],
             hand: None,
+            current_challenges: vec![None; config.players],
+            next_challenges: vec![None; config.players],
             rev: 0,
             notify,
         })
@@ -133,6 +144,15 @@ impl Room {
             return Err("already ready");
         }
 
+        if self
+            .next_challenges
+            .get(seat)
+            .and_then(Option::as_ref)
+            .is_none()
+        {
+            return Err("challenge required");
+        }
+
         let all = self
             .seats
             .iter()
@@ -153,12 +173,64 @@ impl Room {
             }
 
             self.hand = Some(hand);
+            self.current_challenges =
+                std::mem::replace(&mut self.next_challenges, vec![None; self.config.players]);
         } else {
             let hand = self.hand.as_ref().expect("staged hand").id;
 
             self.seats[seat].ready_hand = Some(hand);
         }
 
+        self.changed(rev);
+    }
+
+    fn stage_challenge(
+        &self,
+        room: Uuid,
+        seat: usize,
+        hand_no: u64,
+        tier: u8,
+        commitment: [u8; 32],
+    ) -> Result<PendingChallenge, &'static str> {
+        let hand = self.hand.as_ref().ok_or("game not started")?;
+
+        if !hand.game.settled {
+            return Err("hand not settled");
+        }
+
+        let next_no = hand.no.checked_add(1).ok_or("hand limit reached")?;
+
+        if hand_no != next_no {
+            return Err("wrong challenge hand");
+        }
+
+        if tier != TIER_EASY && tier != TIER_HARD {
+            return Err("invalid challenge tier");
+        }
+
+        if self
+            .next_challenges
+            .get(seat)
+            .and_then(Option::as_ref)
+            .is_some()
+        {
+            return Err("challenge already assigned");
+        }
+
+        Ok(PendingChallenge {
+            hand_no,
+            seat,
+            tier,
+            hand_tag: hand_tag(*room.as_bytes(), hand_no),
+            commitment,
+            rev: self.rev.checked_add(1).ok_or("revision limit reached")?,
+        })
+    }
+
+    fn commit_challenge(&mut self, challenge: Challenge, rev: u64) {
+        let seat = challenge.seat;
+
+        self.next_challenges[seat] = Some(challenge);
         self.changed(rev);
     }
 
@@ -171,6 +243,33 @@ impl Room {
         game.apply(seat, action).map_err(action_error)?;
         advance(&mut game)?;
 
+        let mut actions = hand.actions.clone();
+        actions.push(PlayedAction {
+            player: seat,
+            action,
+        });
+        let facts = if game.settled && hand.no > 0 {
+            let (replayed, facts) = replay_hand(
+                self.config,
+                hand.seed,
+                hand.game.dealer,
+                &hand.starting_stacks,
+                &actions,
+            )?;
+
+            if replayed != game {
+                return Err("hand replay mismatch");
+            }
+
+            Some(facts)
+        } else {
+            None
+        };
+        let fact_hashes = facts
+            .as_ref()
+            .map(|facts| challenge_hashes(&self.current_challenges, facts))
+            .transpose()?;
+
         Ok(PendingAction {
             hand: hand.id,
             seq: hand.next_seq,
@@ -179,6 +278,9 @@ impl Room {
             player: seat,
             action,
             game,
+            actions,
+            facts,
+            fact_hashes,
         })
     }
 
@@ -187,6 +289,19 @@ impl Room {
 
         hand.game = action.game;
         hand.next_seq = action.next_seq;
+        hand.actions = action.actions;
+
+        if let Some(facts) = action.facts {
+            for (seat, facts) in facts.into_iter().enumerate() {
+                let challenge = self.current_challenges[seat]
+                    .as_mut()
+                    .expect("staged challenge");
+
+                challenge.facts_hash = Some(facts_hash(challenge.hand_tag, seat as u8, facts));
+                challenge.facts = Some(facts);
+            }
+        }
+
         self.changed(action.rev);
     }
 
@@ -204,8 +319,38 @@ struct Seat {
 struct LiveHand {
     id: Uuid,
     no: u64,
+    seed: [u8; 32],
+    starting_stacks: Vec<u32>,
     game: State,
     next_seq: u64,
+    actions: Vec<PlayedAction>,
+}
+
+#[derive(Clone, Copy)]
+struct PlayedAction {
+    player: usize,
+    action: Action,
+}
+
+#[derive(Clone)]
+struct Challenge {
+    hand_no: u64,
+    seat: usize,
+    tier: u8,
+    hand_tag: [u8; 32],
+    commitment: [u8; 32],
+    nonce: [u8; 32],
+    facts_hash: Option<[u8; 32]>,
+    facts: Option<Facts>,
+}
+
+struct PendingChallenge {
+    hand_no: u64,
+    seat: usize,
+    tier: u8,
+    hand_tag: [u8; 32],
+    commitment: [u8; 32],
+    rev: u64,
 }
 
 struct PendingReady {
@@ -222,6 +367,9 @@ struct PendingAction {
     player: usize,
     action: Action,
     game: State,
+    actions: Vec<PlayedAction>,
+    facts: Option<Vec<Facts>>,
+    fact_hashes: Option<Vec<FactHash>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -238,12 +386,22 @@ struct SeatResponse {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 enum ClientMessage {
-    Auth { token: Uuid },
+    Auth {
+        token: Uuid,
+    },
     Fold,
     Check,
     Call,
-    RaiseTo { to: u32 },
+    RaiseTo {
+        to: u32,
+    },
+    ChallengeCommit {
+        hand_no: u64,
+        tier: u8,
+        commitment: String,
+    },
     Ready,
 }
 
@@ -251,7 +409,7 @@ enum ClientMessage {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerMessage {
     Waiting { joined: usize, players: usize },
-    Snapshot { rev: u64, view: SeatView },
+    Snapshot { rev: u64, view: Box<SeatView> },
     Error { message: &'static str },
 }
 
@@ -271,6 +429,35 @@ struct SeatView {
     actions: Option<ActionView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     ready: Option<ReadyView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    challenge: Option<ChallengeView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    claim: Option<ClaimView>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct ChallengeView {
+    hand_no: u64,
+    assigned: bool,
+    hand_tag: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tier: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    commitment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nonce: Option<String>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct ClaimView {
+    hand_no: u64,
+    hand_tag: String,
+    tier: u8,
+    commitment: String,
+    nonce: String,
+    facts_hash: String,
+    facts: [u8; FACT_COUNT],
+    claimable: bool,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -417,8 +604,11 @@ async fn join_room(
     let game = seed.map(|seed| LiveHand {
         id: hand_id.expect("hand id"),
         no: 0,
+        seed,
+        starting_stacks: stacks.clone().expect("starting stacks"),
         game: start_game(room.config, seed),
         next_seq: 0,
+        actions: Vec::new(),
     });
 
     state
@@ -456,7 +646,7 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
             let room = room.lock().await;
 
             match seat_for_token(&room, token) {
-                Some(seat) => Ok((seat, room.notify.subscribe(), room_message(&room, seat))),
+                Some(seat) => Ok((seat, room.notify.subscribe(), room_message(id, &room, seat))),
                 None => Err("unknown token"),
             }
         }
@@ -502,6 +692,13 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                     ClientMessage::Call => apply_action(&state, id, seat, Action::Call).await,
                     ClientMessage::RaiseTo { to } => {
                         apply_action(&state, id, seat, Action::RaiseTo(to)).await
+                    }
+                    ClientMessage::ChallengeCommit {
+                        hand_no,
+                        tier,
+                        commitment,
+                    } => {
+                        challenge_room(&state, id, seat, hand_no, tier, &commitment).await
                     }
                     ClientMessage::Ready => ready_room(&state, id, seat).await,
                     ClientMessage::Auth { .. } => {
@@ -576,15 +773,62 @@ async fn apply_action(
         .append_action(NewAction {
             room: id,
             hand: next.hand,
+            hand_no: room.hand.as_ref().expect("staged hand").no,
             seq: next.seq,
             player: next.player,
             action: next.action,
+            facts: next.fact_hashes.clone(),
             rev: room.rev,
             next_rev: next.rev,
         })
         .await
         .map_err(|_| "cannot persist action")?;
     room.commit_action(next);
+    Ok(())
+}
+
+async fn challenge_room(
+    state: &AppState,
+    id: Uuid,
+    seat: usize,
+    hand_no: u64,
+    tier: u8,
+    commitment: &str,
+) -> Result<(), &'static str> {
+    let commitment = decode_hex(commitment).ok_or("invalid challenge commitment")?;
+    let room = find_room(state, id).await.ok_or("room not found")?;
+    let mut room = room.lock().await;
+    let pending = room.stage_challenge(id, seat, hand_no, tier, commitment)?;
+
+    // nonce after commitment validation
+    let nonce = secure_nonce().map_err(|_| "cannot assign challenge")?;
+    let challenge = Challenge {
+        hand_no: pending.hand_no,
+        seat: pending.seat,
+        tier: pending.tier,
+        hand_tag: pending.hand_tag,
+        commitment: pending.commitment,
+        nonce,
+        facts_hash: None,
+        facts: None,
+    };
+
+    state
+        .db
+        .add_challenge(NewChallenge {
+            room: id,
+            hand_no: pending.hand_no,
+            seat: pending.seat,
+            tier: pending.tier,
+            hand_tag: pending.hand_tag,
+            commitment: pending.commitment,
+            nonce,
+            rev: room.rev,
+            next_rev: pending.rev,
+        })
+        .await
+        .map_err(|_| "cannot persist challenge")?;
+    room.commit_challenge(challenge, pending.rev);
     Ok(())
 }
 
@@ -623,8 +867,11 @@ async fn ready_room(state: &AppState, id: Uuid, seat: usize) -> Result<(), &'sta
         Ok(game) => Some(LiveHand {
             id: Uuid::new_v4(),
             no: next_no,
+            seed,
+            starting_stacks: stacks.clone(),
             game,
             next_seq: 0,
+            actions: Vec::new(),
         }),
         Err(NextHandError::CannotStart) => None,
         Err(NextHandError::NotSettled) => return Err("hand not settled"),
@@ -657,14 +904,14 @@ async fn current_message(state: &AppState, id: Uuid, seat: usize) -> Option<Serv
     let room = find_room(state, id).await?;
     let room = room.lock().await;
 
-    Some(room_message(&room, seat))
+    Some(room_message(id, &room, seat))
 }
 
-fn room_message(room: &Room, seat: usize) -> ServerMessage {
+fn room_message(id: Uuid, room: &Room, seat: usize) -> ServerMessage {
     match &room.hand {
         Some(hand) => ServerMessage::Snapshot {
             rev: room.rev,
-            view: room_view(room, hand, seat),
+            view: Box::new(room_view(id, room, hand, seat)),
         },
         None => ServerMessage::Waiting {
             joined: room.seats.len(),
@@ -673,7 +920,7 @@ fn room_message(room: &Room, seat: usize) -> ServerMessage {
     }
 }
 
-fn room_view(room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
+fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
     let mut view = seat_view(&hand.game, seat);
 
     if hand.game.settled {
@@ -689,9 +936,53 @@ fn room_view(room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
             players: room.seats.len(),
             complete: count == room.seats.len(),
         });
+
+        let next_no = hand.no.checked_add(1).expect("valid hand number");
+        view.challenge = Some(challenge_view(
+            next_no,
+            hand_tag(*id.as_bytes(), next_no),
+            room.next_challenges[seat].as_ref(),
+        ));
+
+        if let Some(challenge) = room.current_challenges[seat].as_ref() {
+            view.claim = challenge
+                .facts
+                .zip(challenge.facts_hash)
+                .map(|(facts, hash)| ClaimView {
+                    hand_no: challenge.hand_no,
+                    hand_tag: encode_hex(challenge.hand_tag),
+                    tier: challenge.tier,
+                    commitment: encode_hex(challenge.commitment),
+                    nonce: encode_hex(challenge.nonce),
+                    facts_hash: encode_hex(hash),
+                    facts: facts.bytes(),
+                    claimable: true,
+                });
+        }
+    } else if let Some(challenge) = room.current_challenges[seat].as_ref() {
+        view.challenge = Some(challenge_view(
+            challenge.hand_no,
+            challenge.hand_tag,
+            Some(challenge),
+        ));
     }
 
     view
+}
+
+fn challenge_view(
+    hand_no: u64,
+    hand_tag: [u8; 32],
+    challenge: Option<&Challenge>,
+) -> ChallengeView {
+    ChallengeView {
+        hand_no,
+        assigned: challenge.is_some(),
+        hand_tag: encode_hex(hand_tag),
+        tier: challenge.map(|challenge| challenge.tier),
+        commitment: challenge.map(|challenge| encode_hex(challenge.commitment)),
+        nonce: challenge.map(|challenge| encode_hex(challenge.nonce)),
+    }
 }
 
 async fn send_message(socket: &mut WebSocket, message: &ServerMessage) -> bool {
@@ -737,6 +1028,13 @@ fn secure_seed() -> Result<[u8; 32], getrandom::Error> {
     Ok(seed)
 }
 
+fn secure_nonce() -> Result<[u8; 32], getrandom::Error> {
+    let mut nonce = [0u8; 32];
+
+    getrandom::fill(&mut nonce)?;
+    Ok(nonce)
+}
+
 fn start_game(config: RoomConfig, seed: [u8; 32]) -> State {
     let stacks = vec![config.stack; config.players];
 
@@ -759,6 +1057,121 @@ fn advance(game: &mut State) -> Result<(), &'static str> {
     }
 
     Ok(())
+}
+
+fn replay_hand(
+    config: RoomConfig,
+    seed: [u8; 32],
+    dealer: usize,
+    stacks: &[u32],
+    actions: &[PlayedAction],
+) -> Result<(State, Vec<Facts>), &'static str> {
+    let mut game = State::new(seed, dealer, stacks, config.small_blind, config.big_blind);
+    let mut facts = vec![empty_facts(); stacks.len()];
+
+    for action in actions {
+        let street = game.street;
+
+        game.apply(action.player, action.action)
+            .map_err(|_| "action replay rejected")?;
+
+        match (street, action.action) {
+            (Street::Preflop, Action::RaiseTo(_)) => {
+                facts[action.player].raised_preflop = true;
+            }
+            (Street::Preflop, Action::Call) => {
+                facts[action.player].called_preflop = true;
+            }
+            (Street::Flop, Action::Check) => {
+                facts[action.player].checked_flop = true;
+            }
+            _ => {}
+        }
+
+        if street == Street::Preflop && game.round_complete && game.fold_winner.is_none() {
+            for (seat, player) in game.players.iter().enumerate() {
+                facts[seat].saw_flop = !player.folded;
+            }
+        }
+
+        advance(&mut game)?;
+    }
+
+    if game.settled {
+        for (seat, player) in game.players.iter().enumerate() {
+            facts[seat].reached_showdown = game.fold_winner.is_none() && !player.folded;
+            facts[seat].net_profit = player.stack > stacks[seat];
+        }
+    }
+
+    Ok((game, facts))
+}
+
+const fn empty_facts() -> Facts {
+    Facts {
+        saw_flop: false,
+        raised_preflop: false,
+        called_preflop: false,
+        checked_flop: false,
+        reached_showdown: false,
+        net_profit: false,
+    }
+}
+
+fn challenge_hashes(
+    challenges: &[Option<Challenge>],
+    facts: &[Facts],
+) -> Result<Vec<FactHash>, &'static str> {
+    challenges
+        .iter()
+        .zip(facts)
+        .enumerate()
+        .map(|(seat, (challenge, facts))| {
+            let challenge = challenge.as_ref().ok_or("challenge missing")?;
+
+            Ok(FactHash {
+                seat,
+                value: facts_hash(challenge.hand_tag, seat as u8, *facts),
+            })
+        })
+        .collect()
+}
+
+fn encode_hex(bytes: [u8; 32]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut value = String::with_capacity(64);
+
+    for byte in bytes {
+        value.push(char::from(HEX[usize::from(byte >> 4)]));
+        value.push(char::from(HEX[usize::from(byte & 15)]));
+    }
+
+    value
+}
+
+fn decode_hex(value: &str) -> Option<[u8; 32]> {
+    if value.len() != 64 {
+        return None;
+    }
+
+    let mut bytes = [0u8; 32];
+
+    for (i, byte) in bytes.iter_mut().enumerate() {
+        let high = hex_nibble(value.as_bytes()[i * 2])?;
+        let low = hex_nibble(value.as_bytes()[i * 2 + 1])?;
+
+        *byte = high << 4 | low;
+    }
+
+    Some(bytes)
+}
+
+const fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
 }
 
 fn restore_rooms(stored: Vec<StoredRoom>) -> Result<HashMap<Uuid, Arc<Mutex<Room>>>, io::Error> {
@@ -817,13 +1230,30 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
         });
     }
 
-    let hand = match stored.hand {
-        Some(hand) if seats.len() == config.players => Some(restore_hand(id, config, hand)?),
+    let (hand, facts) = match stored.hand {
+        Some(hand) if seats.len() == config.players => {
+            let (hand, facts) = restore_hand(id, config, hand)?;
+
+            (Some(hand), facts)
+        }
         Some(_) => return Err(recovery_error(id, "hand before room full")),
         None if seats.len() == config.players => {
             return Err(recovery_error(id, "full room without hand"));
         }
-        None => None,
+        None => (None, None),
+    };
+    let (current_challenges, next_challenges) = match &hand {
+        Some(hand) => restore_challenges(
+            id,
+            hand,
+            facts.as_deref(),
+            stored.challenges,
+            config.players,
+        )?,
+        None if stored.challenges.is_empty() => {
+            (vec![None; config.players], vec![None; config.players])
+        }
+        None => return Err(recovery_error(id, "challenge without hand")),
     };
     let ready_count = match &hand {
         Some(hand) => {
@@ -850,6 +1280,15 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
     let min_rev = seat_revs
         .checked_add(action_count)
         .and_then(|rev| rev.checked_add(ready_count))
+        .and_then(|rev| {
+            rev.checked_add(
+                u64::try_from(
+                    current_challenges.iter().flatten().count()
+                        + next_challenges.iter().flatten().count(),
+                )
+                .ok()?,
+            )
+        })
         .ok_or_else(|| recovery_error(id, "revision limit reached"))?;
 
     if rev < min_rev {
@@ -862,12 +1301,18 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
         config,
         seats,
         hand,
+        current_challenges,
+        next_challenges,
         rev,
         notify,
     })
 }
 
-fn restore_hand(id: Uuid, config: RoomConfig, stored: StoredHand) -> Result<LiveHand, io::Error> {
+fn restore_hand(
+    id: Uuid,
+    config: RoomConfig,
+    stored: StoredHand,
+) -> Result<(LiveHand, Option<Vec<Facts>>), io::Error> {
     let no =
         u64::try_from(stored.hand_no).map_err(|_| recovery_error(id, "invalid hand number"))?;
     let seed = stored
@@ -891,9 +1336,9 @@ fn restore_hand(id: Uuid, config: RoomConfig, stored: StoredHand) -> Result<Live
         return Err(recovery_error(id, "invalid hand inputs"));
     }
 
-    let mut game = State::new(seed, dealer, &stacks, config.small_blind, config.big_blind);
     let next_seq = u64::try_from(stored.actions.len())
         .map_err(|_| recovery_error(id, "action limit reached"))?;
+    let mut actions = Vec::with_capacity(stored.actions.len());
 
     // replay persisted actions
     for (expected, stored) in stored.actions.into_iter().enumerate() {
@@ -913,17 +1358,134 @@ fn restore_hand(id: Uuid, config: RoomConfig, stored: StoredHand) -> Result<Live
             return Err(recovery_error(id, "invalid action player"));
         }
 
-        game.apply(player, action)
-            .map_err(|_| recovery_error(id, "action replay rejected"))?;
-        advance(&mut game).map_err(|_| recovery_error(id, "action replay failed"))?;
+        actions.push(PlayedAction { player, action });
     }
 
-    Ok(LiveHand {
-        id: stored.id,
-        no,
-        game,
-        next_seq,
-    })
+    let (game, facts) = replay_hand(config, seed, dealer, &stacks, &actions)
+        .map_err(|_| recovery_error(id, "action replay failed"))?;
+    let facts = game.settled.then_some(facts);
+
+    Ok((
+        LiveHand {
+            id: stored.id,
+            no,
+            seed,
+            starting_stacks: stacks.clone(),
+            game,
+            next_seq,
+            actions,
+        },
+        facts,
+    ))
+}
+
+fn restore_challenges(
+    id: Uuid,
+    hand: &LiveHand,
+    facts: Option<&[Facts]>,
+    stored: Vec<StoredChallenge>,
+    players: usize,
+) -> Result<(Challenges, Challenges), io::Error> {
+    let mut current = vec![None; players];
+    let mut next = vec![None; players];
+    let next_no = hand
+        .no
+        .checked_add(1)
+        .ok_or_else(|| recovery_error(id, "hand limit reached"))?;
+
+    for stored in stored {
+        let no = u64::try_from(stored.hand_no)
+            .map_err(|_| recovery_error(id, "invalid challenge hand"))?;
+
+        if no < hand.no {
+            continue;
+        }
+
+        if no > next_no {
+            return Err(recovery_error(id, "future challenge hand"));
+        }
+
+        let seat = usize::try_from(stored.seat)
+            .map_err(|_| recovery_error(id, "invalid challenge seat"))?;
+        let tier =
+            u8::try_from(stored.tier).map_err(|_| recovery_error(id, "invalid challenge tier"))?;
+
+        if seat >= players
+            || stored.version != i32::from(PROTOCOL_VERSION)
+            || (tier != TIER_EASY && tier != TIER_HARD)
+        {
+            return Err(recovery_error(id, "invalid challenge assignment"));
+        }
+
+        let tag: [u8; 32] = stored
+            .hand_tag
+            .try_into()
+            .map_err(|_| recovery_error(id, "invalid challenge hand tag"))?;
+        let commitment = stored
+            .commitment
+            .try_into()
+            .map_err(|_| recovery_error(id, "invalid challenge commitment"))?;
+        let nonce = stored
+            .nonce
+            .try_into()
+            .map_err(|_| recovery_error(id, "invalid challenge nonce"))?;
+        let stored_hash = stored
+            .facts_hash
+            .map(|hash| {
+                hash.try_into()
+                    .map_err(|_| recovery_error(id, "invalid challenge facts hash"))
+            })
+            .transpose()?;
+
+        if tag != hand_tag(*id.as_bytes(), no) {
+            return Err(recovery_error(id, "challenge hand tag mismatch"));
+        }
+
+        let mut challenge = Challenge {
+            hand_no: no,
+            seat,
+            tier,
+            hand_tag: tag,
+            commitment,
+            nonce,
+            facts_hash: stored_hash,
+            facts: None,
+        };
+
+        if no == hand.no {
+            if hand.no == 0 || current[seat].is_some() {
+                return Err(recovery_error(id, "invalid current challenge"));
+            }
+
+            match (hand.game.settled, facts, stored_hash) {
+                (true, Some(facts), Some(stored_hash)) => {
+                    let expected = facts_hash(tag, seat as u8, facts[seat]);
+
+                    if stored_hash != expected {
+                        return Err(recovery_error(id, "challenge facts hash mismatch"));
+                    }
+
+                    challenge.facts = Some(facts[seat]);
+                }
+                (false, _, None) => {}
+                _ => return Err(recovery_error(id, "invalid challenge facts")),
+            }
+
+            current[seat] = Some(challenge);
+        } else {
+            if !hand.game.settled || stored_hash.is_some() || next[seat].is_some() {
+                return Err(recovery_error(id, "invalid next challenge"));
+            }
+
+            next[seat] = Some(challenge);
+        }
+    }
+
+    if hand.no > 0 && current.iter().any(Option::is_none) {
+        return Err(recovery_error(id, "current challenge missing"));
+    }
+
+    Ok((current, next))
 }
 
 fn restore_action(stored: &StoredAction) -> Result<Action, &'static str> {
@@ -971,6 +1533,8 @@ fn seat_view(game: &State, seat: usize) -> SeatView {
         settled: game.settled,
         actions: game.legal_actions(seat).map(action_view),
         ready: None,
+        challenge: None,
+        claim: None,
     }
 }
 
@@ -1044,6 +1608,7 @@ mod tests {
 
     const SEED: [u8; 32] = [0x42; 32];
     const NEXT_SEED: [u8; 32] = [0x24; 32];
+    const TEST_ROOM: Uuid = Uuid::from_u128(10);
 
     fn config(players: usize) -> RoomConfig {
         RoomConfig {
@@ -1069,13 +1634,9 @@ mod tests {
         let seat = room.next_seat()?;
         let hand = if seat + 1 == room.config.players {
             let seed = seed.expect("test seed");
+            let stacks = vec![room.config.stack; room.config.players];
 
-            Some(LiveHand {
-                id: Uuid::new_v4(),
-                no: 0,
-                game: start_game(room.config, seed),
-                next_seq: 0,
-            })
+            Some(live_hand(Uuid::new_v4(), 0, seed, 0, stacks, room.config))
         } else {
             None
         };
@@ -1083,6 +1644,50 @@ mod tests {
 
         room.commit_join(hash_token(token), hand, rev);
         Ok(seat)
+    }
+
+    fn live_hand(
+        id: Uuid,
+        no: u64,
+        seed: [u8; 32],
+        dealer: usize,
+        stacks: Vec<u32>,
+        config: RoomConfig,
+    ) -> LiveHand {
+        LiveHand {
+            id,
+            no,
+            seed,
+            game: State::new(seed, dealer, &stacks, config.small_blind, config.big_blind),
+            starting_stacks: stacks,
+            next_seq: 0,
+            actions: Vec::new(),
+        }
+    }
+
+    fn assign(room: &mut Room, id: Uuid, seat: usize, tier: u8) {
+        let hand_no = room.hand.as_ref().unwrap().no + 1;
+        let pending = room
+            .stage_challenge(id, seat, hand_no, tier, [seat as u8 + 1; 32])
+            .unwrap();
+        let challenge = Challenge {
+            hand_no,
+            seat,
+            tier,
+            hand_tag: pending.hand_tag,
+            commitment: pending.commitment,
+            nonce: [seat as u8 + 7; 32],
+            facts_hash: None,
+            facts: None,
+        };
+
+        room.commit_challenge(challenge, pending.rev);
+    }
+
+    fn assign_all(room: &mut Room, id: Uuid) {
+        for seat in 0..room.seats.len() {
+            assign(room, id, seat, TIER_EASY);
+        }
     }
 
     fn apply(room: &mut Room, seat: usize, action: Action) -> Result<(), &'static str> {
@@ -1094,7 +1699,7 @@ mod tests {
 
     fn stored_room() -> StoredRoom {
         StoredRoom {
-            id: Uuid::from_u128(10),
+            id: TEST_ROOM,
             players: 2,
             stack: 1000,
             small_blind: 5,
@@ -1120,6 +1725,7 @@ mod tests {
                 stacks: vec![1000, 1000],
                 actions: Vec::new(),
             }),
+            challenges: Vec::new(),
         }
     }
 
@@ -1162,9 +1768,11 @@ mod tests {
         db.append_action(NewAction {
             room: id,
             hand: next.hand,
+            hand_no: room.hand.as_ref().unwrap().no,
             seq: next.seq,
             player: next.player,
             action: next.action,
+            facts: next.fact_hashes.clone(),
             rev: room.rev,
             next_rev: next.rev,
         })
@@ -1518,6 +2126,8 @@ mod tests {
 
         assert_eq!(room.stage_ready(0).err(), Some("hand not settled"));
         apply(&mut room, 0, Action::Fold).unwrap();
+        assert_eq!(room.stage_ready(0).err(), Some("challenge required"));
+        assign_all(&mut room, TEST_ROOM);
 
         let ready = room.stage_ready(0).unwrap();
 
@@ -1525,10 +2135,10 @@ mod tests {
         room.commit_ready(0, None, ready.rev);
         assert_eq!(room.stage_ready(0).err(), Some("already ready"));
 
-        let first = room_view(&room, room.hand.as_ref().unwrap(), 0)
+        let first = room_view(TEST_ROOM, &room, room.hand.as_ref().unwrap(), 0)
             .ready
             .unwrap();
-        let second = room_view(&room, room.hand.as_ref().unwrap(), 1)
+        let second = room_view(TEST_ROOM, &room, room.hand.as_ref().unwrap(), 1)
             .ready
             .unwrap();
 
@@ -1539,10 +2149,248 @@ mod tests {
     }
 
     #[test]
+    fn challenge_rules() {
+        let mut room = started(100);
+
+        assert_eq!(
+            room.stage_challenge(TEST_ROOM, 0, 1, TIER_EASY, [1; 32])
+                .err(),
+            Some("hand not settled")
+        );
+        apply(&mut room, 0, Action::Fold).unwrap();
+        assert_eq!(
+            room.stage_challenge(TEST_ROOM, 0, 2, TIER_EASY, [1; 32])
+                .err(),
+            Some("wrong challenge hand")
+        );
+        assert_eq!(
+            room.stage_challenge(TEST_ROOM, 0, 1, 2, [1; 32]).err(),
+            Some("invalid challenge tier")
+        );
+
+        assign(&mut room, TEST_ROOM, 0, TIER_EASY);
+        assign(&mut room, TEST_ROOM, 1, TIER_HARD);
+
+        assert_eq!(
+            room.stage_challenge(TEST_ROOM, 0, 1, TIER_HARD, [9; 32])
+                .err(),
+            Some("challenge already assigned")
+        );
+
+        let first = room_view(TEST_ROOM, &room, room.hand.as_ref().unwrap(), 0)
+            .challenge
+            .unwrap();
+        let second = room_view(TEST_ROOM, &room, room.hand.as_ref().unwrap(), 1)
+            .challenge
+            .unwrap();
+
+        assert!(first.assigned);
+        assert!(second.assigned);
+        assert_eq!(first.tier, Some(TIER_EASY));
+        assert_eq!(second.tier, Some(TIER_HARD));
+        assert_ne!(first.commitment, second.commitment);
+        assert_eq!(
+            first.hand_tag,
+            encode_hex(hand_tag(*TEST_ROOM.as_bytes(), 1))
+        );
+        assert!(room.stage_ready(0).is_ok());
+    }
+
+    #[test]
+    fn challenge_message() {
+        let value = "11".repeat(32);
+        let valid = format!(
+            "{{\"type\":\"challenge_commit\",\"hand_no\":1,\"tier\":0,\"commitment\":\"{value}\"}}"
+        );
+        let secret = format!(
+            "{{\"type\":\"challenge_commit\",\"hand_no\":1,\"tier\":0,\"commitment\":\"{value}\",\"secret\":\"{value}\"}}"
+        );
+        let index = format!(
+            "{{\"type\":\"challenge_commit\",\"hand_no\":1,\"tier\":0,\"commitment\":\"{value}\",\"objective_index\":2}}"
+        );
+
+        assert!(serde_json::from_str::<ClientMessage>(&valid).is_ok());
+        assert!(serde_json::from_str::<ClientMessage>(&secret).is_err());
+        assert!(serde_json::from_str::<ClientMessage>(&index).is_err());
+        assert!(decode_hex(&value).is_some());
+        assert!(decode_hex(&value[..62]).is_none());
+        assert!(decode_hex(&"aa".repeat(32).to_uppercase()).is_none());
+    }
+
+    #[test]
+    fn replay_facts() {
+        let config = RoomConfig {
+            players: 2,
+            stack: 100,
+            small_blind: 5,
+            big_blind: 10,
+        };
+        let stacks = [100, 100];
+        let actions = [
+            PlayedAction {
+                player: 0,
+                action: Action::RaiseTo(20),
+            },
+            PlayedAction {
+                player: 1,
+                action: Action::Call,
+            },
+        ];
+        let (_, facts) = replay_hand(config, SEED, 0, &stacks, &actions).unwrap();
+
+        assert!(facts[0].raised_preflop);
+        assert!(facts[0].saw_flop);
+        assert!(facts[1].saw_flop);
+
+        let actions = [
+            PlayedAction {
+                player: 0,
+                action: Action::Call,
+            },
+            PlayedAction {
+                player: 1,
+                action: Action::Check,
+            },
+            PlayedAction {
+                player: 1,
+                action: Action::Check,
+            },
+            PlayedAction {
+                player: 0,
+                action: Action::Fold,
+            },
+        ];
+        let (game, facts) = replay_hand(config, SEED, 0, &stacks, &actions).unwrap();
+
+        assert!(game.settled);
+        assert!(facts[0].called_preflop);
+        assert!(facts[0].saw_flop);
+        assert!(facts[1].checked_flop);
+        assert!(!facts[0].reached_showdown);
+        assert!(!facts[1].reached_showdown);
+        assert_eq!(facts[1].net_profit, game.players[1].stack > stacks[1]);
+
+        let actions = [PlayedAction {
+            player: 0,
+            action: Action::Fold,
+        }];
+        let (_, facts) = replay_hand(config, SEED, 0, &stacks, &actions).unwrap();
+
+        assert!(!facts[0].saw_flop);
+        assert!(!facts[1].saw_flop);
+
+        let actions = [
+            PlayedAction {
+                player: 0,
+                action: Action::Call,
+            },
+            PlayedAction {
+                player: 1,
+                action: Action::Check,
+            },
+            PlayedAction {
+                player: 1,
+                action: Action::Check,
+            },
+            PlayedAction {
+                player: 0,
+                action: Action::Check,
+            },
+            PlayedAction {
+                player: 1,
+                action: Action::Check,
+            },
+            PlayedAction {
+                player: 0,
+                action: Action::Check,
+            },
+            PlayedAction {
+                player: 1,
+                action: Action::Check,
+            },
+            PlayedAction {
+                player: 0,
+                action: Action::Check,
+            },
+        ];
+        let (game, facts) = replay_hand(config, SEED, 0, &stacks, &actions).unwrap();
+
+        assert!(game.settled);
+        assert!(facts.iter().all(|facts| facts.reached_showdown));
+
+        for seat in 0..2 {
+            assert_eq!(
+                facts[seat].net_profit,
+                game.players[seat].stack > stacks[seat]
+            );
+        }
+    }
+
+    #[test]
+    fn challenge_recovery() {
+        let mut stored = stored_room();
+        let hand = stored.hand.as_mut().unwrap();
+
+        hand.hand_no = 1;
+        hand.actions.push(StoredAction {
+            seq: 0,
+            player: 0,
+            action: "fold".to_owned(),
+            raise_to: None,
+        });
+        stored.rev = 4;
+        let (_, facts) = replay_hand(
+            config(2),
+            SEED,
+            0,
+            &[1000, 1000],
+            &[PlayedAction {
+                player: 0,
+                action: Action::Fold,
+            }],
+        )
+        .unwrap();
+        let tag = hand_tag(*TEST_ROOM.as_bytes(), 1);
+
+        for seat in 0..2 {
+            stored.challenges.push(StoredChallenge {
+                hand_no: 1,
+                seat,
+                version: i32::from(PROTOCOL_VERSION),
+                tier: i32::from(TIER_EASY),
+                hand_tag: tag.to_vec(),
+                commitment: vec![seat as u8 + 1; 32],
+                nonce: vec![seat as u8 + 7; 32],
+                facts_hash: Some(facts_hash(tag, seat as u8, facts[seat as usize]).to_vec()),
+            });
+        }
+
+        let restored = restore_room(stored.clone()).unwrap();
+
+        assert!(restored.hand.as_ref().unwrap().game.settled);
+        assert_eq!(
+            restored.current_challenges[0].as_ref().unwrap().nonce,
+            [7; 32]
+        );
+        assert!(
+            restored.current_challenges[0]
+                .as_ref()
+                .unwrap()
+                .facts
+                .is_some()
+        );
+
+        let mut corrupt = stored;
+        corrupt.challenges[0].facts_hash.as_mut().unwrap()[0] ^= 1;
+        assert!(restore_room(corrupt).is_err());
+    }
+
+    #[test]
     fn next_hand() {
         let mut room = started(100);
 
         apply(&mut room, 0, Action::Fold).unwrap();
+        assign_all(&mut room, TEST_ROOM);
 
         let old = room.hand.as_ref().unwrap();
         let old_hole = old.game.hole.clone();
@@ -1562,8 +2410,11 @@ mod tests {
         let hand = LiveHand {
             id: Uuid::new_v4(),
             no: 1,
+            seed: NEXT_SEED,
+            starting_stacks: stacks.clone(),
             game,
             next_seq: 0,
+            actions: Vec::new(),
         };
 
         assert!(ready.all);
@@ -1584,7 +2435,7 @@ mod tests {
             stacks
         );
         assert!(room.seats.iter().all(|seat| seat.ready_hand.is_none()));
-        assert!(room_view(&room, hand, 0).ready.is_none());
+        assert!(room_view(TEST_ROOM, &room, hand, 0).ready.is_none());
         assert_ne!(seat_view(&hand.game, 0).hole, seat_view(&hand.game, 1).hole);
     }
 
@@ -1594,6 +2445,7 @@ mod tests {
 
         apply(&mut room, 0, Action::Fold).unwrap();
         let game = room.hand.as_ref().unwrap().game.clone();
+        assign_all(&mut room, TEST_ROOM);
 
         let ready = room.stage_ready(0).unwrap();
         room.commit_ready(0, None, ready.rev);
@@ -1607,7 +2459,7 @@ mod tests {
         room.commit_ready(1, None, ready.rev);
 
         let hand = room.hand.as_ref().unwrap();
-        let view = room_view(&room, hand, 0).ready.unwrap();
+        let view = room_view(TEST_ROOM, &room, hand, 0).ready.unwrap();
 
         assert_eq!(hand.game, game);
         assert_eq!(hand.no, 0);
@@ -1621,7 +2473,7 @@ mod tests {
         let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();
@@ -1654,7 +2506,7 @@ mod tests {
         assert_eq!(seat_for_token(&waiting, waiting_first), Some(0));
         assert_eq!(seat_for_token(&waiting, waiting_second), Some(1));
         assert_eq!(
-            room_message(&waiting, 0),
+            room_message(waiting_id, &waiting, 0),
             ServerMessage::Waiting {
                 joined: 2,
                 players: 3
@@ -1715,12 +2567,7 @@ mod tests {
         .unwrap();
         room.commit_join(
             second_hash,
-            Some(LiveHand {
-                id: hand_id,
-                no: 0,
-                game: start_game(config, SEED),
-                next_seq: 0,
-            }),
+            Some(live_hand(hand_id, 0, SEED, 0, stacks.clone(), config)),
             1,
         );
 
@@ -1811,9 +2658,11 @@ mod tests {
             db.append_action(NewAction {
                 room: id,
                 hand: next.hand,
+                hand_no: 0,
                 seq: next.seq,
                 player: next.player,
                 action: next.action,
+                facts: next.fact_hashes.clone(),
                 rev: rev + 1,
                 next_rev: next.rev,
             })
@@ -1931,12 +2780,7 @@ mod tests {
         .unwrap();
         other.commit_join(
             other_second,
-            Some(LiveHand {
-                id: other_hand,
-                no: 0,
-                game: start_game(config, SEED),
-                next_seq: 0,
-            }),
+            Some(live_hand(other_hand, 0, SEED, 0, stacks.clone(), config)),
             1,
         );
         persist(&db, other_id, &mut other, 0, Action::Fold).await;
@@ -2009,12 +2853,14 @@ mod tests {
         .unwrap();
         all_in.commit_join(
             all_in_second,
-            Some(LiveHand {
-                id: all_in_hand,
-                no: 0,
-                game: State::new(SEED, 0, &all_in_stacks, 5, 10),
-                next_seq: 0,
-            }),
+            Some(live_hand(
+                all_in_hand,
+                0,
+                SEED,
+                0,
+                all_in_stacks.clone(),
+                all_in_config,
+            )),
             1,
         );
         persist(&db, all_in_id, &mut all_in, 0, Action::RaiseTo(100)).await;
@@ -2044,6 +2890,24 @@ mod tests {
         .execute(db.pool())
         .await
         .unwrap();
+
+        let latest_tag = hand_tag(*all_in_id.as_bytes(), 1);
+
+        for seat in 0..2i32 {
+            sqlx::query(
+                "INSERT INTO challenge_assignments \
+                 (room_id, hand_no, seat, version, tier, hand_tag, commitment, nonce) \
+                 VALUES ($1, 1, $2, 1, 0, $3, $4, $5)",
+            )
+            .bind(all_in_id)
+            .bind(seat)
+            .bind(latest_tag.as_slice())
+            .bind(vec![seat as u8 + 1; 32])
+            .bind(vec![seat as u8 + 7; 32])
+            .execute(db.pool())
+            .await
+            .unwrap();
+        }
 
         let restored = reload(&db, all_in_id).await;
         let restored_hand = restored.hand.as_ref().unwrap();
@@ -2094,12 +2958,14 @@ mod tests {
         .unwrap();
         live.commit_join(
             hash_token(ready_second),
-            Some(LiveHand {
-                id: ready_hand,
-                no: 0,
-                game: State::new(SEED, 0, &ready_stacks, 5, 10),
-                next_seq: 0,
-            }),
+            Some(live_hand(
+                ready_hand,
+                0,
+                SEED,
+                0,
+                ready_stacks.clone(),
+                ready_config,
+            )),
             1,
         );
 
@@ -2114,6 +2980,31 @@ mod tests {
         apply_action(&ready_state, ready_id, 0, Action::Fold)
             .await
             .unwrap();
+        assert_eq!(
+            ready_room(&ready_state, ready_id, 0).await,
+            Err("challenge required")
+        );
+        let first_commitment = encode_hex([1; 32]);
+        let second_commitment = encode_hex([2; 32]);
+
+        challenge_room(&ready_state, ready_id, 0, 1, TIER_EASY, &first_commitment)
+            .await
+            .unwrap();
+        challenge_room(&ready_state, ready_id, 1, 1, TIER_HARD, &second_commitment)
+            .await
+            .unwrap();
+        assert_eq!(
+            challenge_room(
+                &ready_state,
+                ready_id,
+                0,
+                1,
+                TIER_HARD,
+                &encode_hex([9; 32]),
+            )
+            .await,
+            Err("challenge already assigned")
+        );
         ready_room(&ready_state, ready_id, 0).await.unwrap();
 
         let rev = sqlx::query("SELECT rev FROM rooms WHERE id = $1")
@@ -2123,7 +3014,33 @@ mod tests {
             .unwrap()
             .get::<i64, _>("rev");
 
-        assert_eq!(rev, 3);
+        assert_eq!(rev, 5);
+        let assignments = sqlx::query(
+            "SELECT hand_no, seat, version, tier, hand_tag, commitment, nonce, facts_hash \
+             FROM challenge_assignments WHERE room_id = $1 ORDER BY seat",
+        )
+        .bind(ready_id)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(assignments.len(), 2);
+        assert_eq!(assignments[0].get::<i64, _>("hand_no"), 1);
+        assert_eq!(assignments[0].get::<i32, _>("seat"), 0);
+        assert_eq!(assignments[1].get::<i32, _>("tier"), i32::from(TIER_HARD));
+        assert_eq!(assignments[0].get::<i32, _>("version"), 1);
+        assert_eq!(
+            assignments[0].get::<Vec<u8>, _>("hand_tag"),
+            hand_tag(*ready_id.as_bytes(), 1)
+        );
+        assert_eq!(assignments[0].get::<Vec<u8>, _>("commitment"), [1; 32]);
+        assert_eq!(assignments[0].get::<Vec<u8>, _>("nonce").len(), 32);
+        assert!(
+            assignments[0]
+                .get::<Option<Vec<u8>>, _>("facts_hash")
+                .is_none()
+        );
+        let first_nonce = assignments[0].get::<Vec<u8>, _>("nonce");
         assert_eq!(
             sqlx::query("SELECT ready_hand FROM seats WHERE room_id = $1 AND seat = 0")
                 .bind(ready_id)
@@ -2148,17 +3065,21 @@ mod tests {
         );
 
         let restored = reload(&db, ready_id).await;
-        let first_ready = room_view(&restored, restored.hand.as_ref().unwrap(), 0)
+        let first_ready = room_view(ready_id, &restored, restored.hand.as_ref().unwrap(), 0)
             .ready
             .unwrap();
-        let second_ready = room_view(&restored, restored.hand.as_ref().unwrap(), 1)
+        let second_ready = room_view(ready_id, &restored, restored.hand.as_ref().unwrap(), 1)
             .ready
             .unwrap();
 
         assert!(first_ready.mine);
         assert!(!second_ready.mine);
         assert_eq!(first_ready.count, 1);
-        assert_eq!(restored.rev, 3);
+        assert_eq!(restored.rev, 5);
+        assert_eq!(
+            restored.next_challenges[0].as_ref().unwrap().nonce,
+            first_nonce.as_slice()
+        );
         assert_eq!(seat_for_token(&restored, ready_first), Some(0));
         assert_eq!(seat_for_token(&restored, ready_second), Some(1));
 
@@ -2180,7 +3101,7 @@ mod tests {
         assert_eq!(next.game.board.len(), 0);
         assert_eq!(next.game.pot, 15);
         assert!(room.seats.iter().all(|seat| seat.ready_hand.is_none()));
-        assert!(room_view(&room, next, 0).ready.is_none());
+        assert!(room_view(ready_id, &room, next, 0).ready.is_none());
         assert_ne!(seat_view(&next.game, 0).hole, seat_view(&next.game, 1).hole);
         drop(room);
 
@@ -2248,6 +3169,106 @@ mod tests {
         apply_action(&ready_state, ready_id, 0, Action::Fold)
             .await
             .unwrap();
+
+        let fact_rows = sqlx::query(
+            "SELECT seat, facts_hash FROM challenge_assignments \
+             WHERE room_id = $1 AND hand_no = 1 ORDER BY seat",
+        )
+        .bind(ready_id)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        let room = find_room(&ready_state, ready_id).await.unwrap();
+        let room = room.lock().await;
+        let first_claim = room_view(ready_id, &room, room.hand.as_ref().unwrap(), 0)
+            .claim
+            .unwrap();
+        let second_claim = room_view(ready_id, &room, room.hand.as_ref().unwrap(), 1)
+            .claim
+            .unwrap();
+
+        assert_eq!(fact_rows.len(), 2);
+        assert_eq!(first_claim.facts, [0, 0, 0, 0, 0, 0]);
+        assert_eq!(second_claim.facts, [0, 0, 1, 0, 0, 1]);
+        assert_eq!(
+            fact_rows[0].get::<Vec<u8>, _>("facts_hash"),
+            decode_hex(&first_claim.facts_hash).unwrap()
+        );
+        assert_eq!(
+            fact_rows[1].get::<Vec<u8>, _>("facts_hash"),
+            decode_hex(&second_claim.facts_hash).unwrap()
+        );
+        assert_ne!(first_claim.facts_hash, second_claim.facts_hash);
+        drop(room);
+
+        let restored = reload(&db, ready_id).await;
+
+        assert_eq!(
+            restored.current_challenges[0].as_ref().unwrap().nonce,
+            first_nonce.as_slice()
+        );
+        assert_eq!(
+            room_view(ready_id, &restored, restored.hand.as_ref().unwrap(), 0)
+                .claim
+                .unwrap()
+                .facts,
+            [0, 0, 0, 0, 0, 0]
+        );
+
+        let first_hash = fact_rows[0].get::<Vec<u8>, _>("facts_hash");
+        let mut corrupt_hash = first_hash.clone();
+        corrupt_hash[0] ^= 1;
+        sqlx::query(
+            "UPDATE challenge_assignments SET facts_hash = $3 \
+             WHERE room_id = $1 AND hand_no = 1 AND seat = $2",
+        )
+        .bind(ready_id)
+        .bind(0i32)
+        .bind(corrupt_hash)
+        .execute(db.pool())
+        .await
+        .unwrap();
+        let stored = db
+            .load_rooms()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|room| room.id == ready_id)
+            .unwrap();
+
+        assert!(restore_room(stored).is_err());
+
+        sqlx::query(
+            "UPDATE challenge_assignments SET facts_hash = $3 \
+             WHERE room_id = $1 AND hand_no = 1 AND seat = $2",
+        )
+        .bind(ready_id)
+        .bind(0i32)
+        .bind(first_hash)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        challenge_room(
+            &ready_state,
+            ready_id,
+            0,
+            2,
+            TIER_EASY,
+            &encode_hex([3; 32]),
+        )
+        .await
+        .unwrap();
+        challenge_room(
+            &ready_state,
+            ready_id,
+            1,
+            2,
+            TIER_HARD,
+            &encode_hex([4; 32]),
+        )
+        .await
+        .unwrap();
         let (first, second) = tokio::join!(
             ready_room(&ready_state, ready_id, 0),
             ready_room(&ready_state, ready_id, 1)
@@ -2297,12 +3318,14 @@ mod tests {
         .unwrap();
         short.commit_join(
             short_second,
-            Some(LiveHand {
-                id: short_hand,
-                no: 0,
-                game: State::new(SEED, 0, &short_stacks, 5, 10),
-                next_seq: 0,
-            }),
+            Some(live_hand(
+                short_hand,
+                0,
+                SEED,
+                0,
+                short_stacks.clone(),
+                short_config,
+            )),
             1,
         );
 
@@ -2313,6 +3336,26 @@ mod tests {
         apply_action(&short_state, short_id, 0, Action::Fold)
             .await
             .unwrap();
+        challenge_room(
+            &short_state,
+            short_id,
+            0,
+            1,
+            TIER_EASY,
+            &encode_hex([5; 32]),
+        )
+        .await
+        .unwrap();
+        challenge_room(
+            &short_state,
+            short_id,
+            1,
+            1,
+            TIER_HARD,
+            &encode_hex([6; 32]),
+        )
+        .await
+        .unwrap();
         ready_room(&short_state, short_id, 0).await.unwrap();
         ready_room(&short_state, short_id, 1).await.unwrap();
 
@@ -2323,7 +3366,7 @@ mod tests {
         assert_eq!(hand.id, short_hand);
         assert_eq!(hand.no, 0);
         assert_eq!(hand.game.players[0].stack, 5);
-        assert!(room_view(&short, hand, 0).ready.unwrap().complete);
+        assert!(room_view(short_id, &short, hand, 0).ready.unwrap().complete);
         assert_eq!(
             sqlx::query("SELECT COUNT(*) AS count FROM hands WHERE room_id = $1")
                 .bind(short_id)
@@ -2338,7 +3381,7 @@ mod tests {
         let short = reload(&db, short_id).await;
         let hand = short.hand.as_ref().unwrap();
 
-        assert!(room_view(&short, hand, 1).ready.unwrap().complete);
+        assert!(room_view(short_id, &short, hand, 1).ready.unwrap().complete);
         assert_eq!(hand.id, short_hand);
     }
 }

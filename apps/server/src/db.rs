@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::io;
 
+use challenge_core::PROTOCOL_VERSION;
 use game_core::Action;
 use sqlx::postgres::{PgPoolOptions, PgQueryResult};
 use sqlx::{PgPool, Row, query};
@@ -27,16 +28,37 @@ pub struct ReadyUpdate<'a> {
     pub next_hand: Option<NewHand<'a>>,
 }
 
-pub struct NewAction {
+pub struct NewChallenge {
     pub room: Uuid,
-    pub hand: Uuid,
-    pub seq: u64,
-    pub player: usize,
-    pub action: Action,
+    pub hand_no: u64,
+    pub seat: usize,
+    pub tier: u8,
+    pub hand_tag: [u8; 32],
+    pub commitment: [u8; 32],
+    pub nonce: [u8; 32],
     pub rev: u64,
     pub next_rev: u64,
 }
 
+#[derive(Clone)]
+pub struct FactHash {
+    pub seat: usize,
+    pub value: [u8; 32],
+}
+
+pub struct NewAction {
+    pub room: Uuid,
+    pub hand: Uuid,
+    pub hand_no: u64,
+    pub seq: u64,
+    pub player: usize,
+    pub action: Action,
+    pub facts: Option<Vec<FactHash>>,
+    pub rev: u64,
+    pub next_rev: u64,
+}
+
+#[derive(Clone)]
 pub struct StoredRoom {
     pub id: Uuid,
     pub players: i32,
@@ -46,14 +68,17 @@ pub struct StoredRoom {
     pub rev: i64,
     pub seats: Vec<StoredSeat>,
     pub hand: Option<StoredHand>,
+    pub challenges: Vec<StoredChallenge>,
 }
 
+#[derive(Clone)]
 pub struct StoredSeat {
     pub seat: i32,
     pub token_hash: Vec<u8>,
     pub ready_hand: Option<Uuid>,
 }
 
+#[derive(Clone)]
 pub struct StoredHand {
     pub id: Uuid,
     pub hand_no: i64,
@@ -63,11 +88,24 @@ pub struct StoredHand {
     pub actions: Vec<StoredAction>,
 }
 
+#[derive(Clone)]
 pub struct StoredAction {
     pub seq: i64,
     pub player: i32,
     pub action: String,
     pub raise_to: Option<i64>,
+}
+
+#[derive(Clone)]
+pub struct StoredChallenge {
+    pub hand_no: i64,
+    pub seat: i32,
+    pub version: i32,
+    pub tier: i32,
+    pub hand_tag: Vec<u8>,
+    pub commitment: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub facts_hash: Option<Vec<u8>>,
 }
 
 #[derive(Clone)]
@@ -211,6 +249,36 @@ impl Db {
         Ok(())
     }
 
+    pub async fn add_challenge(&self, challenge: NewChallenge) -> DbResult<()> {
+        let mut tx = self.pool.begin().await?;
+
+        query(
+            "INSERT INTO challenge_assignments \
+             (room_id, hand_no, seat, version, tier, hand_tag, commitment, nonce) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        )
+        .bind(challenge.room)
+        .bind(i64::try_from(challenge.hand_no)?)
+        .bind(i32::try_from(challenge.seat)?)
+        .bind(i32::from(PROTOCOL_VERSION))
+        .bind(i32::from(challenge.tier))
+        .bind(challenge.hand_tag.as_slice())
+        .bind(challenge.commitment.as_slice())
+        .bind(challenge.nonce.as_slice())
+        .execute(&mut *tx)
+        .await?;
+        let changed = query("UPDATE rooms SET rev = $2 WHERE id = $1 AND rev = $3")
+            .bind(challenge.room)
+            .bind(i64::try_from(challenge.next_rev)?)
+            .bind(i64::try_from(challenge.rev)?)
+            .execute(&mut *tx)
+            .await?;
+
+        one_row(changed)?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn append_action(&self, action: NewAction) -> DbResult<()> {
         let mut tx = self.pool.begin().await?;
         let (name, raise_to) = action_data(action.action);
@@ -226,6 +294,27 @@ impl Db {
         .bind(raise_to)
         .execute(&mut *tx)
         .await?;
+
+        if let Some(facts) = action.facts {
+            for fact in facts {
+                let changed = query(
+                    "UPDATE challenge_assignments SET facts_hash = $4 \
+                     WHERE room_id = $1 AND hand_no = $2 AND seat = $3 \
+                     AND facts_hash IS NULL",
+                )
+                .bind(action.room)
+                .bind(i64::try_from(action.hand_no)?)
+                .bind(i32::try_from(fact.seat)?)
+                .bind(fact.value.as_slice())
+                .execute(&mut *tx)
+                .await?;
+
+                if changed.rows_affected() != 1 {
+                    return Err(io::Error::other("challenge facts mismatch").into());
+                }
+            }
+        }
+
         let changed = query("UPDATE rooms SET rev = $2 WHERE id = $1 AND rev = $3")
             .bind(action.room)
             .bind(i64::try_from(action.next_rev)?)
@@ -249,6 +338,7 @@ impl Db {
             let id = row.try_get("id")?;
             let seats = self.load_seats(id).await?;
             let hand = self.load_hand(id).await?;
+            let challenges = self.load_challenges(id).await?;
 
             rooms.push(StoredRoom {
                 id,
@@ -259,6 +349,7 @@ impl Db {
                 rev: row.try_get("rev")?,
                 seats,
                 hand,
+                challenges,
             });
         }
 
@@ -323,6 +414,31 @@ impl Db {
             stacks: row.try_get("starting_stacks")?,
             actions,
         }))
+    }
+
+    async fn load_challenges(&self, room: Uuid) -> DbResult<Vec<StoredChallenge>> {
+        let rows = query(
+            "SELECT hand_no, seat, version, tier, hand_tag, commitment, nonce, facts_hash \
+             FROM challenge_assignments WHERE room_id = $1 ORDER BY hand_no, seat",
+        )
+        .bind(room)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(StoredChallenge {
+                    hand_no: row.try_get("hand_no")?,
+                    seat: row.try_get("seat")?,
+                    version: row.try_get("version")?,
+                    tier: row.try_get("tier")?,
+                    hand_tag: row.try_get("hand_tag")?,
+                    commitment: row.try_get("commitment")?,
+                    nonce: row.try_get("nonce")?,
+                    facts_hash: row.try_get("facts_hash")?,
+                })
+            })
+            .collect()
     }
 
     #[cfg(test)]

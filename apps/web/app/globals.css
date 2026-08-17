@@ -470,6 +470,59 @@ button {
   background: #0d1214;
 }
 
+.challenge-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: min(760px, 100%);
+  margin: 10px auto 0;
+  padding: 14px;
+  border: 1px solid #384244;
+  border-radius: 14px;
+  background: #0d1214;
+}
+
+.challenge-panel > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.challenge-panel span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.challenge-panel .room-error {
+  color: #d98d91;
+}
+
+.challenge-panel strong {
+  font-size: 14px;
+}
+
+.challenge-tiers {
+  display: flex;
+  gap: 8px;
+}
+
+.challenge-tiers button {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--gold);
+  border-radius: 9px;
+  background: #182022;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.challenge-tiers button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .action-copy {
   display: grid;
   flex: 0 0 auto;
@@ -575,6 +628,10 @@ button {
   .action-bar {
     display: grid;
     gap: 12px;
+  }
+
+  .challenge-panel {
+    display: grid;
   }
 
   .action-copy {

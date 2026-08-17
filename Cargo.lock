@@ -1229,6 +1229,7 @@ name = "server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "challenge-core",
  "game-core",
  "getrandom 0.4.3",
  "serde",

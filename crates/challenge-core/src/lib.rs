@@ -12,6 +12,7 @@ const COMMITMENT_DOMAIN: [u8; 8] = *b"NPCOMM01";
 const SELECTOR_DOMAIN: [u8; 8] = *b"NPSELE01";
 const FACTS_DOMAIN: [u8; 8] = *b"NPFACT01";
 const NULLIFIER_DOMAIN: [u8; 8] = *b"NPNULL01";
+const HAND_DOMAIN: [u8; 8] = *b"NPHAND01";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Facts {
@@ -34,6 +35,16 @@ impl Facts {
             self.net_profit as u8,
         ]
     }
+}
+
+pub fn hand_tag(room: [u8; 16], hand_no: u64) -> [u8; 32] {
+    let mut input = [0u8; 32];
+
+    input[..8].copy_from_slice(&HAND_DOMAIN);
+    input[8..24].copy_from_slice(&room);
+    input[24..].copy_from_slice(&hand_no.to_be_bytes());
+
+    Blake2s256::digest(input).into()
 }
 
 pub fn commitment(hand_tag: [u8; 32], seat: u8, tier: u8, secret: [u8; 32]) -> [u8; 32] {
@@ -140,6 +151,17 @@ mod tests {
         assert_eq!(SELECTOR_DOMAIN.len(), 8);
         assert_eq!(FACTS_DOMAIN.len(), 8);
         assert_eq!(NULLIFIER_DOMAIN.len(), 8);
+        assert_eq!(HAND_DOMAIN.len(), 8);
+    }
+
+    #[test]
+    fn hand_tags() {
+        let room = [0x44; 16];
+        let tag = hand_tag(room, 1);
+
+        assert_eq!(tag, hand_tag(room, 1));
+        assert_ne!(tag, hand_tag(room, 2));
+        assert_ne!(tag, hand_tag([0x45; 16], 1));
     }
 
     #[test]

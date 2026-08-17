@@ -30,6 +30,26 @@ type ReadyView = {
   complete: boolean;
 };
 
+export type ChallengeView = {
+  hand_no: number;
+  assigned: boolean;
+  hand_tag: string;
+  tier?: number;
+  commitment?: string;
+  nonce?: string;
+};
+
+export type ClaimView = {
+  hand_no: number;
+  hand_tag: string;
+  tier: number;
+  commitment: string;
+  nonce: string;
+  facts_hash: string;
+  facts: [number, number, number, number, number, number];
+  claimable: boolean;
+};
+
 export type View = {
   players: PlayerView[];
   hole: [CardView, CardView];
@@ -42,6 +62,8 @@ export type View = {
   settled: boolean;
   actions: ActionView | undefined;
   ready?: ReadyView;
+  challenge?: ChallengeView;
+  claim?: ClaimView;
 };
 
 type TableProps = {
@@ -58,6 +80,10 @@ type TableProps = {
   onRaise: () => void;
   onNewHand?: () => void;
   onReady?: () => void;
+  onChallenge?: (tier: number) => void;
+  objective?: string;
+  claimObjective?: string;
+  challengeError?: string;
 };
 
 const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
@@ -76,6 +102,10 @@ export function Table({
   onRaise,
   onNewHand,
   onReady,
+  onChallenge,
+  objective,
+  claimObjective,
+  challengeError,
 }: TableProps) {
   const hole = [view.hole[0].value, view.hole[1].value] as const;
   const actions = view.actions;
@@ -147,6 +177,37 @@ export function Table({
         })}
       </div>
 
+      {onChallenge && view.challenge && (
+        <div className="challenge-panel">
+          <div>
+            <span>Hidden challenge</span>
+            <strong>
+              {view.challenge.assigned
+                ? (objective ?? "Challenge assigned")
+                : `Choose for hand ${view.challenge.hand_no}`}
+            </strong>
+          </div>
+          {!view.challenge.assigned && (
+            <div className="challenge-tiers">
+              <button type="button" onClick={() => onChallenge(0)} disabled={disabled}>
+                Easy 10 points
+              </button>
+              <button type="button" onClick={() => onChallenge(1)} disabled={disabled}>
+                Hard 25 points
+              </button>
+            </div>
+          )}
+          {view.claim?.claimable && (
+            <span>
+              {claimObjective
+                ? `Previous challenge ${claimObjective}`
+                : "Previous challenge ready to prove"}
+            </span>
+          )}
+          {challengeError && <span className="room-error">{challengeError}</span>}
+        </div>
+      )}
+
       <div className="action-bar" aria-label="Player actions">
         <div className="action-copy" aria-live="polite">
           <span>{status}</span>
@@ -201,7 +262,12 @@ export function Table({
               className="new-hand-button"
               type="button"
               onClick={onReady}
-              disabled={disabled || view.ready.mine || view.ready.complete}
+              disabled={
+                disabled ||
+                view.ready.mine ||
+                view.ready.complete ||
+                !view.challenge?.assigned
+              }
             >
               {view.ready.complete
                 ? "Table complete"
