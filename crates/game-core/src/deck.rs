@@ -7,7 +7,7 @@ use crate::card::{Card, Rank, Suit};
 
 const CARD_COUNT: usize = Rank::ALL.len() * Suit::ALL.len();
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Deck {
     cards: [Card; CARD_COUNT],
 }

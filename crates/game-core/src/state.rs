@@ -82,7 +82,7 @@ pub struct Player {
     pub acted_bet: Option<u32>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct State {
     // same shuffled deck continues after hole cards
     deck: Deck,

@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: noir_poker
+      POSTGRES_USER: noir_poker
+      POSTGRES_PASSWORD: noir_poker
+    ports:
+      - "5432:5432"
+    volumes:
+      - noir-poker-postgres:/var/lib/postgresql
+
+volumes:
+  noir-poker-postgres:
