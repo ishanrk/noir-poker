@@ -33,7 +33,7 @@ fi
 
 (
     cd "$root/circuits/challenge-v1"
-    "$nargo" compile
+    "$nargo" compile --force
 )
 
 tmp="$(mktemp -d)"
@@ -48,10 +48,14 @@ mkdir -p "$root/apps/web/zk" "$root/apps/server/zk"
 cp "$root/circuits/challenge-v1/target/challenge_v1.json" "$root/apps/web/zk/challenge_v1.json"
 cp "$tmp/vk/vk" "$root/apps/server/zk/challenge_v1.vk"
 
-artifact_digest="$(sha256sum "$root/apps/web/zk/challenge_v1.json" | awk '{print $1}')"
+# remove checkout path from debug metadata
+artifact_digest="$(
+    sed -E 's#"path":"[^"]*/circuits/challenge-v1/src/main.nr"#"path":"/repo/circuits/challenge-v1/src/main.nr"#g' \
+        "$root/apps/web/zk/challenge_v1.json" | sha256sum | awk '{print $1}'
+)"
 vk_digest="$(sha256sum "$root/apps/server/zk/challenge_v1.vk" | awk '{print $1}')"
 
-if test "$artifact_digest" != "6d6883e92c09c1c483679ce9da75b7018cde496e1a16f8ccf491262f92f70ab1"; then
+if test "$artifact_digest" != "94125fd41b87a412605169b5839ad9d7c9022d4009e795ba63ff1efcf8adc28d"; then
     echo "challenge artifact digest mismatch" >&2
     exit 1
 fi
