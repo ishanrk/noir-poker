@@ -38,21 +38,27 @@ export type View = {
 
 type TableProps = {
   view: View;
+  viewer: number;
+  label?: string;
   error?: string;
+  disabled?: boolean;
   raiseTo: number;
   setRaiseTo: (to: number) => void;
   onFold: () => void;
   onCheck: () => void;
   onCall: () => void;
   onRaise: () => void;
-  onNewHand: () => void;
+  onNewHand?: () => void;
 };
 
 const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
 
 export function Table({
   view,
+  viewer,
+  label = "Local game",
   error,
+  disabled = false,
   raiseTo,
   setRaiseTo,
   onFold,
@@ -64,13 +70,35 @@ export function Table({
   const hole = [view.hole[0].value, view.hole[1].value] as const;
   const actions = view.actions;
   const range = actions?.raise;
+  let status = "Table";
+  let message = "Waiting for player";
+
+  if (actions) {
+    status = "Your action";
+    message = "Choose an action";
+  }
+
+  if (disabled) {
+    status = "Waiting";
+    message = "Waiting for server";
+  }
+
+  if (view.settled) {
+    status = "Complete";
+    message = "Hand complete";
+  }
+
+  if (error) {
+    status = "Error";
+    message = error;
+  }
 
   return (
     <section className="table-shell" aria-label="Six-max poker table">
       <div className="table-stage">
         <div className="table-surface">
           <div className="table-label">
-            <span>Local game</span>
+            <span>{label}</span>
             <strong>{view.street}</strong>
           </div>
 
@@ -97,10 +125,10 @@ export function Table({
             <Seat
               key={position}
               position={position}
-              name={position === 0 ? "You" : `Player ${position + 1}`}
+              name={position === viewer ? "You" : `Player ${position + 1}`}
               stack={player?.stack}
               bet={player?.bet}
-              cards={position === 0 && player ? hole : undefined}
+              cards={position === viewer && player ? hole : undefined}
               acting={view.turn === position}
               dealer={view.dealer === position}
               empty={!player}
@@ -111,18 +139,22 @@ export function Table({
 
       <div className="action-bar" aria-label="Player actions">
         <div className="action-copy" aria-live="polite">
-          <span>{error ? "Error" : view.settled ? "Complete" : "Your action"}</span>
-          <strong>{error ?? (view.settled ? "Hand complete" : "Choose an action")}</strong>
+          <span>{status}</span>
+          <strong>{message}</strong>
         </div>
 
         <div className="actions">
-          <button type="button" onClick={onFold} disabled={!actions?.fold}>
+          <button type="button" onClick={onFold} disabled={disabled || !actions?.fold}>
             Fold
           </button>
-          <button type="button" onClick={onCheck} disabled={!actions?.check}>
+          <button type="button" onClick={onCheck} disabled={disabled || !actions?.check}>
             Check
           </button>
-          <button type="button" onClick={onCall} disabled={actions?.call === undefined}>
+          <button
+            type="button"
+            onClick={onCall}
+            disabled={disabled || actions?.call === undefined}
+          >
             {actions?.call === undefined
               ? "Call"
               : `Call ${actions.call.toLocaleString("en-US")}`}
@@ -134,13 +166,23 @@ export function Table({
             max={range?.max_to}
             value={range ? raiseTo : ""}
             onChange={(event) => setRaiseTo(Number(event.target.value))}
-            disabled={!range}
+            disabled={disabled || !range}
           />
-          <button className="raise-button" type="button" onClick={onRaise} disabled={!range}>
+          <button
+            className="raise-button"
+            type="button"
+            onClick={onRaise}
+            disabled={disabled || !range}
+          >
             Raise
           </button>
-          {view.settled && (
-            <button className="new-hand-button" type="button" onClick={onNewHand}>
+          {view.settled && onNewHand && (
+            <button
+              className="new-hand-button"
+              type="button"
+              onClick={onNewHand}
+              disabled={disabled}
+            >
               New hand
             </button>
           )}

@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State as AxumState};
-use axum::http::StatusCode;
+use axum::http::header::CONTENT_TYPE;
+use axum::http::{HeaderValue, Method, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -12,6 +13,7 @@ use game_core::{Action, ActionError, Card, LegalActions, Rank, State, Street, Su
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, broadcast};
+use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
 type HttpError = (StatusCode, &'static str);
@@ -205,19 +207,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| "3001".to_owned())
         .parse()?;
+    let origin: HeaderValue = env::var("WEB_ORIGIN")
+        .unwrap_or_else(|_| "http://localhost:3000".to_owned())
+        .parse()?;
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
 
-    axum::serve(listener, app(AppState::new())).await?;
+    axum::serve(listener, app(AppState::new(), origin)).await?;
     Ok(())
 }
 
-fn app(state: AppState) -> Router {
+fn app(state: AppState, origin: HeaderValue) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/rooms", post(create_room))
         .route("/rooms/{room}/join", post(join_room))
         .route("/rooms/{room}/ws", get(room_ws))
         .with_state(state)
+        .layer(
+            CorsLayer::new()
+                .allow_origin(origin)
+                .allow_methods([Method::POST])
+                .allow_headers([CONTENT_TYPE]),
+        )
 }
 
 async fn health() -> &'static str {

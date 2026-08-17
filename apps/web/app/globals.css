@@ -65,6 +65,142 @@ button {
   text-transform: uppercase;
 }
 
+.lobby {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  width: min(760px, 100%);
+  margin: clamp(44px, 8vw, 90px) auto 0;
+}
+
+.lobby-panel {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+.lobby-copy {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 4px;
+}
+
+.lobby-copy span {
+  color: var(--gold);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.lobby-copy h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 24px;
+  font-weight: 500;
+}
+
+.lobby-panel label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lobby-panel input,
+.lobby-panel button,
+.room-status button,
+.connection-bar button {
+  min-height: 42px;
+  border: 1px solid #384244;
+  border-radius: 9px;
+  background: #182022;
+  color: var(--text);
+  font: inherit;
+}
+
+.lobby-panel input {
+  width: 100%;
+  padding: 0 11px;
+}
+
+.lobby-panel button,
+.room-status button,
+.connection-bar button {
+  padding: 0 16px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lobby-panel > button {
+  border-color: var(--gold);
+  background: var(--gold);
+  color: #171914;
+}
+
+.lobby-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.lobby-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lobby-error,
+.demo-link {
+  grid-column: 1 / -1;
+  margin: 0;
+  text-align: center;
+}
+
+.lobby-error,
+.room-error {
+  color: #d98d91;
+}
+
+.demo-link a,
+.room-status a {
+  color: var(--gold);
+}
+
+.room-status {
+  display: grid;
+  min-height: clamp(460px, 55vw, 620px);
+  place-content: center;
+  justify-items: center;
+  gap: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.room-status strong {
+  color: var(--text);
+  font-size: 20px;
+}
+
+.connection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: min(760px, 100%);
+  margin: 22px auto -10px;
+  color: #d98d91;
+  font-size: 13px;
+}
+
+.connection-bar button {
+  min-height: 34px;
+}
+
 .table-shell {
   width: min(1080px, 100%);
   margin: 0 auto;
@@ -406,6 +542,11 @@ button {
 
   .page-header {
     margin-bottom: 16px;
+  }
+
+  .lobby {
+    grid-template-columns: 1fr;
+    margin-top: 34px;
   }
 
   .table-stage {

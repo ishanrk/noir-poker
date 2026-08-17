@@ -1,15 +1,15 @@
-import { Game } from "@/components/game";
+import { Lobby } from "@/components/lobby";
 
 export default function Home() {
   return (
     <main className="page">
       <header className="page-header">
-        <p className="eyebrow">Private table</p>
+        <p className="eyebrow">Private tables</p>
         <h1>Noir Poker</h1>
-        <p>Six-max No-Limit Hold&apos;em</p>
+        <p>Server authoritative No-Limit Hold&apos;em</p>
       </header>
 
-      <Game />
+      <Lobby />
     </main>
   );
 }

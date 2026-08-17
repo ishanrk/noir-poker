@@ -5,7 +5,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Noir Poker",
-  description: "A deterministic six-max poker table",
+  description: "A real-time six-max poker table",
   icons: { icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" },
 };
 

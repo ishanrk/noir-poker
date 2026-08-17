@@ -98,6 +98,7 @@ export function Game() {
   return (
     <Table
       view={view}
+      viewer={0}
       error={error}
       raiseTo={raiseTo}
       setRaiseTo={setRaiseTo}
