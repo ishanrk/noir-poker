@@ -7,6 +7,8 @@ use sqlx::postgres::{PgPoolOptions, PgQueryResult};
 use sqlx::{PgPool, Row, query};
 use uuid::Uuid;
 
+use crate::room::FactHash;
+
 type DbResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
@@ -57,20 +59,14 @@ pub struct ClaimUpdate {
     pub next_rev: u64,
 }
 
-#[derive(Clone)]
-pub struct FactHash {
-    pub seat: usize,
-    pub value: [u8; 32],
-}
-
-pub struct NewAction {
+pub struct NewAction<'a> {
     pub room: Uuid,
     pub hand: Uuid,
     pub hand_no: u64,
     pub seq: u64,
     pub player: usize,
     pub action: Action,
-    pub facts: Option<Vec<FactHash>>,
+    pub facts: Option<&'a [FactHash]>,
     pub rev: u64,
     pub next_rev: u64,
 }
@@ -366,7 +362,7 @@ impl Db {
         Ok(())
     }
 
-    pub async fn append_action(&self, action: NewAction) -> DbResult<()> {
+    pub async fn append_action(&self, action: NewAction<'_>) -> DbResult<()> {
         let mut tx = self.pool.begin().await?;
         let (name, raise_to) = action_data(action.action);
 

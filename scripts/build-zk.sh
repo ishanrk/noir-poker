@@ -5,16 +5,29 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 nargo="${NARGO_PATH:-nargo}"
 bb="${BB_PATH:-bb}"
 
+resolve_tool() {
+    local tool="$1"
+    local path
+
+    path="$(type -P -- "$tool")" || {
+        echo "executable not found using $tool" >&2
+        exit 1
+    }
+    realpath -- "$path"
+}
+
+nargo="$(resolve_tool "$nargo")"
+bb="$(resolve_tool "$bb")"
 nargo_version="$("$nargo" --version | sed -n '1s/nargo version = //p')"
-bb_version="$("$bb" --version)"
+bb_version="$("$bb" --version | sed -n '1p')"
 
 if test "$nargo_version" != "1.0.0-beta.26"; then
-    echo "expected nargo 1.0.0-beta.26 got $nargo_version" >&2
+    echo "expected nargo 1.0.0-beta.26 got ${nargo_version:-unknown} using $nargo" >&2
     exit 1
 fi
 
 if test "$bb_version" != "5.2.0"; then
-    echo "expected bb 5.2.0 got $bb_version" >&2
+    echo "expected bb 5.2.0 got ${bb_version:-unknown} using $bb" >&2
     exit 1
 fi
 
