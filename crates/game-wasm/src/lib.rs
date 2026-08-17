@@ -4,6 +4,7 @@ use game_core::{
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
+// six player hand stays below this limit
 const MAX_STEPS: usize = 64;
 
 #[wasm_bindgen]
@@ -196,6 +197,7 @@ fn apply_view(state: &mut State, viewer: usize, action: Action) -> Result<View, 
     Ok(state_view(state, viewer))
 }
 
+// runs opponents until viewer action or payout
 fn drive(state: &mut State, viewer: usize) -> Result<(), &'static str> {
     for _ in 0..MAX_STEPS {
         if state.settled {

@@ -79,6 +79,7 @@ export function Game() {
   function nextHand() {
     const seed = SEED.slice();
 
+    // hand count makes demo seeds repeatable
     seed[0] = hand.current;
 
     if (act((current) => current.next_hand(seed))) {
