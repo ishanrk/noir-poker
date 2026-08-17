@@ -619,3 +619,146 @@ fn action_error(err: ActionError) -> &'static str {
         ActionError::CannotRaise => "cannot raise",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use game_core::{Deck, Rank, Suit};
+
+    use super::*;
+
+    const SEED: [u8; 32] = [0x42; 32];
+
+    #[test]
+    fn fold_result() {
+        let mut game = State::new(SEED, 0, &[100, 100], 5, 10);
+
+        game.apply(0, Action::Fold).unwrap();
+
+        assert_eq!(
+            settle(&mut game).unwrap(),
+            HandResult {
+                kind: HandResultKind::Fold,
+                awards: vec![Award {
+                    player: 1,
+                    amount: 15,
+                }],
+            }
+        );
+    }
+
+    #[test]
+    fn tie_result() {
+        let mut game = showdown(&[20, 20]);
+
+        game.board = vec![
+            card(Rank::Ten, Suit::Clubs),
+            card(Rank::Jack, Suit::Diamonds),
+            card(Rank::Queen, Suit::Hearts),
+            card(Rank::King, Suit::Spades),
+            card(Rank::Ace, Suit::Clubs),
+        ];
+        game.hole = vec![
+            [
+                card(Rank::Two, Suit::Hearts),
+                card(Rank::Three, Suit::Hearts),
+            ],
+            [
+                card(Rank::Four, Suit::Spades),
+                card(Rank::Five, Suit::Spades),
+            ],
+        ];
+
+        assert_eq!(
+            settle(&mut game).unwrap(),
+            HandResult {
+                kind: HandResultKind::Showdown,
+                awards: vec![
+                    Award {
+                        player: 0,
+                        amount: 20,
+                    },
+                    Award {
+                        player: 1,
+                        amount: 20,
+                    },
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn side_pot_result() {
+        let mut game = showdown(&[100, 60, 30]);
+
+        game.board = vec![
+            card(Rank::Two, Suit::Clubs),
+            card(Rank::Three, Suit::Diamonds),
+            card(Rank::Seven, Suit::Hearts),
+            card(Rank::Nine, Suit::Spades),
+            card(Rank::Jack, Suit::Clubs),
+        ];
+        game.hole = vec![
+            [
+                card(Rank::Queen, Suit::Clubs),
+                card(Rank::Queen, Suit::Diamonds),
+            ],
+            [
+                card(Rank::King, Suit::Clubs),
+                card(Rank::King, Suit::Diamonds),
+            ],
+            [
+                card(Rank::Ace, Suit::Clubs),
+                card(Rank::Ace, Suit::Diamonds),
+            ],
+        ];
+
+        assert_eq!(
+            settle(&mut game).unwrap(),
+            HandResult {
+                kind: HandResultKind::Showdown,
+                awards: vec![
+                    Award {
+                        player: 0,
+                        amount: 40,
+                    },
+                    Award {
+                        player: 1,
+                        amount: 60,
+                    },
+                    Award {
+                        player: 2,
+                        amount: 90,
+                    },
+                ],
+            }
+        );
+    }
+
+    fn showdown(contributions: &[u32]) -> State {
+        let stacks = vec![100; contributions.len()];
+        let mut game = State::new(SEED, 0, &stacks, 5, 10);
+
+        for (player, &amount) in game.players.iter_mut().zip(contributions) {
+            player.stack = 100 - amount;
+            player.bet = 0;
+            player.contributed = amount;
+            player.folded = false;
+            player.acted_bet = None;
+        }
+
+        game.pot = contributions.iter().sum();
+        game.street = Street::River;
+        game.round_complete = true;
+        game.fold_winner = None;
+        game.settled = false;
+        game
+    }
+
+    fn card(rank: Rank, suit: Suit) -> game_core::Card {
+        *Deck::new()
+            .cards()
+            .iter()
+            .find(|card| card.rank() == rank && card.suit() == suit)
+            .unwrap()
+    }
+}

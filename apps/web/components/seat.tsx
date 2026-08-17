@@ -7,6 +7,7 @@ type SeatProps = {
   bet?: number;
   proofPoints?: number;
   cards?: readonly [string, string];
+  awards?: readonly number[];
   acting?: boolean;
   dealer?: boolean;
   empty?: boolean;
@@ -19,11 +20,13 @@ export function Seat({
   bet,
   proofPoints,
   cards,
+  awards,
   acting = false,
   dealer = false,
   empty = false,
 }: SeatProps) {
-  const className = `seat seat-${position}${acting ? " seat-acting" : ""}${empty ? " seat-empty" : ""}`;
+  const won = !!awards?.length;
+  const className = `seat seat-${position}${acting ? " seat-acting" : ""}${won ? " seat-winner" : ""}${empty ? " seat-empty" : ""}`;
 
   return (
     <section className={className} aria-label={empty ? `Seat ${position} open` : name}>
@@ -52,6 +55,11 @@ export function Seat({
             <span>{stack?.toLocaleString("en-US")}</span>
             {!!bet && <small>Bet {bet.toLocaleString("en-US")}</small>}
             {!!proofPoints && <small>{proofPoints} proof points</small>}
+            {awards?.map((amount, index) => (
+              <small className="seat-award" key={index}>
+                Won {amount.toLocaleString("en-US")}
+              </small>
+            ))}
             {acting && <small>Acting</small>}
           </>
         )}

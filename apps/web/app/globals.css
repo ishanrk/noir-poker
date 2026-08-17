@@ -423,6 +423,16 @@ button {
   text-transform: uppercase;
 }
 
+.seat-winner .seat-panel {
+  border-color: var(--gold);
+  background: #202219;
+  box-shadow: 0 0 0 3px rgb(207 181 111 / 16%), 0 8px 18px rgb(0 0 0 / 35%);
+}
+
+.seat-panel .seat-award {
+  color: #f0d993;
+}
+
 .seat-acting .seat-panel {
   border-color: var(--gold);
   box-shadow: 0 0 0 3px rgb(207 181 111 / 20%), 0 8px 18px rgb(0 0 0 / 35%);

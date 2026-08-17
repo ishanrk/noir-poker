@@ -1,5 +1,5 @@
 use game_core::{
-    Action, ActionError, Card, LegalActions, NextHandError, Rank, State, Street, Suit,
+    Action, ActionError, Card, Event, LegalActions, NextHandError, Rank, State, Street, Suit,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -11,6 +11,7 @@ const MAX_STEPS: usize = 64;
 pub struct Game {
     state: State,
     viewer: usize,
+    result: Option<HandResult>,
 }
 
 #[wasm_bindgen]
@@ -28,7 +29,7 @@ impl Game {
     }
 
     pub fn view(&self) -> Result<JsValue, JsError> {
-        view_value(state_view(&self.state, self.viewer))
+        view_value(state_view(&self.state, self.viewer, self.result.as_ref()))
     }
 
     pub fn fold(&mut self) -> Result<JsValue, JsError> {
@@ -49,16 +50,18 @@ impl Game {
 
     pub fn next_hand(&mut self, seed: &[u8]) -> Result<JsValue, JsError> {
         let seed = parse_seed(seed).map_err(JsError::new)?;
-        let state = next_state(&self.state, self.viewer, seed).map_err(JsError::new)?;
+        let (state, result) = next_state(&self.state, self.viewer, seed).map_err(JsError::new)?;
 
         self.state = state;
+        self.result = result;
         self.view()
     }
 }
 
 impl Game {
     fn apply_action(&mut self, action: Action) -> Result<JsValue, JsError> {
-        let view = apply_view(&mut self.state, self.viewer, action).map_err(JsError::new)?;
+        let view = apply_view(&mut self.state, self.viewer, &mut self.result, action)
+            .map_err(JsError::new)?;
 
         view_value(view)
     }
@@ -76,6 +79,21 @@ struct View {
     round_complete: bool,
     settled: bool,
     actions: Option<ActionView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<HandResultView>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct HandResultView {
+    kind: &'static str,
+    awards: Vec<AwardView>,
+    revealed: Vec<Option<[CardView; 2]>>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct AwardView {
+    player: usize,
+    amount: u32,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -102,6 +120,24 @@ struct ActionView {
 struct RaiseView {
     min_to: u32,
     max_to: u32,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct HandResult {
+    kind: HandResultKind,
+    awards: Vec<Award>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HandResultKind {
+    Fold,
+    Showdown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Award {
+    player: usize,
+    amount: u32,
 }
 
 fn create(
@@ -147,12 +183,16 @@ fn create(
 
     let mut state = State::new(seed, dealer, stacks, sb, bb);
 
-    drive(&mut state, viewer)?;
+    let result = drive(&mut state, viewer)?;
 
-    Ok(Game { state, viewer })
+    Ok(Game {
+        state,
+        viewer,
+        result,
+    })
 }
 
-fn state_view(state: &State, viewer: usize) -> View {
+fn state_view(state: &State, viewer: usize, result: Option<&HandResult>) -> View {
     let players = state
         .players
         .iter()
@@ -176,6 +216,35 @@ fn state_view(state: &State, viewer: usize) -> View {
         round_complete: state.round_complete,
         settled: state.settled,
         actions: state.legal_actions(viewer).map(action_view),
+        result: result.map(|result| result_view(state, result)),
+    }
+}
+
+fn result_view(state: &State, result: &HandResult) -> HandResultView {
+    let revealed = state
+        .players
+        .iter()
+        .enumerate()
+        .map(|(seat, player)| match result.kind {
+            HandResultKind::Showdown if !player.folded => Some(state.hole[seat].map(card_view)),
+            HandResultKind::Fold | HandResultKind::Showdown => None,
+        })
+        .collect();
+
+    HandResultView {
+        kind: match result.kind {
+            HandResultKind::Fold => "fold",
+            HandResultKind::Showdown => "showdown",
+        },
+        awards: result
+            .awards
+            .iter()
+            .map(|award| AwardView {
+                player: award.player,
+                amount: award.amount,
+            })
+            .collect(),
+        revealed,
     }
 }
 
@@ -191,28 +260,33 @@ fn action_view(actions: LegalActions) -> ActionView {
     }
 }
 
-fn apply_view(state: &mut State, viewer: usize, action: Action) -> Result<View, &'static str> {
+fn apply_view(
+    state: &mut State,
+    viewer: usize,
+    result: &mut Option<HandResult>,
+    action: Action,
+) -> Result<View, &'static str> {
     state.apply(viewer, action).map_err(action_error)?;
-    drive(state, viewer)?;
-    Ok(state_view(state, viewer))
+    if let Some(settled) = drive(state, viewer)? {
+        *result = Some(settled);
+    }
+    Ok(state_view(state, viewer, result.as_ref()))
 }
 
 // runs opponents until viewer action or payout
-fn drive(state: &mut State, viewer: usize) -> Result<(), &'static str> {
+fn drive(state: &mut State, viewer: usize) -> Result<Option<HandResult>, &'static str> {
     for _ in 0..MAX_STEPS {
         if state.settled {
-            return Ok(());
+            return Err("demo settlement result missing");
         }
 
         if state.fold_winner.is_some() {
-            state.settle().map_err(|_| "cannot settle demo hand")?;
-            return Ok(());
+            return settle(state).map(Some);
         }
 
         if state.round_complete {
             if state.street == Street::River {
-                state.settle().map_err(|_| "cannot settle demo hand")?;
-                return Ok(());
+                return settle(state).map(Some);
             }
 
             state
@@ -222,7 +296,7 @@ fn drive(state: &mut State, viewer: usize) -> Result<(), &'static str> {
         }
 
         if state.legal_actions(viewer).is_some() {
-            return Ok(());
+            return Ok(None);
         }
 
         let player = state.turn;
@@ -252,11 +326,38 @@ fn passive_action(state: &State, player: usize) -> Result<Action, &'static str> 
     }
 }
 
-fn next_state(state: &State, viewer: usize, seed: [u8; 32]) -> Result<State, &'static str> {
+fn next_state(
+    state: &State,
+    viewer: usize,
+    seed: [u8; 32],
+) -> Result<(State, Option<HandResult>), &'static str> {
     let mut state = state.next_hand(seed).map_err(next_hand_error)?;
+    let result = drive(&mut state, viewer)?;
 
-    drive(&mut state, viewer)?;
-    Ok(state)
+    Ok((state, result))
+}
+
+fn settle(state: &mut State) -> Result<HandResult, &'static str> {
+    let kind = if state.fold_winner.is_some() {
+        HandResultKind::Fold
+    } else {
+        HandResultKind::Showdown
+    };
+    let awards = state
+        .settle()
+        .map_err(|_| "cannot settle demo hand")?
+        .into_iter()
+        .map(|event| match event {
+            Event::Awarded { player, amount } => Ok(Award { player, amount }),
+            _ => Err("invalid settlement event"),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if awards.is_empty() {
+        return Err("settlement awards missing");
+    }
+
+    Ok(HandResult { kind, awards })
 }
 
 fn parse_seed(seed: &[u8]) -> Result<[u8; 32], &'static str> {
@@ -333,7 +434,7 @@ mod tests {
     #[test]
     fn six_view() {
         let game = create(&SEED, 2, &[1000, 1200, 900, 1500, 800, 1100], 5, 10, 0).unwrap();
-        let view = state_view(&game.state, game.viewer);
+        let view = state_view(&game.state, game.viewer, game.result.as_ref());
 
         assert_eq!(view.players.len(), 6);
 
@@ -351,17 +452,20 @@ mod tests {
         assert!(!view.round_complete);
         assert!(!view.settled);
         assert!(view.actions.is_some());
+        assert!(view.result.is_none());
     }
 
     #[test]
     fn private_hole() {
         let game = create(&SEED, 0, &[1000; 6], 5, 10, 0).unwrap();
-        let view0 = state_view(&game.state, 0);
-        let view1 = state_view(&game.state, 1);
+        let view0 = state_view(&game.state, 0, game.result.as_ref());
+        let view1 = state_view(&game.state, 1, game.result.as_ref());
 
         assert_eq!(view0.hole, game.state.hole[0].map(card_view));
         assert_eq!(view1.hole, game.state.hole[1].map(card_view));
         assert_ne!(view0.hole, view1.hole);
+        assert!(view0.result.is_none());
+        assert!(view1.result.is_none());
     }
 
     #[test]
@@ -369,8 +473,8 @@ mod tests {
         let game = create(&SEED, 1, &[1000; 4], 5, 10, 2).unwrap();
 
         assert_eq!(
-            state_view(&game.state, game.viewer),
-            state_view(&game.state, game.viewer)
+            state_view(&game.state, game.viewer, game.result.as_ref()),
+            state_view(&game.state, game.viewer, game.result.as_ref())
         );
     }
 
@@ -383,16 +487,30 @@ mod tests {
         let mut fold = create(&SEED, 0, &[100; 2], 5, 10, 0).unwrap();
         fold.state.apply(0, Action::Fold).unwrap();
 
-        assert_eq!(state_view(&round.state, round.viewer).turn, None);
-        assert_eq!(state_view(&fold.state, fold.viewer).turn, None);
-        assert_eq!(state_view(&round.state, round.viewer).actions, None);
-        assert_eq!(state_view(&fold.state, fold.viewer).actions, None);
+        assert_eq!(
+            state_view(&round.state, round.viewer, round.result.as_ref()).turn,
+            None
+        );
+        assert_eq!(
+            state_view(&fold.state, fold.viewer, fold.result.as_ref()).turn,
+            None
+        );
+        assert_eq!(
+            state_view(&round.state, round.viewer, round.result.as_ref()).actions,
+            None
+        );
+        assert_eq!(
+            state_view(&fold.state, fold.viewer, fold.result.as_ref()).actions,
+            None
+        );
     }
 
     #[test]
     fn viewer_actions() {
         let game = create(&SEED, 3, &[1000; 6], 5, 10, 0).unwrap();
-        let actions = state_view(&game.state, game.viewer).actions.unwrap();
+        let actions = state_view(&game.state, game.viewer, game.result.as_ref())
+            .actions
+            .unwrap();
 
         assert!(actions.fold);
         assert!(!actions.check);
@@ -442,7 +560,8 @@ mod tests {
     #[test]
     fn viewer_return() {
         let mut game = create(&SEED, 0, &[1000; 6], 5, 10, 0).unwrap();
-        let view = apply_view(&mut game.state, game.viewer, Action::Call).unwrap();
+        let view =
+            apply_view(&mut game.state, game.viewer, &mut game.result, Action::Call).unwrap();
 
         assert_eq!(game.state.street, Street::Flop);
         assert_eq!(view.turn, Some(game.viewer));
@@ -470,21 +589,68 @@ mod tests {
     }
 
     #[test]
-    fn fold_runout() {
+    fn showdown_result() {
         let mut game = create(&SEED, 0, &[1000; 6], 5, 10, 0).unwrap();
-        let view = apply_view(&mut game.state, game.viewer, Action::Fold).unwrap();
+        let view =
+            apply_view(&mut game.state, game.viewer, &mut game.result, Action::Fold).unwrap();
+        let result = view.result.as_ref().unwrap();
 
         assert!(view.players[game.viewer].folded);
         assert!(view.settled);
         assert_eq!(view.board.len(), 5);
         assert_eq!(view.pot, 0);
         assert_eq!(view.actions, None);
+        assert_eq!(result.kind, "showdown");
+        assert_eq!(result.revealed[game.viewer], None);
+
+        for cards in &result.revealed[1..] {
+            assert!(cards.is_some());
+        }
+
+        assert_eq!(
+            result.awards,
+            game.result
+                .as_ref()
+                .unwrap()
+                .awards
+                .iter()
+                .map(|award| AwardView {
+                    player: award.player,
+                    amount: award.amount,
+                })
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn fold_result() {
+        let mut game = create(&SEED, 0, &[100; 2], 5, 10, 0).unwrap();
+        let view =
+            apply_view(&mut game.state, game.viewer, &mut game.result, Action::Fold).unwrap();
+        let result = view.result.unwrap();
+
+        assert_eq!(result.kind, "fold");
+        assert_eq!(
+            result.awards,
+            vec![AwardView {
+                player: 1,
+                amount: 15,
+            }]
+        );
+        assert!(result.revealed.iter().all(Option::is_none));
+        assert_eq!(view.hole, game.state.hole[game.viewer].map(card_view));
     }
 
     #[test]
     fn all_in_runout() {
         let mut game = create(&SEED, 0, &[100; 6], 5, 10, 0).unwrap();
-        let view = apply_view(&mut game.state, game.viewer, Action::RaiseTo(100)).unwrap();
+        let view = apply_view(
+            &mut game.state,
+            game.viewer,
+            &mut game.result,
+            Action::RaiseTo(100),
+        )
+        .unwrap();
 
         assert!(view.settled);
         assert_eq!(view.board.len(), 5);
@@ -505,6 +671,8 @@ mod tests {
 
         finish(&mut game);
 
+        assert!(game.result.is_some());
+
         let stacks: Vec<_> = game
             .state
             .players
@@ -512,7 +680,7 @@ mod tests {
             .map(|player| player.stack)
             .collect();
         let hole = game.state.hole.clone();
-        let next = next_state(&game.state, game.viewer, [0x24; 32]).unwrap();
+        let (next, result) = next_state(&game.state, game.viewer, [0x24; 32]).unwrap();
 
         assert_eq!(next.dealer, 1);
         assert_eq!(next.street, Street::Preflop);
@@ -534,6 +702,7 @@ mod tests {
         assert_ne!(next.hole, hole);
         assert_eq!(next.turn, game.viewer);
         assert!(next.legal_actions(game.viewer).is_some());
+        assert!(result.is_none());
     }
 
     #[test]
@@ -561,7 +730,7 @@ mod tests {
         while !game.state.settled {
             let action = passive_action(&game.state, game.viewer).unwrap();
 
-            apply_view(&mut game.state, game.viewer, action).unwrap();
+            apply_view(&mut game.state, game.viewer, &mut game.result, action).unwrap();
         }
     }
 }

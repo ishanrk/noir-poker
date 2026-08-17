@@ -5,6 +5,17 @@ type CardView = {
   value: string;
 };
 
+export type AwardView = {
+  player: number;
+  amount: number;
+};
+
+export type HandResultView = {
+  kind: "fold" | "showdown";
+  awards: AwardView[];
+  revealed: Array<[CardView, CardView] | null | undefined>;
+};
+
 type PlayerView = {
   stack: number;
   bet: number;
@@ -63,6 +74,7 @@ export type View = {
   round_complete: boolean;
   settled: boolean;
   actions: ActionView | undefined;
+  result?: HandResultView;
   ready?: ReadyView;
   challenge?: ChallengeView;
   claim?: ClaimView;
@@ -92,6 +104,10 @@ type TableProps = {
 
 const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
 
+function playerName(player: number, viewer: number) {
+  return player === viewer ? "You" : `Player ${player + 1}`;
+}
+
 export function Table({
   view,
   viewer,
@@ -116,6 +132,13 @@ export function Table({
   const hole = [view.hole[0].value, view.hole[1].value] as const;
   const actions = view.actions;
   const range = actions?.raise;
+  const result = view.result;
+  const payouts = result?.awards
+    .map(
+      (award) =>
+        `${playerName(award.player, viewer)} ${result.kind === "fold" ? "won " : ""}${award.amount.toLocaleString("en-US")}`,
+    )
+    .join(" · ");
   let status = "Table";
   let message = "Waiting for player";
 
@@ -132,6 +155,16 @@ export function Table({
   if (view.settled) {
     status = "Complete";
     message = view.ready?.complete ? "Table complete" : "Hand complete";
+  }
+
+  if (result?.kind === "fold") {
+    status = "Hand ended";
+    message = payouts ?? "Payout complete";
+  }
+
+  if (result?.kind === "showdown") {
+    status = "Showdown";
+    message = payouts ? `Payouts ${payouts}` : "Payout complete";
   }
 
   if (error) {
@@ -166,16 +199,27 @@ export function Table({
 
         {POSITIONS.map((position) => {
           const player = view.players[position];
+          const revealed = result?.revealed[position];
+          const cards =
+            position === viewer
+              ? hole
+              : revealed
+                ? ([revealed[0].value, revealed[1].value] as const)
+                : undefined;
+          const awards = result?.awards
+            .filter((award) => award.player === position)
+            .map((award) => award.amount);
 
           return (
             <Seat
               key={position}
               position={position}
-              name={position === viewer ? "You" : `Player ${position + 1}`}
+              name={playerName(position, viewer)}
               stack={player?.stack}
               bet={player?.bet}
               proofPoints={player?.proof_points}
-              cards={position === viewer && player ? hole : undefined}
+              cards={player ? cards : undefined}
+              awards={awards}
               acting={view.turn === position}
               dealer={view.dealer === position}
               empty={!player}

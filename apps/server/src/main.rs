@@ -31,7 +31,7 @@ use crate::db::{
 };
 use crate::proof::{ClaimInputs, ProofVerifier, decode_claim};
 use crate::room::{
-    Award, Challenge, Challenges, HandResult, HandResultKind, JoinError, LiveHand, PendingClaim,
+    Challenge, Challenges, HandResult, HandResultKind, JoinError, LiveHand, PendingClaim,
     PlayedAction, Room, RoomConfig, Seat, TokenHash, challenge_points, replay_hand, start_game,
 };
 
@@ -1272,15 +1272,15 @@ fn result_view(game: &State, result: &HandResult) -> HandResultView {
             HandResultKind::Fold => "fold",
             HandResultKind::Showdown => "showdown",
         },
-        awards: result.awards.iter().copied().map(award_view).collect(),
+        awards: result
+            .awards
+            .iter()
+            .map(|award| AwardView {
+                player: award.player,
+                amount: award.amount,
+            })
+            .collect(),
         revealed,
-    }
-}
-
-fn award_view(award: Award) -> AwardView {
-    AwardView {
-        player: award.player,
-        amount: award.amount,
     }
 }
 
@@ -1769,13 +1769,16 @@ mod tests {
     #[test]
     fn private_views() {
         let room = started(1000);
-        let game = &room.hand.as_ref().unwrap().game;
-        let first = seat_view(game, 0);
-        let second = seat_view(game, 1);
+        let hand = room.hand.as_ref().unwrap();
+        let game = &hand.game;
+        let first = room_view(TEST_ROOM, &room, hand, 0);
+        let second = room_view(TEST_ROOM, &room, hand, 1);
 
         assert_eq!(first.hole, game.hole[0].map(card_view));
         assert_eq!(second.hole, game.hole[1].map(card_view));
         assert_ne!(first.hole, second.hole);
+        assert!(first.result.is_none());
+        assert!(second.result.is_none());
     }
 
     #[test]
@@ -1852,13 +1855,70 @@ mod tests {
 
         apply(&mut room, 0, Action::Fold).unwrap();
 
-        let game = &room.hand.as_ref().unwrap().game;
+        let hand = room.hand.as_ref().unwrap();
+        let game = &hand.game;
+        let view = room_view(TEST_ROOM, &room, hand, 0);
+        let result = view.result.unwrap();
 
         assert!(game.settled);
         assert_eq!(game.fold_winner, Some(1));
         assert_eq!(game.pot, 0);
         assert_eq!(game.players[1].stack, 105);
+        assert_eq!(result.kind, "fold");
+        assert_eq!(
+            result.awards,
+            vec![AwardView {
+                player: 1,
+                amount: 15,
+            }]
+        );
+        assert!(result.revealed.iter().all(Option::is_none));
         assert_eq!(room.rev, 2);
+    }
+
+    #[test]
+    fn showdown_view() {
+        let mut room = Room::new(config(3), hash_token(Uuid::new_v4())).unwrap();
+
+        join(&mut room, Uuid::new_v4(), None).unwrap();
+        join(&mut room, Uuid::new_v4(), Some(SEED)).unwrap();
+        apply(&mut room, 0, Action::Fold).unwrap();
+
+        while !room.hand.as_ref().unwrap().game.settled {
+            let game = &room.hand.as_ref().unwrap().game;
+            let seat = game.turn;
+            let actions = game.legal_actions(seat).unwrap();
+            let action = if actions.check {
+                Action::Check
+            } else if actions.call.is_some() {
+                Action::Call
+            } else {
+                Action::Fold
+            };
+
+            apply(&mut room, seat, action).unwrap();
+        }
+
+        let hand = room.hand.as_ref().unwrap();
+        let result = room_view(TEST_ROOM, &room, hand, 1).result.unwrap();
+
+        assert_eq!(result.kind, "showdown");
+        assert_eq!(result.revealed[0], None);
+        assert_eq!(result.revealed[1], Some(hand.game.hole[1].map(card_view)));
+        assert_eq!(result.revealed[2], Some(hand.game.hole[2].map(card_view)));
+        assert_eq!(
+            result.awards,
+            hand.result
+                .as_ref()
+                .unwrap()
+                .awards
+                .iter()
+                .map(|award| AwardView {
+                    player: award.player,
+                    amount: award.amount,
+                })
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -2217,7 +2277,7 @@ mod tests {
             raise_to: None,
         });
         stored.rev = 4;
-        let (_, _, facts) = replay_hand(
+        let (_, result, facts) = replay_hand(
             config(2),
             SEED,
             0,
@@ -2249,6 +2309,7 @@ mod tests {
         let restored = restore_room(stored.clone()).unwrap();
 
         assert!(restored.hand.as_ref().unwrap().game.settled);
+        assert_eq!(restored.hand.as_ref().unwrap().result, result);
         assert_eq!(
             restored.current_challenges[0].as_ref().unwrap().nonce,
             [7; 32]
@@ -2600,10 +2661,12 @@ mod tests {
         persist(&db, id, &mut room, 0, Action::Check).await;
 
         let expected = room.hand.as_ref().unwrap().game.clone();
+        let expected_result = room.hand.as_ref().unwrap().result.clone();
         let restored = reload(&db, id).await;
         let restored_hand = restored.hand.as_ref().unwrap();
 
         same_game(&restored_hand.game, &expected);
+        assert_eq!(restored_hand.result, expected_result);
         assert!(restored_hand.game.settled);
         assert_eq!(restored_hand.game.street, Street::River);
         assert_eq!(restored_hand.game.board.len(), 5);
@@ -2668,10 +2731,12 @@ mod tests {
         persist(&db, other_id, &mut other, 0, Action::Fold).await;
 
         let expected = other.hand.as_ref().unwrap().game.clone();
+        let expected_result = other.hand.as_ref().unwrap().result.clone();
         let restored = reload(&db, other_id).await;
         let restored_hand = restored.hand.as_ref().unwrap();
 
         same_game(&restored_hand.game, &expected);
+        assert_eq!(restored_hand.result, expected_result);
         assert!(restored_hand.game.settled);
         assert_eq!(restored_hand.game.fold_winner, Some(1));
         assert_eq!(restored_hand.game.pot, 0);
