@@ -584,10 +584,13 @@ async fn claim_room(
     }
 
     let verifier = state.proof.as_ref().ok_or("proof verifier unavailable")?;
-    let verified = verifier
-        .verify(proof)
-        .await
-        .map_err(|_| "cannot verify challenge")?;
+    let verified = match verifier.verify(proof).await {
+        Ok(verified) => verified,
+        Err(err) => {
+            eprintln!("challenge verify error: {err:?}");
+            return Err("cannot verify challenge");
+        }
+    };
 
     if !verified {
         return Err("challenge proof failed");
