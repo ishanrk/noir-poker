@@ -43,7 +43,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libgcc-s1 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system app \
-    && useradd --system --gid app --no-create-home --home-dir /nonexistent app
+    && useradd --system --gid app --home-dir /home/app app \
+    && mkdir -p /home/app \
+    && chown app:app /home/app
 
 WORKDIR /app
 
@@ -51,7 +53,8 @@ COPY --from=builder --chown=app:app /src/target/release/server /app/server
 COPY --from=builder /usr/local/bin/bb /usr/local/bin/bb
 COPY --from=builder --chown=app:app /src/apps/server/zk/challenge_v1.vk /app/zk/challenge_v1.vk
 
-ENV BB_PATH=/usr/local/bin/bb \
+ENV HOME=/home/app \
+    BB_PATH=/usr/local/bin/bb \
     CHALLENGE_VK_PATH=/app/zk/challenge_v1.vk
 
 EXPOSE 10000
