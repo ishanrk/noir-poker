@@ -15,7 +15,7 @@ use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use challenge_core::{
-    FACT_COUNT, Facts, PROTOCOL_VERSION, TIER_EASY, TIER_HARD, facts_hash, hand_tag,
+    FACT_COUNT, Facts, PROTOCOL_VERSION, TIER_EASY, TIER_HARD, catalog_root, facts_hash, hand_tag,
 };
 use game_core::{Action, Card, LegalActions, Rank, State, Street, Suit};
 use serde::{Deserialize, Serialize};
@@ -153,6 +153,8 @@ struct ChallengeView {
     commitment: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     nonce: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    catalog_root: Option<String>,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -162,6 +164,7 @@ struct ClaimView {
     tier: u8,
     commitment: String,
     nonce: String,
+    catalog_root: String,
     facts_hash: String,
     facts: [u8; FACT_COUNT],
     status: &'static str,
@@ -524,6 +527,7 @@ async fn challenge_room(
 
     // nonce after commitment validation
     let nonce = secure_nonce().map_err(|_| "cannot assign challenge")?;
+    let root = catalog_root();
     let challenge = Challenge {
         hand_no: pending.hand_no,
         seat: pending.seat,
@@ -531,6 +535,7 @@ async fn challenge_room(
         hand_tag: pending.hand_tag,
         commitment: pending.commitment,
         nonce,
+        catalog_root: root,
         facts_hash: None,
         facts: None,
         nullifier: None,
@@ -547,6 +552,7 @@ async fn challenge_room(
             hand_tag: pending.hand_tag,
             commitment: pending.commitment,
             nonce,
+            catalog_root: root,
             rev: room.rev,
             next_rev: pending.rev,
         })
@@ -604,6 +610,7 @@ async fn claim_room(
             hand_tag: pending.hand_tag,
             commitment: pending.commitment,
             nonce: pending.nonce,
+            catalog_root: pending.catalog_root,
             facts_hash: pending.facts_hash,
             nullifier: inputs.nullifier,
             points: pending.points,
@@ -624,6 +631,7 @@ fn claim_matches(inputs: ClaimInputs, claim: PendingClaim) -> bool {
         && inputs.hand_tag == claim.hand_tag
         && inputs.commitment == claim.commitment
         && inputs.nonce == claim.nonce
+        && inputs.catalog_root == claim.catalog_root
         && inputs.facts_hash == claim.facts_hash
 }
 
@@ -737,6 +745,7 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
                     tier: challenge.tier,
                     commitment: encode_hex(challenge.commitment),
                     nonce: encode_hex(challenge.nonce),
+                    catalog_root: encode_hex(challenge.catalog_root),
                     facts_hash: encode_hex(hash),
                     facts: facts.bytes(),
                     status: if challenge.nullifier.is_some() {
@@ -770,6 +779,7 @@ fn challenge_view(
         tier: challenge.map(|challenge| challenge.tier),
         commitment: challenge.map(|challenge| encode_hex(challenge.commitment)),
         nonce: challenge.map(|challenge| encode_hex(challenge.nonce)),
+        catalog_root: challenge.map(|challenge| encode_hex(challenge.catalog_root)),
     }
 }
 
@@ -1138,6 +1148,10 @@ fn restore_challenges(
             .nonce
             .try_into()
             .map_err(|_| recovery_error(id, "invalid challenge nonce"))?;
+        let root = stored
+            .catalog_root
+            .try_into()
+            .map_err(|_| recovery_error(id, "invalid challenge catalog root"))?;
         let stored_hash = stored
             .facts_hash
             .map(|hash| {
@@ -1157,6 +1171,7 @@ fn restore_challenges(
             hand_tag: tag,
             commitment,
             nonce,
+            catalog_root: root,
             facts_hash: stored_hash,
             facts: None,
             nullifier: None,
@@ -1445,6 +1460,7 @@ mod tests {
             hand_tag: pending.hand_tag,
             commitment: pending.commitment,
             nonce: [seat as u8 + 7; 32],
+            catalog_root: catalog_root(),
             facts_hash: None,
             facts: None,
             nullifier: None,
@@ -1474,6 +1490,7 @@ mod tests {
                 hand_tag: hand_tag(*TEST_ROOM.as_bytes(), 1),
                 commitment: [seat as u8 + 1; 32],
                 nonce: [seat as u8 + 7; 32],
+                catalog_root: catalog_root(),
                 facts_hash: None,
                 facts: None,
                 nullifier: None,
@@ -2045,6 +2062,8 @@ mod tests {
         assert!(second.assigned);
         assert_eq!(first.tier, Some(TIER_EASY));
         assert_eq!(second.tier, Some(TIER_HARD));
+        assert_eq!(first.catalog_root, Some(encode_hex(catalog_root())));
+        assert_eq!(second.catalog_root, Some(encode_hex(catalog_root())));
         assert_ne!(first.commitment, second.commitment);
         assert_eq!(
             first.hand_tag,
@@ -2101,6 +2120,7 @@ mod tests {
             nonce: challenge.nonce,
             facts_hash: challenge.facts_hash.unwrap(),
             nullifier: [9; 32],
+            catalog_root: challenge.catalog_root,
         };
 
         assert!(claim_matches(inputs, claim));
@@ -2116,6 +2136,10 @@ mod tests {
         let view = room_view(TEST_ROOM, &room, room.hand.as_ref().unwrap(), 0);
 
         assert_eq!(view.claim.as_ref().unwrap().status, "claimed");
+        assert_eq!(
+            view.claim.as_ref().unwrap().catalog_root,
+            encode_hex(catalog_root())
+        );
         assert_eq!(view.claim.unwrap().points, Some(10));
         assert_eq!(view.players[0].proof_points, 10);
     }
@@ -2132,6 +2156,7 @@ mod tests {
             nonce: claim.nonce,
             facts_hash: claim.facts_hash,
             nullifier: [9; 32],
+            catalog_root: claim.catalog_root,
         };
 
         assert!(claim_matches(inputs, claim));
@@ -2151,6 +2176,9 @@ mod tests {
         inputs.nonce[0] ^= 1;
         assert!(!claim_matches(inputs, claim));
         inputs.nonce = claim.nonce;
+        inputs.catalog_root[0] ^= 1;
+        assert!(!claim_matches(inputs, claim));
+        inputs.catalog_root = claim.catalog_root;
         inputs.facts_hash[0] ^= 1;
         assert!(!claim_matches(inputs, claim));
     }
@@ -2299,6 +2327,7 @@ mod tests {
                 hand_tag: tag.to_vec(),
                 commitment: vec![seat as u8 + 1; 32],
                 nonce: vec![seat as u8 + 7; 32],
+                catalog_root: catalog_root().to_vec(),
                 facts_hash: Some(facts_hash(tag, seat as u8, facts[seat as usize]).to_vec()),
                 nullifier: None,
                 points: None,
@@ -2314,6 +2343,13 @@ mod tests {
             restored.current_challenges[0].as_ref().unwrap().nonce,
             [7; 32]
         );
+        assert_eq!(
+            restored.current_challenges[0]
+                .as_ref()
+                .unwrap()
+                .catalog_root,
+            catalog_root()
+        );
         assert!(
             restored.current_challenges[0]
                 .as_ref()
@@ -2322,8 +2358,12 @@ mod tests {
                 .is_some()
         );
 
-        let mut corrupt = stored;
+        let mut corrupt = stored.clone();
         corrupt.challenges[0].facts_hash.as_mut().unwrap()[0] ^= 1;
+        assert!(restore_room(corrupt).is_err());
+
+        let mut corrupt = stored;
+        corrupt.challenges[0].catalog_root.pop();
         assert!(restore_room(corrupt).is_err());
     }
 
@@ -2843,14 +2883,15 @@ mod tests {
         for seat in 0..2i32 {
             sqlx::query(
                 "INSERT INTO challenge_assignments \
-                 (room_id, hand_no, seat, version, tier, hand_tag, commitment, nonce) \
-                 VALUES ($1, 1, $2, 1, 0, $3, $4, $5)",
+                 (room_id, hand_no, seat, version, tier, hand_tag, commitment, nonce, catalog_root) \
+                 VALUES ($1, 1, $2, 1, 0, $3, $4, $5, $6)",
             )
             .bind(all_in_id)
             .bind(seat)
             .bind(latest_tag.as_slice())
             .bind(vec![seat as u8 + 1; 32])
             .bind(vec![seat as u8 + 7; 32])
+            .bind(catalog_root().as_slice())
             .execute(db.pool())
             .await
             .unwrap();
@@ -2963,7 +3004,7 @@ mod tests {
 
         assert_eq!(rev, 5);
         let assignments = sqlx::query(
-            "SELECT hand_no, seat, version, tier, hand_tag, commitment, nonce, facts_hash \
+            "SELECT hand_no, seat, version, tier, hand_tag, commitment, nonce, catalog_root, facts_hash \
              FROM challenge_assignments WHERE room_id = $1 ORDER BY seat",
         )
         .bind(ready_id)
@@ -2982,6 +3023,10 @@ mod tests {
         );
         assert_eq!(assignments[0].get::<Vec<u8>, _>("commitment"), [1; 32]);
         assert_eq!(assignments[0].get::<Vec<u8>, _>("nonce").len(), 32);
+        assert_eq!(
+            assignments[0].get::<Vec<u8>, _>("catalog_root"),
+            catalog_root()
+        );
         assert!(
             assignments[0]
                 .get::<Option<Vec<u8>>, _>("facts_hash")
@@ -3175,6 +3220,7 @@ mod tests {
             hand_tag: claim.hand_tag,
             commitment: claim.commitment,
             nonce: claim.nonce,
+            catalog_root: claim.catalog_root,
             facts_hash: claim.facts_hash,
             nullifier,
             points: claim.points,
@@ -3204,6 +3250,7 @@ mod tests {
                 hand_tag: other.hand_tag,
                 commitment: other.commitment,
                 nonce: other.nonce,
+                catalog_root: other.catalog_root,
                 facts_hash: other.facts_hash,
                 nullifier,
                 points: other.points,
@@ -3521,6 +3568,7 @@ mod tests {
             hand_tag: tag,
             commitment,
             nonce,
+            catalog_root: catalog_root(),
             rev: 2,
             next_rev: 3,
         })
@@ -3551,6 +3599,7 @@ mod tests {
             hand_tag: tag,
             commitment,
             nonce,
+            catalog_root: catalog_root(),
             facts_hash: Some(fact_hash),
             facts: Some(Facts {
                 saw_flop: true,
@@ -3588,6 +3637,13 @@ mod tests {
         assert_eq!(
             claim_room(&state, id, 2, 0, proof, public).await,
             Err("wrong challenge hand")
+        );
+
+        let mut wrong_root = STANDARD.decode(public).unwrap();
+        wrong_root[162 * 32 + 31] ^= 1;
+        assert_eq!(
+            claim_room(&state, id, 2, 1, proof, &STANDARD.encode(wrong_root)).await,
+            Err("challenge proof mismatch")
         );
 
         let mut altered = STANDARD.decode(proof).unwrap();
@@ -3645,6 +3701,29 @@ mod tests {
             sqlx::query(
                 "SELECT COUNT(*) AS count FROM information_schema.columns \
                  WHERE table_name = 'challenge_assignments' AND column_name = 'proof'",
+            )
+            .fetch_one(db.pool())
+            .await
+            .unwrap()
+            .get::<i64, _>("count"),
+            0
+        );
+        assert_eq!(
+            sqlx::query(
+                "SELECT COUNT(*) AS count FROM information_schema.columns \
+                 WHERE table_name = 'challenge_assignments' \
+                 AND column_name IN ('secret', 'objective_index', 'siblings')",
+            )
+            .fetch_one(db.pool())
+            .await
+            .unwrap()
+            .get::<i64, _>("count"),
+            0
+        );
+        assert_eq!(
+            sqlx::query(
+                "SELECT COUNT(*) AS count FROM information_schema.tables \
+                 WHERE table_schema = current_schema() AND table_name = 'challenge_catalog'",
             )
             .fetch_one(db.pool())
             .await

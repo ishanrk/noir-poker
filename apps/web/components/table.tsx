@@ -50,6 +50,7 @@ export type ChallengeView = {
   tier?: number;
   commitment?: string;
   nonce?: string;
+  catalog_root?: string;
 };
 
 export type ClaimView = {
@@ -58,6 +59,7 @@ export type ClaimView = {
   tier: number;
   commitment: string;
   nonce: string;
+  catalog_root: string;
   facts_hash: string;
   facts: [number, number, number, number, number, number];
   status: "claimable" | "claimed";

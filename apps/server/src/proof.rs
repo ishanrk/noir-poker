@@ -14,13 +14,13 @@ use sha2::{Digest, Sha256};
 
 const FIELD_BYTES: usize = 32;
 // circuit public u8s use one field each
-const PUBLIC_FIELDS: usize = 162;
+const PUBLIC_FIELDS: usize = 194;
 const PUBLIC_BYTES: usize = PUBLIC_FIELDS * FIELD_BYTES;
 const MAX_PROOF_BYTES: usize = 65_536;
 const BB_VERSION: &str = "5.2.0";
 const VK_DIGEST: [u8; 32] = [
-    0x65, 0x0e, 0x1b, 0x9a, 0x64, 0x05, 0xd6, 0xd1, 0xb2, 0xb7, 0x41, 0xab, 0xe1, 0xf1, 0x6c, 0x4c,
-    0x66, 0xcd, 0x61, 0x83, 0xa5, 0x6b, 0x73, 0xf1, 0x20, 0x78, 0x3e, 0x0a, 0xaf, 0x71, 0xf9, 0x07,
+    0x5a, 0x70, 0xd3, 0xd6, 0xe8, 0x04, 0xc8, 0x94, 0xee, 0x33, 0x4e, 0xf0, 0xcb, 0x32, 0x4c, 0x5d,
+    0x06, 0x2a, 0x11, 0x6c, 0xa7, 0x3b, 0xb5, 0x64, 0xfb, 0x04, 0x0a, 0xcc, 0x30, 0xfb, 0xfa, 0xa0,
 ];
 
 type ProofResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
@@ -46,6 +46,7 @@ pub struct ClaimInputs {
     pub nonce: [u8; 32],
     pub facts_hash: [u8; 32],
     pub nullifier: [u8; 32],
+    pub catalog_root: [u8; 32],
 }
 
 impl ProofVerifier {
@@ -145,6 +146,7 @@ impl ClaimInputs {
         let nonce = take_bytes(fields, &mut offset)?;
         let facts_hash = take_bytes(fields, &mut offset)?;
         let nullifier = take_bytes(fields, &mut offset)?;
+        let catalog_root = take_bytes(fields, &mut offset)?;
 
         Ok(Self {
             hand_tag,
@@ -154,6 +156,7 @@ impl ClaimInputs {
             nonce,
             facts_hash,
             nullifier,
+            catalog_root,
         })
     }
 }
@@ -202,6 +205,7 @@ mod tests {
             &[5; 32][..],
             &[6; 32][..],
             &[7; 32][..],
+            &[8; 32][..],
         ] {
             for &byte in byte {
                 let mut field = vec![0; 32];
@@ -220,6 +224,7 @@ mod tests {
                 nonce: [5; 32],
                 facts_hash: [6; 32],
                 nullifier: [7; 32],
+                catalog_root: [8; 32],
             }
         );
     }

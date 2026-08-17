@@ -13,15 +13,20 @@ import {
 import {
   CHALLENGE_VERSION,
   HARD_TIER,
+  catalogRoot,
   commitment as challengeCommitment,
   decodeHex,
   encodeHex,
   factsHash,
   loadChallengeSecret,
+  leafHash,
   nullifier as challengeNullifier,
+  objectiveAt,
   objectiveDescription,
   objectiveIndex,
   objectiveMet,
+  objectivePath,
+  pathRoot,
   removeChallengeSecret,
   saveChallengeSecret,
 } from "@/lib/challenge";
@@ -53,6 +58,7 @@ type Assignment = {
   tier: number;
   commitment: string;
   nonce: string;
+  catalog_root: string;
 };
 
 type PrivateObjective = {
@@ -71,7 +77,8 @@ function challengeAssignment(challenge: ChallengeView | undefined): Assignment |
     challenge?.assigned &&
     challenge.tier !== undefined &&
     challenge.commitment !== undefined &&
-    challenge.nonce !== undefined
+    challenge.nonce !== undefined &&
+    challenge.catalog_root !== undefined
   ) {
     return {
       hand_no: challenge.hand_no,
@@ -79,6 +86,7 @@ function challengeAssignment(challenge: ChallengeView | undefined): Assignment |
       tier: challenge.tier,
       commitment: challenge.commitment,
       nonce: challenge.nonce,
+      catalog_root: challenge.catalog_root,
     };
   }
 
@@ -96,6 +104,7 @@ function claimAssignment(claim: ClaimView | undefined): Assignment | undefined {
     tier: claim.tier,
     commitment: claim.commitment,
     nonce: claim.nonce,
+    catalog_root: claim.catalog_root,
   };
 }
 
@@ -118,6 +127,11 @@ function privateObjective(
     const secret = decodeHex(stored.secret);
     const handTag = decodeHex(assignment.hand_tag);
     const expected = encodeHex(challengeCommitment(handTag, seat, assignment.tier, secret));
+    const root = encodeHex(catalogRoot());
+
+    if (root !== assignment.catalog_root) {
+      return { error: "Contract catalog mismatch" };
+    }
 
     if (
       stored.tier !== assignment.tier ||
@@ -157,7 +171,7 @@ function contractCompletion(
       return { error: "Contract facts mismatch" };
     }
 
-    return { completed: objectiveMet(claim.tier, index, claim.facts) };
+    return { completed: objectiveMet(objectiveAt(claim.tier, index), claim.facts) };
   } catch {
     return { error: "Invalid contract facts" };
   }
@@ -451,17 +465,24 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
       const expectedCommitment = challengeCommitment(handTag, seat, claim.tier, secret);
       const expectedFactsHash = factsHash(handTag, seat, claim.facts);
       const index = objectiveIndex(handTag, seat, claim.tier, nonce, secret);
+      const objective = objectiveAt(claim.tier, index);
+      const siblings = objectivePath(claim.tier, index);
+      const root = decodeHex(claim.catalog_root);
+      const localRoot = catalogRoot();
+      const verifiedRoot = pathRoot(leafHash(objective), claim.tier * 4 + index, siblings);
 
       if (
         stored.tier !== claim.tier ||
         stored.commitment !== claim.commitment ||
         encodeHex(expectedCommitment) !== claim.commitment ||
-        encodeHex(expectedFactsHash) !== claim.facts_hash
+        encodeHex(expectedFactsHash) !== claim.facts_hash ||
+        encodeHex(localRoot) !== claim.catalog_root ||
+        encodeHex(verifiedRoot) !== encodeHex(root)
       ) {
         throw new Error("challenge mismatch");
       }
 
-      if (!objectiveMet(claim.tier, index, claim.facts)) {
+      if (!objectiveMet(objective, claim.facts)) {
         setClaimCompleted(false);
         setChallengeError("Contract not completed");
         return;
@@ -481,8 +502,12 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
           nonce,
           factsHash: expectedFactsHash,
           nullifier: challengeNullifier(handTag, seat, claim.tier, secret),
+          catalogRoot: root,
           secret,
           facts: claim.facts,
+          mustTrue: objective.mustTrue,
+          mustFalse: objective.mustFalse,
+          siblings,
         },
         (status: ProofStatus) => {
           setClaimState(status);

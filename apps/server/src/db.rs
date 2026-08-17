@@ -38,6 +38,7 @@ pub struct NewChallenge {
     pub hand_tag: [u8; 32],
     pub commitment: [u8; 32],
     pub nonce: [u8; 32],
+    pub catalog_root: [u8; 32],
     pub rev: u64,
     pub next_rev: u64,
 }
@@ -50,6 +51,7 @@ pub struct ClaimUpdate {
     pub hand_tag: [u8; 32],
     pub commitment: [u8; 32],
     pub nonce: [u8; 32],
+    pub catalog_root: [u8; 32],
     pub facts_hash: [u8; 32],
     pub nullifier: [u8; 32],
     pub points: u32,
@@ -119,6 +121,7 @@ pub struct StoredChallenge {
     pub hand_tag: Vec<u8>,
     pub commitment: Vec<u8>,
     pub nonce: Vec<u8>,
+    pub catalog_root: Vec<u8>,
     pub facts_hash: Option<Vec<u8>>,
     pub nullifier: Option<Vec<u8>>,
     pub points: Option<i64>,
@@ -271,8 +274,8 @@ impl Db {
 
         query(
             "INSERT INTO challenge_assignments \
-             (room_id, hand_no, seat, version, tier, hand_tag, commitment, nonce) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+             (room_id, hand_no, seat, version, tier, hand_tag, commitment, nonce, catalog_root) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(challenge.room)
         .bind(i64::try_from(challenge.hand_no)?)
@@ -282,6 +285,7 @@ impl Db {
         .bind(challenge.hand_tag.as_slice())
         .bind(challenge.commitment.as_slice())
         .bind(challenge.nonce.as_slice())
+        .bind(challenge.catalog_root.as_slice())
         .execute(&mut *tx)
         .await?;
         let changed = query("UPDATE rooms SET rev = $2 WHERE id = $1 AND rev = $3")
@@ -299,7 +303,7 @@ impl Db {
     pub async fn claim(&self, claim: ClaimUpdate) -> DbResult<()> {
         let mut tx = self.pool.begin().await?;
         let row = query(
-            "SELECT version, tier, hand_tag, commitment, nonce, facts_hash, nullifier \
+            "SELECT version, tier, hand_tag, commitment, nonce, catalog_root, facts_hash, nullifier \
              FROM challenge_assignments \
              WHERE room_id = $1 AND hand_no = $2 AND seat = $3 FOR UPDATE",
         )
@@ -314,6 +318,7 @@ impl Db {
             || row.try_get::<Vec<u8>, _>("hand_tag")? != claim.hand_tag
             || row.try_get::<Vec<u8>, _>("commitment")? != claim.commitment
             || row.try_get::<Vec<u8>, _>("nonce")? != claim.nonce
+            || row.try_get::<Vec<u8>, _>("catalog_root")? != claim.catalog_root
             || row.try_get::<Option<Vec<u8>>, _>("facts_hash")? != Some(claim.facts_hash.to_vec())
             || row.try_get::<Option<Vec<u8>>, _>("nullifier")?.is_some()
         {
@@ -503,7 +508,7 @@ impl Db {
 
     async fn load_challenges(&self, room: Uuid) -> DbResult<Vec<StoredChallenge>> {
         let rows = query(
-            "SELECT hand_no, seat, version, tier, hand_tag, commitment, nonce, facts_hash, \
+            "SELECT hand_no, seat, version, tier, hand_tag, commitment, nonce, catalog_root, facts_hash, \
              nullifier, points, claimed_at IS NOT NULL AS claimed \
              FROM challenge_assignments WHERE room_id = $1 ORDER BY hand_no, seat",
         )
@@ -521,6 +526,7 @@ impl Db {
                     hand_tag: row.try_get("hand_tag")?,
                     commitment: row.try_get("commitment")?,
                     nonce: row.try_get("nonce")?,
+                    catalog_root: row.try_get("catalog_root")?,
                     facts_hash: row.try_get("facts_hash")?,
                     nullifier: row.try_get("nullifier")?,
                     points: row.try_get("points")?,

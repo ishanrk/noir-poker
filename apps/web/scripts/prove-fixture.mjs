@@ -14,8 +14,12 @@ const { witness } = await noir.execute({
   nonce: bytes(fixture.nonce),
   facts_hash: bytes(fixture.facts_hash),
   nullifier: bytes(fixture.nullifier),
+  catalog_root: bytes(fixture.catalog_root),
   secret: bytes(fixture.secret),
   facts: fixture.facts,
+  must_true: fixture.must_true,
+  must_false: fixture.must_false,
+  siblings: fixture.siblings.map(bytes),
 });
 const api = await Barretenberg.new({ backend: BackendType.Wasm });
 
@@ -24,9 +28,14 @@ try {
   const log = console.log;
 
   console.log = () => {};
+  await backend.generateProof(witness, {
+    verifierTarget: "noir-recursive",
+  });
+  const started = performance.now();
   const proof = await backend.generateProof(witness, {
     verifierTarget: "noir-recursive",
   });
+  const proveMs = performance.now() - started;
   console.log = log;
 
   process.stdout.write(
@@ -35,6 +44,9 @@ try {
       public_inputs: Buffer.concat(
         proof.publicInputs.map((field) => Buffer.from(field.slice(2), "hex")),
       ).toString("base64"),
+      proof_bytes: proof.proof.length,
+      public_fields: proof.publicInputs.length,
+      prove_ms: proveMs,
     }),
   );
 } finally {

@@ -11,19 +11,42 @@ export type ChallengeSecret = {
   commitment: string;
 };
 
+export type Objective = {
+  tier: number;
+  slot: number;
+  description: string;
+  mustTrue: readonly number[];
+  mustFalse: readonly number[];
+};
+
 const COMMITMENT_DOMAIN = Uint8Array.from([78, 80, 67, 79, 77, 77, 48, 49]);
 const SELECTOR_DOMAIN = Uint8Array.from([78, 80, 83, 69, 76, 69, 48, 49]);
 const FACTS_DOMAIN = Uint8Array.from([78, 80, 70, 65, 67, 84, 48, 49]);
 const NULLIFIER_DOMAIN = Uint8Array.from([78, 80, 78, 85, 76, 76, 48, 49]);
+const LEAF_DOMAIN = Uint8Array.from([78, 80, 76, 69, 65, 70, 48, 49]);
+const NODE_DOMAIN = Uint8Array.from([78, 80, 78, 79, 68, 69, 48, 49]);
 
-const OBJECTIVES = [
-  ["See the flop", "Raise before the flop", "Call before the flop", "Check on the flop"],
-  [
-    "Reach showdown",
-    "Finish the hand ahead",
+export const CATALOG: readonly Objective[] = [
+  objective(0, 0, "See the flop", [1, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]),
+  objective(0, 1, "Raise before the flop", [0, 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]),
+  objective(0, 2, "Call before the flop", [0, 0, 1, 0, 0, 0], [0, 0, 0, 0, 0, 0]),
+  objective(0, 3, "Check on the flop", [0, 0, 0, 1, 0, 0], [0, 0, 0, 0, 0, 0]),
+  objective(1, 0, "Reach showdown", [0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 0]),
+  objective(1, 1, "Finish the hand ahead", [0, 0, 0, 0, 0, 1], [0, 0, 0, 0, 0, 0]),
+  objective(
+    1,
+    2,
     "Raise before the flop and finish ahead",
+    [0, 1, 0, 0, 0, 1],
+    [0, 0, 0, 0, 0, 0],
+  ),
+  objective(
+    1,
+    3,
     "Reach showdown finish ahead and never raise before the flop",
-  ],
+    [0, 0, 0, 0, 1, 1],
+    [0, 1, 0, 0, 0, 0],
+  ),
 ] as const;
 
 export function commitment(
@@ -70,42 +93,93 @@ export function factsHash(handTag: Uint8Array, seat: number, facts: readonly num
   return blake2s(join(FACTS_DOMAIN, handTag, Uint8Array.of(seat), Uint8Array.from(facts)));
 }
 
-export function objectiveMet(tier: number, index: number, facts: readonly number[]) {
-  if (facts.length !== 6 || facts.some((fact) => fact !== 0 && fact !== 1)) {
-    return false;
-  }
+export function objectiveAt(tier: number, slot: number) {
+  const value = CATALOG[tier * 4 + slot];
 
-  if (tier === EASY_TIER) {
-    return facts[index] === 1;
-  }
-
-  if (tier !== HARD_TIER) {
-    return false;
-  }
-
-  if (index === 0) {
-    return facts[4] === 1;
-  }
-
-  if (index === 1) {
-    return facts[5] === 1;
-  }
-
-  if (index === 2) {
-    return facts[1] === 1 && facts[5] === 1;
-  }
-
-  return index === 3 && facts[1] === 0 && facts[4] === 1 && facts[5] === 1;
-}
-
-export function objectiveDescription(tier: number, index: number) {
-  const value = OBJECTIVES[tier]?.[index];
-
-  if (!value) {
+  if (!value || value.tier !== tier || value.slot !== slot) {
     throw new Error("invalid challenge objective");
   }
 
   return value;
+}
+
+export function leafHash(objective: Objective) {
+  return blake2s(
+    join(
+      LEAF_DOMAIN,
+      Uint8Array.of(objective.tier, objective.slot),
+      Uint8Array.from(objective.mustTrue),
+      Uint8Array.from(objective.mustFalse),
+    ),
+  );
+}
+
+export function nodeHash(left: Uint8Array, right: Uint8Array) {
+  return blake2s(join(NODE_DOMAIN, left, right));
+}
+
+export function catalogRoot() {
+  const leaves = CATALOG.map(leafHash);
+  const level = Array.from({ length: 4 }, (_, i) =>
+    nodeHash(leaves[i * 2], leaves[i * 2 + 1]),
+  );
+  const next = [nodeHash(level[0], level[1]), nodeHash(level[2], level[3])];
+
+  return nodeHash(next[0], next[1]);
+}
+
+export function objectivePath(tier: number, slot: number) {
+  const index = tier * 4 + slot;
+
+  objectiveAt(tier, slot);
+
+  const leaves = CATALOG.map(leafHash);
+  const level = Array.from({ length: 4 }, (_, i) =>
+    nodeHash(leaves[i * 2], leaves[i * 2 + 1]),
+  );
+  const next = [nodeHash(level[0], level[1]), nodeHash(level[2], level[3])];
+
+  return [leaves[index ^ 1], level[(index >> 1) ^ 1], next[(index >> 2) ^ 1]];
+}
+
+export function pathRoot(leaf: Uint8Array, index: number, siblings: Uint8Array[]) {
+  let hash = leaf;
+
+  for (const sibling of siblings) {
+    hash = index & 1 ? nodeHash(sibling, hash) : nodeHash(hash, sibling);
+    index >>= 1;
+  }
+
+  return hash;
+}
+
+export function objectiveMet(objective: Objective, facts: readonly number[]) {
+  if (facts.length !== 6 || facts.some((fact) => fact !== 0 && fact !== 1)) {
+    return false;
+  }
+
+  let literals = 0;
+
+  for (let i = 0; i < 6; i += 1) {
+    const yes = objective.mustTrue[i];
+    const no = objective.mustFalse[i];
+
+    if ((yes !== 0 && yes !== 1) || (no !== 0 && no !== 1) || yes + no > 1) {
+      return false;
+    }
+
+    literals += yes + no;
+
+    if ((yes === 1 && facts[i] !== 1) || (no === 1 && facts[i] !== 0)) {
+      return false;
+    }
+  }
+
+  return literals > 0;
+}
+
+export function objectiveDescription(tier: number, index: number) {
+  return objectiveAt(tier, index).description;
 }
 
 export function encodeHex(bytes: Uint8Array) {
@@ -164,6 +238,16 @@ export function removeChallengeSecret(room: string, handNo: number, seat: number
 
 function secretKey(room: string, handNo: number, seat: number) {
   return `noir-poker-challenge-${room}-${handNo}-${seat}`;
+}
+
+function objective(
+  tier: number,
+  slot: number,
+  description: string,
+  mustTrue: readonly number[],
+  mustFalse: readonly number[],
+): Objective {
+  return { tier, slot, description, mustTrue, mustFalse };
 }
 
 function join(...parts: Uint8Array[]) {

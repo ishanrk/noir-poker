@@ -51,12 +51,12 @@ cp "$tmp/vk/vk" "$root/apps/server/zk/challenge_v1.vk"
 artifact_digest="$(sha256sum "$root/apps/web/zk/challenge_v1.json" | awk '{print $1}')"
 vk_digest="$(sha256sum "$root/apps/server/zk/challenge_v1.vk" | awk '{print $1}')"
 
-if test "$artifact_digest" != "e7d1b6cee74d87f6af289cc0e33e3f5133eb8fed8c6211e0eac9a82f84aacbf1"; then
+if test "$artifact_digest" != "6d6883e92c09c1c483679ce9da75b7018cde496e1a16f8ccf491262f92f70ab1"; then
     echo "challenge artifact digest mismatch" >&2
     exit 1
 fi
 
-if test "$vk_digest" != "650e1b9a6405d6d1b2b741abe1f16c4c66cd6183a56b73f120783e0aaf71f907"; then
+if test "$vk_digest" != "5a70d3d6e804c894ee334ef0cb324c5d062a116ca73bb564fb040acc30fbfaa0"; then
     echo "challenge verification key digest mismatch" >&2
     exit 1
 fi

@@ -10,8 +10,12 @@ type ChallengeProofInput = {
   nonce: Uint8Array;
   factsHash: Uint8Array;
   nullifier: Uint8Array;
+  catalogRoot: Uint8Array;
   secret: Uint8Array;
   facts: readonly number[];
+  mustTrue: readonly number[];
+  mustFalse: readonly number[];
+  siblings: readonly Uint8Array[];
 };
 
 export async function proveChallenge(
@@ -33,8 +37,12 @@ export async function proveChallenge(
     nonce: Array.from(input.nonce),
     facts_hash: Array.from(input.factsHash),
     nullifier: Array.from(input.nullifier),
+    catalog_root: Array.from(input.catalogRoot),
     secret: Array.from(input.secret),
     facts: Array.from(input.facts),
+    must_true: Array.from(input.mustTrue),
+    must_false: Array.from(input.mustFalse),
+    siblings: input.siblings.map((value) => Array.from(value)),
   });
 
   status("proving");
@@ -47,7 +55,7 @@ export async function proveChallenge(
       verifierTarget: "noir-recursive",
     });
 
-    if (proof.publicInputs.length !== 162 || proof.proof.length > 65536) {
+    if (proof.publicInputs.length !== 194 || proof.proof.length > 65536) {
       throw new Error("invalid challenge proof");
     }
 
