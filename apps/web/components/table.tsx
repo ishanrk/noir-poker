@@ -23,6 +23,13 @@ type ActionView = {
     | undefined;
 };
 
+type ReadyView = {
+  mine: boolean;
+  count: number;
+  players: number;
+  complete: boolean;
+};
+
 export type View = {
   players: PlayerView[];
   hole: [CardView, CardView];
@@ -34,6 +41,7 @@ export type View = {
   round_complete: boolean;
   settled: boolean;
   actions: ActionView | undefined;
+  ready?: ReadyView;
 };
 
 type TableProps = {
@@ -49,6 +57,7 @@ type TableProps = {
   onCall: () => void;
   onRaise: () => void;
   onNewHand?: () => void;
+  onReady?: () => void;
 };
 
 const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
@@ -66,6 +75,7 @@ export function Table({
   onCall,
   onRaise,
   onNewHand,
+  onReady,
 }: TableProps) {
   const hole = [view.hole[0].value, view.hole[1].value] as const;
   const actions = view.actions;
@@ -85,7 +95,7 @@ export function Table({
 
   if (view.settled) {
     status = "Complete";
-    message = "Hand complete";
+    message = view.ready?.complete ? "Table complete" : "Hand complete";
   }
 
   if (error) {
@@ -184,6 +194,18 @@ export function Table({
               disabled={disabled}
             >
               New hand
+            </button>
+          )}
+          {view.settled && onReady && view.ready && (
+            <button
+              className="new-hand-button"
+              type="button"
+              onClick={onReady}
+              disabled={disabled || view.ready.mine || view.ready.complete}
+            >
+              {view.ready.complete
+                ? "Table complete"
+                : `Ready ${view.ready.count}/${view.ready.players}`}
             </button>
           )}
         </div>

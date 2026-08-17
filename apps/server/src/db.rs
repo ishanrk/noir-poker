@@ -12,9 +12,19 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
 pub struct NewHand<'a> {
     pub id: Uuid,
+    pub no: u64,
     pub seed: &'a [u8; 32],
     pub dealer: usize,
     pub stacks: &'a [u32],
+}
+
+pub struct ReadyUpdate<'a> {
+    pub room: Uuid,
+    pub hand: Uuid,
+    pub seat: usize,
+    pub rev: u64,
+    pub next_rev: u64,
+    pub next_hand: Option<NewHand<'a>>,
 }
 
 pub struct NewAction {
@@ -41,6 +51,7 @@ pub struct StoredRoom {
 pub struct StoredSeat {
     pub seat: i32,
     pub token_hash: Vec<u8>,
+    pub ready_hand: Option<Uuid>,
 }
 
 pub struct StoredHand {
@@ -135,10 +146,11 @@ impl Db {
 
             query(
                 "INSERT INTO hands (id, room_id, hand_no, seed, dealer, starting_stacks) \
-                 VALUES ($1, $2, 0, $3, $4, $5)",
+                 VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(hand.id)
             .bind(room)
+            .bind(i64::try_from(hand.no)?)
             .bind(hand.seed.as_slice())
             .bind(i32::try_from(hand.dealer)?)
             .bind(stacks)
@@ -146,6 +158,55 @@ impl Db {
             .await?;
         }
 
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn ready(&self, ready: ReadyUpdate<'_>) -> DbResult<()> {
+        let mut tx = self.pool.begin().await?;
+        let changed = query(
+            "UPDATE seats SET ready_hand = $3 \
+             WHERE room_id = $1 AND seat = $2 AND ready_hand IS NULL",
+        )
+        .bind(ready.room)
+        .bind(i32::try_from(ready.seat)?)
+        .bind(ready.hand)
+        .execute(&mut *tx)
+        .await?;
+
+        if changed.rows_affected() != 1 {
+            return Err(io::Error::other("seat readiness mismatch").into());
+        }
+
+        if let Some(hand) = ready.next_hand {
+            let stacks: Vec<_> = hand.stacks.iter().copied().map(i64::from).collect();
+
+            query(
+                "INSERT INTO hands (id, room_id, hand_no, seed, dealer, starting_stacks) \
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(hand.id)
+            .bind(ready.room)
+            .bind(i64::try_from(hand.no)?)
+            .bind(hand.seed.as_slice())
+            .bind(i32::try_from(hand.dealer)?)
+            .bind(stacks)
+            .execute(&mut *tx)
+            .await?;
+            query("UPDATE seats SET ready_hand = NULL WHERE room_id = $1")
+                .bind(ready.room)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        let changed = query("UPDATE rooms SET rev = $2 WHERE id = $1 AND rev = $3")
+            .bind(ready.room)
+            .bind(i64::try_from(ready.next_rev)?)
+            .bind(i64::try_from(ready.rev)?)
+            .execute(&mut *tx)
+            .await?;
+
+        one_row(changed)?;
         tx.commit().await?;
         Ok(())
     }
@@ -205,16 +266,19 @@ impl Db {
     }
 
     async fn load_seats(&self, room: Uuid) -> DbResult<Vec<StoredSeat>> {
-        let rows = query("SELECT seat, token_hash FROM seats WHERE room_id = $1 ORDER BY seat")
-            .bind(room)
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = query(
+            "SELECT seat, token_hash, ready_hand FROM seats WHERE room_id = $1 ORDER BY seat",
+        )
+        .bind(room)
+        .fetch_all(&self.pool)
+        .await?;
 
         rows.into_iter()
             .map(|row| {
                 Ok(StoredSeat {
                     seat: row.try_get("seat")?,
                     token_hash: row.try_get("token_hash")?,
+                    ready_hand: row.try_get("ready_hand")?,
                 })
             })
             .collect()

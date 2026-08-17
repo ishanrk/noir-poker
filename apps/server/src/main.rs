@@ -12,7 +12,9 @@ use axum::http::{HeaderValue, Method, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use game_core::{Action, ActionError, Card, LegalActions, Rank, State, Street, Suit};
+use game_core::{
+    Action, ActionError, Card, LegalActions, NextHandError, Rank, State, Street, Suit,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
@@ -20,7 +22,7 @@ use tokio::sync::{Mutex, broadcast};
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
-use crate::db::{Db, NewAction, NewHand, StoredAction, StoredHand, StoredRoom};
+use crate::db::{Db, NewAction, NewHand, ReadyUpdate, StoredAction, StoredHand, StoredRoom};
 
 type HttpError = (StatusCode, &'static str);
 type TokenHash = [u8; 32];
@@ -92,7 +94,10 @@ impl Room {
 
         Ok(Self {
             config,
-            seats: vec![Seat { token_hash }],
+            seats: vec![Seat {
+                token_hash,
+                ready_hand: None,
+            }],
             hand: None,
             rev: 0,
             notify,
@@ -108,8 +113,52 @@ impl Room {
     }
 
     fn commit_join(&mut self, token_hash: TokenHash, hand: Option<LiveHand>, rev: u64) {
-        self.seats.push(Seat { token_hash });
+        self.seats.push(Seat {
+            token_hash,
+            ready_hand: None,
+        });
         self.hand = hand;
+        self.changed(rev);
+    }
+
+    fn stage_ready(&self, seat: usize) -> Result<PendingReady, &'static str> {
+        let hand = self.hand.as_ref().ok_or("game not started")?;
+        let player = self.seats.get(seat).ok_or("invalid player")?;
+
+        if !hand.game.settled {
+            return Err("hand not settled");
+        }
+
+        if player.ready_hand == Some(hand.id) {
+            return Err("already ready");
+        }
+
+        let all = self
+            .seats
+            .iter()
+            .enumerate()
+            .all(|(i, player)| i == seat || player.ready_hand == Some(hand.id));
+
+        Ok(PendingReady {
+            hand: hand.id,
+            rev: self.rev.checked_add(1).ok_or("revision limit reached")?,
+            all,
+        })
+    }
+
+    fn commit_ready(&mut self, seat: usize, hand: Option<LiveHand>, rev: u64) {
+        if let Some(hand) = hand {
+            for player in &mut self.seats {
+                player.ready_hand = None;
+            }
+
+            self.hand = Some(hand);
+        } else {
+            let hand = self.hand.as_ref().expect("staged hand").id;
+
+            self.seats[seat].ready_hand = Some(hand);
+        }
+
         self.changed(rev);
     }
 
@@ -149,12 +198,20 @@ impl Room {
 
 struct Seat {
     token_hash: TokenHash,
+    ready_hand: Option<Uuid>,
 }
 
 struct LiveHand {
     id: Uuid,
+    no: u64,
     game: State,
     next_seq: u64,
+}
+
+struct PendingReady {
+    hand: Uuid,
+    rev: u64,
+    all: bool,
 }
 
 struct PendingAction {
@@ -187,6 +244,7 @@ enum ClientMessage {
     Check,
     Call,
     RaiseTo { to: u32 },
+    Ready,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -211,6 +269,16 @@ struct SeatView {
     settled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     actions: Option<ActionView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ready: Option<ReadyView>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct ReadyView {
+    mine: bool,
+    count: usize,
+    players: usize,
+    complete: bool,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -341,12 +409,14 @@ async fn join_room(
     let stacks = seed.map(|_| vec![room.config.stack; room.config.players]);
     let hand = seed.as_ref().map(|seed| NewHand {
         id: hand_id.expect("hand id"),
+        no: 0,
         seed,
         dealer: 0,
         stacks: stacks.as_deref().expect("starting stacks"),
     });
     let game = seed.map(|seed| LiveHand {
         id: hand_id.expect("hand id"),
+        no: 0,
         game: start_game(room.config, seed),
         next_seq: 0,
     });
@@ -411,16 +481,9 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                     return;
                 };
 
-                let action = match message {
+                let message = match message {
                     Message::Text(text) => match serde_json::from_str(text.as_str()) {
-                        Ok(ClientMessage::Fold) => Action::Fold,
-                        Ok(ClientMessage::Check) => Action::Check,
-                        Ok(ClientMessage::Call) => Action::Call,
-                        Ok(ClientMessage::RaiseTo { to }) => Action::RaiseTo(to),
-                        Ok(ClientMessage::Auth { .. }) => {
-                            send_error(&mut socket, "already authenticated").await;
-                            continue;
-                        }
+                        Ok(message) => message,
                         Err(_) => {
                             send_error(&mut socket, "invalid message").await;
                             continue;
@@ -433,7 +496,19 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                     }
                     Message::Ping(_) | Message::Pong(_) => continue,
                 };
-                let result = apply_action(&state, id, seat, action).await;
+                let result = match message {
+                    ClientMessage::Fold => apply_action(&state, id, seat, Action::Fold).await,
+                    ClientMessage::Check => apply_action(&state, id, seat, Action::Check).await,
+                    ClientMessage::Call => apply_action(&state, id, seat, Action::Call).await,
+                    ClientMessage::RaiseTo { to } => {
+                        apply_action(&state, id, seat, Action::RaiseTo(to)).await
+                    }
+                    ClientMessage::Ready => ready_room(&state, id, seat).await,
+                    ClientMessage::Auth { .. } => {
+                        send_error(&mut socket, "already authenticated").await;
+                        continue;
+                    }
+                };
 
                 if let Err(err) = result {
                     send_error(&mut socket, err).await;
@@ -513,6 +588,71 @@ async fn apply_action(
     Ok(())
 }
 
+async fn ready_room(state: &AppState, id: Uuid, seat: usize) -> Result<(), &'static str> {
+    let room = find_room(state, id).await.ok_or("room not found")?;
+    let mut room = room.lock().await;
+    let ready = room.stage_ready(seat)?;
+
+    if !ready.all {
+        state
+            .db
+            .ready(ReadyUpdate {
+                room: id,
+                hand: ready.hand,
+                seat,
+                rev: room.rev,
+                next_rev: ready.rev,
+                next_hand: None,
+            })
+            .await
+            .map_err(|_| "cannot persist ready")?;
+        room.commit_ready(seat, None, ready.rev);
+        return Ok(());
+    }
+
+    let seed = secure_seed().map_err(|_| "cannot start hand")?;
+    let hand = room.hand.as_ref().expect("staged hand");
+    let stacks: Vec<_> = hand
+        .game
+        .players
+        .iter()
+        .map(|player| player.stack)
+        .collect();
+    let next_no = hand.no.checked_add(1).ok_or("hand limit reached")?;
+    let next = match hand.game.next_hand(seed) {
+        Ok(game) => Some(LiveHand {
+            id: Uuid::new_v4(),
+            no: next_no,
+            game,
+            next_seq: 0,
+        }),
+        Err(NextHandError::CannotStart) => None,
+        Err(NextHandError::NotSettled) => return Err("hand not settled"),
+    };
+    let new_hand = next.as_ref().map(|hand| NewHand {
+        id: hand.id,
+        no: hand.no,
+        seed: &seed,
+        dealer: hand.game.dealer,
+        stacks: &stacks,
+    });
+
+    state
+        .db
+        .ready(ReadyUpdate {
+            room: id,
+            hand: ready.hand,
+            seat,
+            rev: room.rev,
+            next_rev: ready.rev,
+            next_hand: new_hand,
+        })
+        .await
+        .map_err(|_| "cannot persist ready")?;
+    room.commit_ready(seat, next, ready.rev);
+    Ok(())
+}
+
 async fn current_message(state: &AppState, id: Uuid, seat: usize) -> Option<ServerMessage> {
     let room = find_room(state, id).await?;
     let room = room.lock().await;
@@ -524,13 +664,34 @@ fn room_message(room: &Room, seat: usize) -> ServerMessage {
     match &room.hand {
         Some(hand) => ServerMessage::Snapshot {
             rev: room.rev,
-            view: seat_view(&hand.game, seat),
+            view: room_view(room, hand, seat),
         },
         None => ServerMessage::Waiting {
             joined: room.seats.len(),
             players: room.config.players,
         },
     }
+}
+
+fn room_view(room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
+    let mut view = seat_view(&hand.game, seat);
+
+    if hand.game.settled {
+        let count = room
+            .seats
+            .iter()
+            .filter(|seat| seat.ready_hand == Some(hand.id))
+            .count();
+
+        view.ready = Some(ReadyView {
+            mine: room.seats[seat].ready_hand == Some(hand.id),
+            count,
+            players: room.seats.len(),
+            complete: count == room.seats.len(),
+        });
+    }
+
+    view
 }
 
 async fn send_message(socket: &mut WebSocket, message: &ServerMessage) -> bool {
@@ -650,7 +811,10 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
             return Err(recovery_error(id, "seat sequence gap"));
         }
 
-        seats.push(Seat { token_hash });
+        seats.push(Seat {
+            token_hash,
+            ready_hand: seat.ready_hand,
+        });
     }
 
     let hand = match stored.hand {
@@ -661,11 +825,31 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
         }
         None => None,
     };
+    let ready_count = match &hand {
+        Some(hand) => {
+            let mut count = 0;
+
+            for seat in &seats {
+                match seat.ready_hand {
+                    Some(ready) if ready == hand.id && hand.game.settled => count += 1,
+                    Some(_) => return Err(recovery_error(id, "invalid ready hand")),
+                    None => {}
+                }
+            }
+
+            count
+        }
+        None if seats.iter().any(|seat| seat.ready_hand.is_some()) => {
+            return Err(recovery_error(id, "ready seat without hand"));
+        }
+        None => 0,
+    };
     let action_count = hand.as_ref().map_or(0, |hand| hand.next_seq);
     let seat_revs =
         u64::try_from(seats.len() - 1).map_err(|_| recovery_error(id, "revision limit reached"))?;
     let min_rev = seat_revs
         .checked_add(action_count)
+        .and_then(|rev| rev.checked_add(ready_count))
         .ok_or_else(|| recovery_error(id, "revision limit reached"))?;
 
     if rev < min_rev {
@@ -684,7 +868,8 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
 }
 
 fn restore_hand(id: Uuid, config: RoomConfig, stored: StoredHand) -> Result<LiveHand, io::Error> {
-    u64::try_from(stored.hand_no).map_err(|_| recovery_error(id, "invalid hand number"))?;
+    let no =
+        u64::try_from(stored.hand_no).map_err(|_| recovery_error(id, "invalid hand number"))?;
     let seed = stored
         .seed
         .try_into()
@@ -735,6 +920,7 @@ fn restore_hand(id: Uuid, config: RoomConfig, stored: StoredHand) -> Result<Live
 
     Ok(LiveHand {
         id: stored.id,
+        no,
         game,
         next_seq,
     })
@@ -784,6 +970,7 @@ fn seat_view(game: &State, seat: usize) -> SeatView {
         round_complete: game.round_complete,
         settled: game.settled,
         actions: game.legal_actions(seat).map(action_view),
+        ready: None,
     }
 }
 
@@ -856,6 +1043,7 @@ mod tests {
     use super::*;
 
     const SEED: [u8; 32] = [0x42; 32];
+    const NEXT_SEED: [u8; 32] = [0x24; 32];
 
     fn config(players: usize) -> RoomConfig {
         RoomConfig {
@@ -884,6 +1072,7 @@ mod tests {
 
             Some(LiveHand {
                 id: Uuid::new_v4(),
+                no: 0,
                 game: start_game(room.config, seed),
                 next_seq: 0,
             })
@@ -915,10 +1104,12 @@ mod tests {
                 StoredSeat {
                     seat: 0,
                     token_hash: hash_token(Uuid::from_u128(1)).to_vec(),
+                    ready_hand: None,
                 },
                 StoredSeat {
                     seat: 1,
                     token_hash: hash_token(Uuid::from_u128(2)).to_vec(),
+                    ready_hand: None,
                 },
             ],
             hand: Some(StoredHand {
@@ -1317,6 +1508,113 @@ mod tests {
         assert_eq!(room.rev, 3);
     }
 
+    #[test]
+    fn ready_rules() {
+        let waiting = Room::new(config(2), hash_token(Uuid::new_v4())).unwrap();
+
+        assert_eq!(waiting.stage_ready(0).err(), Some("game not started"));
+
+        let mut room = started(100);
+
+        assert_eq!(room.stage_ready(0).err(), Some("hand not settled"));
+        apply(&mut room, 0, Action::Fold).unwrap();
+
+        let ready = room.stage_ready(0).unwrap();
+
+        assert!(!ready.all);
+        room.commit_ready(0, None, ready.rev);
+        assert_eq!(room.stage_ready(0).err(), Some("already ready"));
+
+        let first = room_view(&room, room.hand.as_ref().unwrap(), 0)
+            .ready
+            .unwrap();
+        let second = room_view(&room, room.hand.as_ref().unwrap(), 1)
+            .ready
+            .unwrap();
+
+        assert_eq!(first.count, 1);
+        assert!(first.mine);
+        assert!(!second.mine);
+        assert!(!first.complete);
+    }
+
+    #[test]
+    fn next_hand() {
+        let mut room = started(100);
+
+        apply(&mut room, 0, Action::Fold).unwrap();
+
+        let old = room.hand.as_ref().unwrap();
+        let old_hole = old.game.hole.clone();
+        let stacks: Vec<_> = old.game.players.iter().map(|player| player.stack).collect();
+
+        let ready = room.stage_ready(0).unwrap();
+        room.commit_ready(0, None, ready.rev);
+
+        let ready = room.stage_ready(1).unwrap();
+        let game = room
+            .hand
+            .as_ref()
+            .unwrap()
+            .game
+            .next_hand(NEXT_SEED)
+            .unwrap();
+        let hand = LiveHand {
+            id: Uuid::new_v4(),
+            no: 1,
+            game,
+            next_seq: 0,
+        };
+
+        assert!(ready.all);
+        room.commit_ready(1, Some(hand), ready.rev);
+
+        let hand = room.hand.as_ref().unwrap();
+
+        assert_eq!(hand.no, 1);
+        assert_eq!(hand.game.dealer, 1);
+        assert_eq!(hand.next_seq, 0);
+        assert_ne!(hand.game.hole, old_hole);
+        assert_eq!(
+            hand.game
+                .players
+                .iter()
+                .map(|player| player.stack + player.bet)
+                .collect::<Vec<_>>(),
+            stacks
+        );
+        assert!(room.seats.iter().all(|seat| seat.ready_hand.is_none()));
+        assert!(room_view(&room, hand, 0).ready.is_none());
+        assert_ne!(seat_view(&hand.game, 0).hole, seat_view(&hand.game, 1).hole);
+    }
+
+    #[test]
+    fn short_table() {
+        let mut room = started(10);
+
+        apply(&mut room, 0, Action::Fold).unwrap();
+        let game = room.hand.as_ref().unwrap().game.clone();
+
+        let ready = room.stage_ready(0).unwrap();
+        room.commit_ready(0, None, ready.rev);
+        let ready = room.stage_ready(1).unwrap();
+
+        assert_eq!(
+            room.hand.as_ref().unwrap().game.next_hand(NEXT_SEED),
+            Err(NextHandError::CannotStart)
+        );
+
+        room.commit_ready(1, None, ready.rev);
+
+        let hand = room.hand.as_ref().unwrap();
+        let view = room_view(&room, hand, 0).ready.unwrap();
+
+        assert_eq!(hand.game, game);
+        assert_eq!(hand.no, 0);
+        assert!(view.complete);
+        assert_eq!(view.count, 2);
+    }
+
     #[tokio::test]
     #[ignore = "requires TEST_DATABASE_URL"]
     async fn persistence() {
@@ -1407,6 +1705,7 @@ mod tests {
             1,
             Some(NewHand {
                 id: hand_id,
+                no: 0,
                 seed: &SEED,
                 dealer: 0,
                 stacks: &stacks,
@@ -1418,6 +1717,7 @@ mod tests {
             second_hash,
             Some(LiveHand {
                 id: hand_id,
+                no: 0,
                 game: start_game(config, SEED),
                 next_seq: 0,
             }),
@@ -1621,6 +1921,7 @@ mod tests {
             1,
             Some(NewHand {
                 id: other_hand,
+                no: 0,
                 seed: &SEED,
                 dealer: 0,
                 stacks: &stacks,
@@ -1632,6 +1933,7 @@ mod tests {
             other_second,
             Some(LiveHand {
                 id: other_hand,
+                no: 0,
                 game: start_game(config, SEED),
                 next_seq: 0,
             }),
@@ -1697,6 +1999,7 @@ mod tests {
             1,
             Some(NewHand {
                 id: all_in_hand,
+                no: 0,
                 seed: &SEED,
                 dealer: 0,
                 stacks: &all_in_stacks,
@@ -1708,6 +2011,7 @@ mod tests {
             all_in_second,
             Some(LiveHand {
                 id: all_in_hand,
+                no: 0,
                 game: State::new(SEED, 0, &all_in_stacks, 5, 10),
                 next_seq: 0,
             }),
@@ -1748,5 +2052,293 @@ mod tests {
         assert_eq!(restored_hand.id, latest_id);
         assert_eq!(restored_hand.next_seq, 0);
         same_game(&restored_hand.game, &expected);
+
+        let ready_id = Uuid::new_v4();
+        let ready_first = Uuid::new_v4();
+        let ready_second = Uuid::new_v4();
+        let ready_hand = Uuid::new_v4();
+        let ready_config = RoomConfig {
+            players: 2,
+            stack: 100,
+            small_blind: 5,
+            big_blind: 10,
+        };
+        let ready_stacks = vec![100, 100];
+        let mut live = Room::new(ready_config, hash_token(ready_first)).unwrap();
+
+        db.create_room(
+            ready_id,
+            ready_config.players,
+            100,
+            ready_config.small_blind,
+            ready_config.big_blind,
+            &hash_token(ready_first),
+        )
+        .await
+        .unwrap();
+        db.join_room(
+            ready_id,
+            1,
+            &hash_token(ready_second),
+            0,
+            1,
+            Some(NewHand {
+                id: ready_hand,
+                no: 0,
+                seed: &SEED,
+                dealer: 0,
+                stacks: &ready_stacks,
+            }),
+        )
+        .await
+        .unwrap();
+        live.commit_join(
+            hash_token(ready_second),
+            Some(LiveHand {
+                id: ready_hand,
+                no: 0,
+                game: State::new(SEED, 0, &ready_stacks, 5, 10),
+                next_seq: 0,
+            }),
+            1,
+        );
+
+        let mut rooms = HashMap::new();
+        rooms.insert(ready_id, Arc::new(Mutex::new(live)));
+        let ready_state = AppState::new(db.clone(), rooms);
+
+        assert_eq!(
+            ready_room(&ready_state, ready_id, 0).await,
+            Err("hand not settled")
+        );
+        apply_action(&ready_state, ready_id, 0, Action::Fold)
+            .await
+            .unwrap();
+        ready_room(&ready_state, ready_id, 0).await.unwrap();
+
+        let rev = sqlx::query("SELECT rev FROM rooms WHERE id = $1")
+            .bind(ready_id)
+            .fetch_one(db.pool())
+            .await
+            .unwrap()
+            .get::<i64, _>("rev");
+
+        assert_eq!(rev, 3);
+        assert_eq!(
+            sqlx::query("SELECT ready_hand FROM seats WHERE room_id = $1 AND seat = 0")
+                .bind(ready_id)
+                .fetch_one(db.pool())
+                .await
+                .unwrap()
+                .get::<Option<Uuid>, _>("ready_hand"),
+            Some(ready_hand)
+        );
+        assert_eq!(
+            ready_room(&ready_state, ready_id, 0).await,
+            Err("already ready")
+        );
+        assert_eq!(
+            sqlx::query("SELECT rev FROM rooms WHERE id = $1")
+                .bind(ready_id)
+                .fetch_one(db.pool())
+                .await
+                .unwrap()
+                .get::<i64, _>("rev"),
+            rev
+        );
+
+        let restored = reload(&db, ready_id).await;
+        let first_ready = room_view(&restored, restored.hand.as_ref().unwrap(), 0)
+            .ready
+            .unwrap();
+        let second_ready = room_view(&restored, restored.hand.as_ref().unwrap(), 1)
+            .ready
+            .unwrap();
+
+        assert!(first_ready.mine);
+        assert!(!second_ready.mine);
+        assert_eq!(first_ready.count, 1);
+        assert_eq!(restored.rev, 3);
+        assert_eq!(seat_for_token(&restored, ready_first), Some(0));
+        assert_eq!(seat_for_token(&restored, ready_second), Some(1));
+
+        let mut rooms = HashMap::new();
+        rooms.insert(ready_id, Arc::new(Mutex::new(restored)));
+        let ready_state = AppState::new(db.clone(), rooms);
+
+        ready_room(&ready_state, ready_id, 1).await.unwrap();
+
+        let room = find_room(&ready_state, ready_id).await.unwrap();
+        let room = room.lock().await;
+        let next = room.hand.as_ref().unwrap();
+        let next_id = next.id;
+
+        assert_eq!(next.no, 1);
+        assert_eq!(next.game.dealer, 1);
+        assert_eq!(next.next_seq, 0);
+        assert!(!next.game.settled);
+        assert_eq!(next.game.board.len(), 0);
+        assert_eq!(next.game.pot, 15);
+        assert!(room.seats.iter().all(|seat| seat.ready_hand.is_none()));
+        assert!(room_view(&room, next, 0).ready.is_none());
+        assert_ne!(seat_view(&next.game, 0).hole, seat_view(&next.game, 1).hole);
+        drop(room);
+
+        let rows = sqlx::query(
+            "SELECT id, hand_no, seed, dealer, starting_stacks FROM hands \
+             WHERE room_id = $1 ORDER BY hand_no",
+        )
+        .bind(ready_id)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].get::<Uuid, _>("id"), ready_hand);
+        assert_eq!(rows[1].get::<Uuid, _>("id"), next_id);
+        assert_eq!(rows[1].get::<i64, _>("hand_no"), 1);
+        assert_eq!(rows[1].get::<Vec<u8>, _>("seed").len(), 32);
+        assert_eq!(rows[1].get::<i32, _>("dealer"), 1);
+        assert_eq!(rows[1].get::<Vec<i64>, _>("starting_stacks"), [95, 105]);
+        assert!(
+            sqlx::query("SELECT ready_hand FROM seats WHERE room_id = $1")
+                .bind(ready_id)
+                .fetch_all(db.pool())
+                .await
+                .unwrap()
+                .iter()
+                .all(|row| row.get::<Option<Uuid>, _>("ready_hand").is_none())
+        );
+        assert_eq!(
+            sqlx::query("SELECT COUNT(*) AS count FROM hand_actions WHERE hand_id = $1")
+                .bind(ready_hand)
+                .fetch_one(db.pool())
+                .await
+                .unwrap()
+                .get::<i64, _>("count"),
+            1
+        );
+
+        apply_action(&ready_state, ready_id, 1, Action::Call)
+            .await
+            .unwrap();
+
+        let row = sqlx::query(
+            "SELECT seq, player, action FROM hand_actions WHERE hand_id = $1 ORDER BY seq",
+        )
+        .bind(next_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(row.get::<i64, _>("seq"), 0);
+        assert_eq!(row.get::<i32, _>("player"), 1);
+        assert_eq!(row.get::<String, _>("action"), "call");
+
+        let before = find_room(&ready_state, ready_id).await.unwrap();
+        let before = before.lock().await.hand.as_ref().unwrap().game.clone();
+        let restored = reload(&db, ready_id).await;
+        let restored_hand = restored.hand.as_ref().unwrap();
+
+        same_game(&restored_hand.game, &before);
+        assert_eq!(restored_hand.id, next_id);
+        assert_eq!(restored_hand.no, 1);
+        assert_eq!(restored_hand.next_seq, 1);
+
+        apply_action(&ready_state, ready_id, 0, Action::Fold)
+            .await
+            .unwrap();
+        let (first, second) = tokio::join!(
+            ready_room(&ready_state, ready_id, 0),
+            ready_room(&ready_state, ready_id, 1)
+        );
+
+        assert_eq!(first, Ok(()));
+        assert_eq!(second, Ok(()));
+        assert_eq!(
+            sqlx::query("SELECT COUNT(*) AS count FROM hands WHERE room_id = $1")
+                .bind(ready_id)
+                .fetch_one(db.pool())
+                .await
+                .unwrap()
+                .get::<i64, _>("count"),
+            3
+        );
+
+        let short_id = Uuid::new_v4();
+        let short_first = hash_token(Uuid::new_v4());
+        let short_second = hash_token(Uuid::new_v4());
+        let short_hand = Uuid::new_v4();
+        let short_config = RoomConfig {
+            stack: 10,
+            ..ready_config
+        };
+        let short_stacks = vec![10, 10];
+        let mut short = Room::new(short_config, short_first).unwrap();
+
+        db.create_room(short_id, 2, 10, 5, 10, &short_first)
+            .await
+            .unwrap();
+        db.join_room(
+            short_id,
+            1,
+            &short_second,
+            0,
+            1,
+            Some(NewHand {
+                id: short_hand,
+                no: 0,
+                seed: &SEED,
+                dealer: 0,
+                stacks: &short_stacks,
+            }),
+        )
+        .await
+        .unwrap();
+        short.commit_join(
+            short_second,
+            Some(LiveHand {
+                id: short_hand,
+                no: 0,
+                game: State::new(SEED, 0, &short_stacks, 5, 10),
+                next_seq: 0,
+            }),
+            1,
+        );
+
+        let mut rooms = HashMap::new();
+        rooms.insert(short_id, Arc::new(Mutex::new(short)));
+        let short_state = AppState::new(db.clone(), rooms);
+
+        apply_action(&short_state, short_id, 0, Action::Fold)
+            .await
+            .unwrap();
+        ready_room(&short_state, short_id, 0).await.unwrap();
+        ready_room(&short_state, short_id, 1).await.unwrap();
+
+        let short = find_room(&short_state, short_id).await.unwrap();
+        let short = short.lock().await;
+        let hand = short.hand.as_ref().unwrap();
+
+        assert_eq!(hand.id, short_hand);
+        assert_eq!(hand.no, 0);
+        assert_eq!(hand.game.players[0].stack, 5);
+        assert!(room_view(&short, hand, 0).ready.unwrap().complete);
+        assert_eq!(
+            sqlx::query("SELECT COUNT(*) AS count FROM hands WHERE room_id = $1")
+                .bind(short_id)
+                .fetch_one(db.pool())
+                .await
+                .unwrap()
+                .get::<i64, _>("count"),
+            1
+        );
+        drop(short);
+
+        let short = reload(&db, short_id).await;
+        let hand = short.hand.as_ref().unwrap();
+
+        assert!(room_view(&short, hand, 1).ready.unwrap().complete);
+        assert_eq!(hand.id, short_hand);
     }
 }

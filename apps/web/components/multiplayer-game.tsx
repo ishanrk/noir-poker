@@ -20,7 +20,8 @@ type ClientAction =
   | { type: "fold" }
   | { type: "check" }
   | { type: "call" }
-  | { type: "raise_to"; to: number };
+  | { type: "raise_to"; to: number }
+  | { type: "ready" };
 
 function closeSocket(socket: WebSocket) {
   socket.onopen = null;
@@ -262,6 +263,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
         onCheck={() => send({ type: "check" })}
         onCall={() => send({ type: "call" })}
         onRaise={() => send({ type: "raise_to", to: raiseTo })}
+        onReady={() => send({ type: "ready" })}
       />
     </>
   );
