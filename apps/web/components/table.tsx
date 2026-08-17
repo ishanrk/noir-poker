@@ -11,6 +11,18 @@ type PlayerView = {
   folded: boolean;
 };
 
+type ActionView = {
+  fold: boolean;
+  check: boolean;
+  call: number | undefined;
+  raise:
+    | {
+        min_to: number;
+        max_to: number;
+      }
+    | undefined;
+};
+
 export type View = {
   players: PlayerView[];
   hole: [CardView, CardView];
@@ -20,16 +32,38 @@ export type View = {
   turn: number | undefined;
   street: string;
   round_complete: boolean;
+  settled: boolean;
+  actions: ActionView | undefined;
 };
 
 type TableProps = {
   view: View;
+  error?: string;
+  raiseTo: number;
+  setRaiseTo: (to: number) => void;
+  onFold: () => void;
+  onCheck: () => void;
+  onCall: () => void;
+  onRaise: () => void;
+  onNewHand: () => void;
 };
 
 const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
 
-export function Table({ view }: TableProps) {
+export function Table({
+  view,
+  error,
+  raiseTo,
+  setRaiseTo,
+  onFold,
+  onCheck,
+  onCall,
+  onRaise,
+  onNewHand,
+}: TableProps) {
   const hole = [view.hole[0].value, view.hole[1].value] as const;
+  const actions = view.actions;
+  const range = actions?.raise;
 
   return (
     <section className="table-shell" aria-label="Six-max poker table">
@@ -76,24 +110,40 @@ export function Table({ view }: TableProps) {
       </div>
 
       <div className="action-bar" aria-label="Player actions">
-        <div className="action-copy">
-          <span>Read only</span>
-          <strong>Actions unavailable</strong>
+        <div className="action-copy" aria-live="polite">
+          <span>{error ? "Error" : view.settled ? "Complete" : "Your action"}</span>
+          <strong>{error ?? (view.settled ? "Hand complete" : "Choose an action")}</strong>
         </div>
 
         <div className="actions">
-          <button type="button" disabled>
+          <button type="button" onClick={onFold} disabled={!actions?.fold}>
             Fold
           </button>
-          <button type="button" disabled>
+          <button type="button" onClick={onCheck} disabled={!actions?.check}>
             Check
           </button>
-          <button type="button" disabled>
-            Call
+          <button type="button" onClick={onCall} disabled={actions?.call === undefined}>
+            {actions?.call === undefined
+              ? "Call"
+              : `Call ${actions.call.toLocaleString("en-US")}`}
           </button>
-          <button className="raise-button" type="button" disabled>
+          <input
+            aria-label="Raise to"
+            type="number"
+            min={range?.min_to}
+            max={range?.max_to}
+            value={range ? raiseTo : ""}
+            onChange={(event) => setRaiseTo(Number(event.target.value))}
+            disabled={!range}
+          />
+          <button className="raise-button" type="button" onClick={onRaise} disabled={!range}>
             Raise
           </button>
+          {view.settled && (
+            <button className="new-hand-button" type="button" onClick={onNewHand}>
+              New hand
+            </button>
+          )}
         </div>
       </div>
     </section>

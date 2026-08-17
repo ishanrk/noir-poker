@@ -9,6 +9,20 @@ pub enum Action {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RaiseRange {
+    pub min_to: u32,
+    pub max_to: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LegalActions {
+    pub fold: bool,
+    pub check: bool,
+    pub call: Option<u32>,
+    pub raise: Option<RaiseRange>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Event {
     Folded { player: usize },
     Checked { player: usize },
@@ -157,6 +171,30 @@ impl State {
 
         state.round_complete = state.round_done();
         state
+    }
+
+    pub fn legal_actions(&self, player: usize) -> Option<LegalActions> {
+        let actor = self.players.get(player)?;
+
+        if self.fold_winner.is_some()
+            || self.settled
+            || self.round_complete
+            || self.turn != player
+            || actor.folded
+            || actor.stack == 0
+        {
+            return None;
+        }
+
+        let current_bet = self.current_bet();
+        let call = (actor.bet < current_bet).then(|| actor.stack.min(current_bet - actor.bet));
+
+        Some(LegalActions {
+            fold: true,
+            check: actor.bet == current_bet,
+            call,
+            raise: self.raise_range(player, current_bet),
+        })
     }
 
     pub fn apply(&mut self, player: usize, action: Action) -> Result<Vec<Event>, ActionError> {
@@ -482,24 +520,31 @@ impl State {
     }
 
     fn can_raise(&self, player: usize, to: u32, current_bet: u32) -> bool {
-        let player = &self.players[player];
-        let Some(max_bet) = player.bet.checked_add(player.stack) else {
-            return false;
-        };
+        self.raise_range(player, current_bet)
+            .is_some_and(|range| to > current_bet && (range.min_to..=range.max_to).contains(&to))
+    }
 
-        if to <= current_bet || to > max_bet {
-            return false;
+    fn raise_range(&self, player: usize, current_bet: u32) -> Option<RaiseRange> {
+        let player = &self.players[player];
+        let max_to = player.bet.checked_add(player.stack)?;
+
+        if max_to <= current_bet {
+            return None;
         }
 
         // raising reopens after a full raise since the last response
         if let Some(acted_bet) = player.acted_bet
             && current_bet - acted_bet < self.min_raise
         {
-            return false;
+            return None;
         }
 
-        let raise_size = to - current_bet;
-        raise_size >= self.min_raise || to == max_bet
+        let min_to = current_bet
+            .checked_add(self.min_raise)
+            .filter(|&to| to <= max_to)
+            .unwrap_or(max_to);
+
+        Some(RaiseRange { min_to, max_to })
     }
 
     fn round_done(&self) -> bool {
@@ -1117,6 +1162,147 @@ mod tests {
         assert!(state.round_complete);
         assert_eq!(state.fold_winner, None);
         assert_eq!(state.pot, 40);
+    }
+
+    #[test]
+    fn check_actions() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+
+        state.apply(0, Action::Call).unwrap();
+        state.apply(1, Action::Check).unwrap();
+        state.advance_street().unwrap();
+
+        assert_eq!(
+            state.legal_actions(1),
+            Some(LegalActions {
+                fold: true,
+                check: true,
+                call: None,
+                raise: Some(RaiseRange {
+                    min_to: 10,
+                    max_to: 90,
+                }),
+            })
+        );
+    }
+
+    #[test]
+    fn call_actions() {
+        let state = State::new(SEED, 3, &[100; 6], 5, 10);
+
+        assert_eq!(
+            state.legal_actions(0),
+            Some(LegalActions {
+                fold: true,
+                check: false,
+                call: Some(10),
+                raise: Some(RaiseRange {
+                    min_to: 20,
+                    max_to: 100,
+                }),
+            })
+        );
+    }
+
+    #[test]
+    fn short_call_actions() {
+        let mut state = State::new(SEED, 0, &[100, 20, 100], 5, 10);
+
+        state.apply(0, Action::RaiseTo(50)).unwrap();
+
+        assert_eq!(state.legal_actions(1).unwrap().call, Some(15));
+        assert_eq!(state.legal_actions(1).unwrap().raise, None);
+    }
+
+    #[test]
+    fn raise_bounds() {
+        let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
+        let range = state.legal_actions(0).unwrap().raise.unwrap();
+
+        assert_eq!(
+            range,
+            RaiseRange {
+                min_to: 20,
+                max_to: 100,
+            }
+        );
+        assert_eq!(
+            state.apply(0, Action::RaiseTo(range.min_to - 1)),
+            Err(ActionError::CannotRaise)
+        );
+        assert_eq!(
+            state.apply(0, Action::RaiseTo(range.min_to)),
+            Ok(vec![Event::Raised {
+                player: 0,
+                to: range.min_to,
+            }])
+        );
+    }
+
+    #[test]
+    fn short_raise_actions() {
+        let mut state = State::new(SEED, 0, &[15, 100, 100], 5, 10);
+        let range = state.legal_actions(0).unwrap().raise.unwrap();
+
+        assert_eq!(
+            range,
+            RaiseRange {
+                min_to: 15,
+                max_to: 15,
+            }
+        );
+        assert!(state.apply(0, Action::RaiseTo(range.min_to)).is_ok());
+    }
+
+    #[test]
+    fn closed_raise_actions() {
+        let mut state = State::new(SEED, 0, &[100, 15, 100, 100], 5, 10);
+
+        state.apply(3, Action::Call).unwrap();
+        state.apply(0, Action::Fold).unwrap();
+        state.apply(1, Action::RaiseTo(15)).unwrap();
+        state.apply(2, Action::Call).unwrap();
+
+        let actions = state.legal_actions(3).unwrap();
+
+        assert_eq!(actions.call, Some(5));
+        assert_eq!(actions.raise, None);
+    }
+
+    #[test]
+    fn reopened_raise_actions() {
+        let mut state = State::new(SEED, 0, &[20, 100, 100, 100, 15], 5, 10);
+
+        state.apply(3, Action::Call).unwrap();
+        state.apply(4, Action::RaiseTo(15)).unwrap();
+        state.apply(0, Action::RaiseTo(20)).unwrap();
+        state.apply(1, Action::Call).unwrap();
+        state.apply(2, Action::Call).unwrap();
+
+        let range = state.legal_actions(3).unwrap().raise.unwrap();
+
+        assert_eq!(
+            range,
+            RaiseRange {
+                min_to: 30,
+                max_to: 100,
+            }
+        );
+        assert!(state.apply(3, Action::RaiseTo(range.min_to)).is_ok());
+    }
+
+    #[test]
+    fn no_actions() {
+        let state = State::new(SEED, 3, &[100; 6], 5, 10);
+
+        assert_eq!(state.legal_actions(1), None);
+        assert_eq!(state.legal_actions(6), None);
+
+        let mut terminal = State::new(SEED, 0, &[100; 2], 5, 10);
+        terminal.apply(0, Action::Fold).unwrap();
+
+        assert_eq!(terminal.legal_actions(0), None);
+        assert_eq!(terminal.legal_actions(1), None);
     }
 
     #[test]
