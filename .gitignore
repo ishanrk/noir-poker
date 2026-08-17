@@ -1,3 +1,4 @@
 .local/
 /target/
 /crates/game-wasm/pkg/
+/circuits/challenge-v1/target/
