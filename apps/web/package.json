@@ -6,7 +6,7 @@
     "runtime": "../../scripts/web-runtime.sh update",
     "runtime:check": "../../scripts/web-runtime.sh check",
     "dev": "next dev",
-    "build": "next build",
+    "build": "bash ../../tools/regen/vercel-build.sh",
     "start": "next start",
     "lint": "eslint .",
     "challenge:test": "node --experimental-strip-types lib/challenge.test.ts",
