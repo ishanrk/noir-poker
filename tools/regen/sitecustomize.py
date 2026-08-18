@@ -45,7 +45,14 @@ def fix_generated_server() -> None:
         "rooms: &HashMap<Uuid, Arc<Mutex<Room>>>,",
         1,
     )
-    block = block.replace("rooms.lock().await", "rooms")
+    block, count = re.subn(
+        r"rooms\s*\.lock\(\)\s*\.await",
+        "rooms",
+        block,
+        count=1,
+    )
+    if count != 1:
+        raise RuntimeError(f"expected one fairness rooms lock found {count}")
     text = text[:start] + block + text[end:]
 
     text = text.replace("    ReadyUpdate, ", "    ", 1)
