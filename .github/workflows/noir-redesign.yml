@@ -105,7 +105,7 @@ jobs:
             64048040befd55a987158b11137d8f38f9688f696db4d84910dd1bcf0442fb80 \
             nargo.tar.gz | sha256sum -c -
           tar -xzf nargo.tar.gz
-          install -m 0755 nargo "$RUNNER_TEMP/noir-tools/nargo"
+          chmod 0755 nargo
           curl -fL --retry 5 --retry-delay 2 \
             -o bb.tar.gz \
             https://github.com/AztecProtocol/aztec-packages/releases/download/v5.2.0/barretenberg-amd64-linux.tar.gz
@@ -113,7 +113,7 @@ jobs:
             17ab8476961728cdc5c69b6c4ff427c9092cef11d1e0b0166929a0417dfa7cfb \
             bb.tar.gz | sha256sum -c -
           tar -xzf bb.tar.gz
-          install -m 0755 bb "$RUNNER_TEMP/noir-tools/bb"
+          chmod 0755 bb
           echo "NARGO_PATH=$RUNNER_TEMP/noir-tools/nargo" >> "$GITHUB_ENV"
           echo "BB_PATH=$RUNNER_TEMP/noir-tools/bb" >> "$GITHUB_ENV"
           echo "CHALLENGE_VK_PATH=$GITHUB_WORKSPACE/apps/server/zk/challenge_v2.vk" >> "$GITHUB_ENV"
