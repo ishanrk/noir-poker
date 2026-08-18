@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: noir-poker-ui-zk-redesign
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-test-and-publish:
