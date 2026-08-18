@@ -67,7 +67,7 @@ try {
       proof_system: "ultra_honk",
       circuit_id: "challenge_v2",
       bb_version: "5.2.0",
-      artifact_sha256: "83a9a72327d42546fe6449306b916c993d1df820717f8bccd2dd6c9659b3f171",
+      artifact_sha256: "1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d",
       vk_sha256: "b435db9d240683e181d8bad47203bf85d57ca27982bc676cf2686b5cf3de1d67",
       hand_tag: fixture.hand_tag,
       seat: fixture.seat,

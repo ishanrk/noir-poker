@@ -9,7 +9,7 @@ import type { ProofReceipt } from "@/lib/server";
 const PROOF_SYSTEM = "ultra_honk";
 const CIRCUIT_ID = "challenge_v2";
 const BB_VERSION = "5.2.0";
-const ARTIFACT_SHA256 = "83a9a72327d42546fe6449306b916c993d1df820717f8bccd2dd6c9659b3f171";
+const ARTIFACT_SHA256 = "1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d";
 const VK_SHA256 = "b435db9d240683e181d8bad47203bf85d57ca27982bc676cf2686b5cf3de1d67";
 const ZERO = "00".repeat(32);
 

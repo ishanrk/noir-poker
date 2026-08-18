@@ -55,7 +55,7 @@ cp "$tmp/challenge_v2.json" "$root/apps/web/zk/challenge_v2.json"
 artifact_digest="$(sha256sum "$root/apps/web/zk/challenge_v2.json" | awk '{print $1}')"
 vk_digest="$(sha256sum "$root/apps/server/zk/challenge_v2.vk" | awk '{print $1}')"
 
-if test "$artifact_digest" != "83a9a72327d42546fe6449306b916c993d1df820717f8bccd2dd6c9659b3f171"; then
+if test "$artifact_digest" != "1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d"; then
     echo "challenge artifact digest mismatch" >&2
     exit 1
 fi

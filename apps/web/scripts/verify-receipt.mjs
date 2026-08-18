@@ -10,7 +10,7 @@ import {
   deflattenFields,
 } from "@aztec/bb.js";
 
-const ARTIFACT_SHA256 = "83a9a72327d42546fe6449306b916c993d1df820717f8bccd2dd6c9659b3f171";
+const ARTIFACT_SHA256 = "1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d";
 const VK_SHA256 = "b435db9d240683e181d8bad47203bf85d57ca27982bc676cf2686b5cf3de1d67";
 const ROOT = "0e5885f1c42a9799237a606f214f7256806d77977179e5b9ff49ea99b446c409";
 const ZERO = "00".repeat(32);

@@ -21,7 +21,7 @@ pub const BB_VERSION: &str = "5.2.0";
 pub const CIRCUIT_ID: &str = "challenge_v2";
 pub const PROOF_SYSTEM: &str = "ultra_honk";
 pub const ARTIFACT_SHA256: &str =
-    "83a9a72327d42546fe6449306b916c993d1df820717f8bccd2dd6c9659b3f171";
+    "1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d";
 pub const VK_SHA256: &str = "b435db9d240683e181d8bad47203bf85d57ca27982bc676cf2686b5cf3de1d67";
 const VK_DIGEST: [u8; 32] = [
     0xb4, 0x35, 0xdb, 0x9d, 0x24, 0x06, 0x83, 0xe1, 0x81, 0xd8, 0xba, 0xd4, 0x72, 0x03, 0xbf, 0x85,
