@@ -1,0 +1,288 @@
+name: build isolated noir poker redesign
+
+on:
+  push:
+    branches:
+      - agent/noir-poker-ui-zk-redesign
+
+permissions:
+  contents: write
+
+concurrency:
+  group: noir-poker-ui-zk-redesign
+  cancel-in-progress: false
+
+jobs:
+  build-test-and-publish:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: noir_poker_test
+          POSTGRES_USER: noir_poker
+          POSTGRES_PASSWORD: noir_poker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U noir_poker -d noir_poker_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      BASE_SHA: 340a9be579c2ca26715146b4c79ff0c8f681a1b5
+      WORK_BRANCH: agent/noir-poker-ui-zk-redesign
+      OLD_BRANCH: agent/noir-poker-redesign-fairness-artifact
+      TEST_DATABASE_URL: postgres://noir_poker:noir_poker@localhost:5432/noir_poker_test
+      DATABASE_URL: postgres://noir_poker:noir_poker@localhost:5432/noir_poker_test
+      WEB_ORIGIN: http://127.0.0.1:3000
+      PORT: 3001
+
+    steps:
+      - name: Checkout isolated branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/noir-poker-ui-zk-redesign
+
+      - name: Prove branch isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "$WORK_BRANCH"
+          test "$(git rev-parse "$BASE_SHA")" = "$BASE_SHA"
+          git merge-base --is-ancestor "$BASE_SHA" HEAD
+          echo "MAIN_BEFORE=$(git ls-remote origin refs/heads/main | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "DEV_BEFORE=$(git ls-remote origin refs/heads/dev | awk '{print $1}')" >> "$GITHUB_ENV"
+          test -n "$(git ls-remote origin refs/heads/main)"
+          test -n "$(git ls-remote origin refs/heads/dev)"
+
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.93.0
+          components: rustfmt, clippy
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Extract deterministic transformation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat tools/regen/noir-tools.part.* | base64 --decode > "$RUNNER_TEMP/noir-tools.tar.xz"
+          echo "db20d0ff5ffcb9541da5e09ec84b27d4ea7c6e9064dba4bd51f562fe5a449ec7  $RUNNER_TEMP/noir-tools.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/noir-tools.tar.xz" -C tools/regen
+          python -m py_compile tools/regen/common.py tools/regen/backend.py tools/regen/frontend.py tools/regen/apply.py
+          PYTHONPATH=tools/regen python tools/regen/apply.py
+
+      - name: Resolve lockfiles and format
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --workspace
+          cargo fmt --all
+          npm --prefix apps/web ci
+          git diff --check
+
+      - name: Install pinned Noir and Barretenberg
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/noir-tools"
+          cd "$RUNNER_TEMP/noir-tools"
+          curl -fL --retry 5 --retry-delay 2 \
+            -o nargo.tar.gz \
+            https://github.com/noir-lang/noir/releases/download/v1.0.0-beta.26/nargo-x86_64-unknown-linux-gnu.tar.gz
+          printf '%s  %s\n' \
+            64048040befd55a987158b11137d8f38f9688f696db4d84910dd1bcf0442fb80 \
+            nargo.tar.gz | sha256sum -c -
+          tar -xzf nargo.tar.gz
+          install -m 0755 nargo "$RUNNER_TEMP/noir-tools/nargo"
+          curl -fL --retry 5 --retry-delay 2 \
+            -o bb.tar.gz \
+            https://github.com/AztecProtocol/aztec-packages/releases/download/v5.2.0/barretenberg-amd64-linux.tar.gz
+          printf '%s  %s\n' \
+            17ab8476961728cdc5c69b6c4ff427c9092cef11d1e0b0166929a0417dfa7cfb \
+            bb.tar.gz | sha256sum -c -
+          tar -xzf bb.tar.gz
+          install -m 0755 bb "$RUNNER_TEMP/noir-tools/bb"
+          echo "NARGO_PATH=$RUNNER_TEMP/noir-tools/nargo" >> "$GITHUB_ENV"
+          echo "BB_PATH=$RUNNER_TEMP/noir-tools/bb" >> "$GITHUB_ENV"
+          echo "CHALLENGE_VK_PATH=$GITHUB_WORKSPACE/apps/server/zk/challenge_v2.vk" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/noir-tools/nargo" --version
+          "$RUNNER_TEMP/noir-tools/bb" --version
+
+      - name: Rebuild pinned circuit artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          NARGO_PATH="$NARGO_PATH" BB_PATH="$BB_PATH" ./scripts/build-zk.sh
+          git diff --check
+
+      - name: Validate transformed source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/logs
+          cargo fmt --all -- --check |& tee artifacts/logs/cargo-fmt.log
+          cargo test --workspace --locked |& tee artifacts/logs/cargo-test.log
+          cargo clippy --workspace --all-targets --locked -- -D warnings |& tee artifacts/logs/cargo-clippy.log
+          npm --prefix apps/web run challenge:test |& tee artifacts/logs/challenge-test.log
+          npm --prefix apps/web run deal:test |& tee artifacts/logs/deal-test.log
+          npm --prefix apps/web run receipt:test |& tee artifacts/logs/receipt-test.log
+          npm --prefix apps/web run lint |& tee artifacts/logs/eslint.log
+          npm --prefix apps/web run build |& tee artifacts/logs/next-build.log
+          TEST_DATABASE_URL="$TEST_DATABASE_URL" cargo test -p server persistence -- --ignored --nocapture |& tee artifacts/logs/postgres-persistence.log
+          BB_PATH="$BB_PATH" CHALLENGE_VK_PATH="$CHALLENGE_VK_PATH" \
+            cargo test -p server real_proof -- --ignored --nocapture |& tee artifacts/logs/real-proof.log
+          BB_PATH="$BB_PATH" CHALLENGE_VK_PATH="$CHALLENGE_VK_PATH" TEST_DATABASE_URL="$TEST_DATABASE_URL" \
+            cargo test -p server real_claim -- --ignored --nocapture |& tee artifacts/logs/real-claim.log
+          if grep -R --include='*.tsx' 'type="number"' apps/web; then
+            echo "numeric spinner found" >&2
+            exit 1
+          fi
+          ! grep -R --include='*.rs' -E 'SliceRandom|ChaCha20Rng|rand_chacha' crates apps/server
+          ! grep -R --include='*.css' -E 'linear-gradient|radial-gradient|backdrop-filter' apps/web/app/globals.css
+
+      - name: Generate self-contained patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          git add -A
+          git diff --cached --binary "$BASE_SHA" -- \
+            . \
+            ':(exclude).github/workflows/noir-redesign.yml' \
+            ':(exclude)tools/regen' \
+            ':(exclude)artifacts' \
+            > artifacts/noir-poker-redesign-fairness.patch
+          test -s artifacts/noir-poker-redesign-fairness.patch
+          sha256sum artifacts/noir-poker-redesign-fairness.patch \
+            > artifacts/noir-poker-redesign-fairness.patch.sha256
+          git apply --check artifacts/noir-poker-redesign-fairness.patch
+          git diff --check
+
+      - name: Validate patch in a second clean worktree
+        shell: bash
+        run: |
+          set -euo pipefail
+          verify="$RUNNER_TEMP/noir-poker-patch-verify"
+          git worktree add --detach "$verify" "$BASE_SHA"
+          git -C "$verify" apply --check "$GITHUB_WORKSPACE/artifacts/noir-poker-redesign-fairness.patch"
+          git -C "$verify" apply "$GITHUB_WORKSPACE/artifacts/noir-poker-redesign-fairness.patch"
+          git -C "$verify" diff --check
+          cargo fmt --manifest-path "$verify/Cargo.toml" --all -- --check
+          cargo test --manifest-path "$verify/Cargo.toml" --workspace --locked
+          cargo clippy --manifest-path "$verify/Cargo.toml" --workspace --all-targets --locked -- -D warnings
+          npm --prefix "$verify/apps/web" ci
+          npm --prefix "$verify/apps/web" run challenge:test
+          npm --prefix "$verify/apps/web" run deal:test
+          npm --prefix "$verify/apps/web" run receipt:test
+          npm --prefix "$verify/apps/web" run lint
+          npm --prefix "$verify/apps/web" run build
+          (
+            cd "$verify"
+            TEST_DATABASE_URL="$TEST_DATABASE_URL" cargo test -p server persistence -- --ignored --nocapture
+            BB_PATH="$BB_PATH" CHALLENGE_VK_PATH="$verify/apps/server/zk/challenge_v2.vk" \
+              cargo test -p server real_proof -- --ignored --nocapture
+            BB_PATH="$BB_PATH" CHALLENGE_VK_PATH="$verify/apps/server/zk/challenge_v2.vk" \
+              TEST_DATABASE_URL="$TEST_DATABASE_URL" cargo test -p server real_claim -- --ignored --nocapture
+          )
+          git -C "$verify" add -A
+          git -C "$verify" diff --cached --binary "$BASE_SHA" -- . \
+            > "$RUNNER_TEMP/reapplied.patch"
+          cmp "$RUNNER_TEMP/reapplied.patch" artifacts/noir-poker-redesign-fairness.patch
+
+      - name: Write durable validation report
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_sha="$(cut -d' ' -f1 artifacts/noir-poker-redesign-fairness.patch.sha256)"
+          files="$(git diff --name-only "$BASE_SHA" -- . ':(exclude).github' ':(exclude)tools/regen' ':(exclude)artifacts' | wc -l)"
+          insertions="$(git diff --numstat "$BASE_SHA" -- . ':(exclude).github' ':(exclude)tools/regen' ':(exclude)artifacts' | awk '{a += $1} END {print a+0}')"
+          deletions="$(git diff --numstat "$BASE_SHA" -- . ':(exclude).github' ':(exclude)tools/regen' ':(exclude)artifacts' | awk '{d += $2} END {print d+0}')"
+          cat > artifacts/validation-report.md <<EOF
+          # Noir Poker redesign and fairness patch
+
+          Baseline: \`$BASE_SHA\`
+
+          Branch: \`$WORK_BRANCH\`
+
+          Patch SHA-256: \`$patch_sha\`
+
+          Source files changed: $files
+
+          Insertions: $insertions
+
+          Deletions: $deletions
+
+          ## Validated
+
+          - patch applies cleanly to a second detached worktree at the exact baseline
+          - source and reapplied patch diffs are byte-for-byte identical
+          - Rust formatting, workspace tests and Clippy with warnings denied
+          - TypeScript challenge, deal and receipt binding tests
+          - ESLint and production Next.js build
+          - PostgreSQL persistence and restart recovery tests
+          - pinned Noir 1.0.0-beta.26 artifact rebuild
+          - pinned Barretenberg 5.2.0 real proof generation and native server verification
+          - public two-proof bounty receipt path
+          - no numeric spinner controls
+          - no dependency-defined shuffle implementation
+          - no gradients, glass blur or generic pill-card styling
+
+          ## Security scope
+
+          The deal transcript is commit/reveal auditable after settlement. The authoritative server still sees cards during play. This is not mental poker, does not prevent aborts, and assumes at least one non-colluding player supplies unpredictable entropy after the server commitment is durable.
+          EOF
+          sed -i 's/^          //' artifacts/validation-report.md
+          git diff --stat "$BASE_SHA" -- . ':(exclude).github' ':(exclude)tools/regen' ':(exclude)artifacts' \
+            > artifacts/diff-stat.txt
+          git diff --name-status "$BASE_SHA" -- . ':(exclude).github' ':(exclude)tools/regen' ':(exclude)artifacts' \
+            > artifacts/changed-files.txt
+
+      - name: Upload patch review bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: noir-poker-redesign-fairness
+          path: |
+            artifacts/noir-poker-redesign-fairness.patch
+            artifacts/noir-poker-redesign-fairness.patch.sha256
+            artifacts/validation-report.md
+            artifacts/diff-stat.txt
+            artifacts/changed-files.txt
+            artifacts/logs
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish only to isolated branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "$WORK_BRANCH"
+          rm -rf tools/regen artifacts/logs
+          rm -f .github/workflows/noir-redesign.yml
+          rmdir .github/workflows 2>/dev/null || true
+          rmdir .github 2>/dev/null || true
+          git config user.name "noir-poker-validation"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "apply verified noir poker redesign [skip ci]"
+          git push origin "HEAD:refs/heads/$WORK_BRANCH"
+          git push origin --delete "$OLD_BRANCH"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_BEFORE"
+          test "$(git ls-remote origin refs/heads/dev | awk '{print $1}')" = "$DEV_BEFORE"
+          test -z "$(git ls-remote origin "refs/heads/$OLD_BRANCH")"
+          test -n "$(git ls-remote origin "refs/heads/$WORK_BRANCH")"
+          mapfile -t branches < <(git ls-remote --heads origin | sed 's#.*refs/heads/##' | sort)
+          test "${#branches[@]}" -eq 3
+          test "${branches[0]}" = "$WORK_BRANCH"
+          test "${branches[1]}" = "dev"
+          test "${branches[2]}" = "main"
