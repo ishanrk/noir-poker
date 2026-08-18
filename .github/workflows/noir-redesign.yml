@@ -1,3 +1,4 @@
+# manual actions trigger after repository workflow permissions enabled
 name: build isolated noir poker redesign
 
 on:
