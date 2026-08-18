@@ -54,7 +54,7 @@ export function Lobby() {
 
   return (
     <section className="lobby" aria-label="Poker lobby">
-      <form className="lobby-panel" onSubmit={create}>
+      <form className="lobby-section" onSubmit={create}>
         <div className="lobby-copy">
           <span>Create</span>
           <h2>New table</h2>
@@ -78,12 +78,12 @@ export function Lobby() {
             <input name="big_blind" type="number" min="1" defaultValue="10" required />
           </label>
         </div>
-        <button type="submit" disabled={busy}>
+        <button className="lobby-submit" type="submit" disabled={busy}>
           Create table
         </button>
       </form>
 
-      <form className="lobby-panel" onSubmit={join}>
+      <form className="lobby-section" onSubmit={join}>
         <div className="lobby-copy">
           <span>Join</span>
           <h2>Existing table</h2>
@@ -93,13 +93,12 @@ export function Lobby() {
           Room id
           <input name="room" type="text" autoComplete="off" required />
         </label>
-        <button type="submit" disabled={busy}>
+        <button className="lobby-submit" type="submit" disabled={busy}>
           Join table
         </button>
       </form>
 
       {error && <p className="lobby-error">{error}</p>}
-
     </section>
   );
 }

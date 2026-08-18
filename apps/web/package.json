@@ -10,7 +10,7 @@
     "start": "next start",
     "lint": "eslint .",
     "challenge:test": "node --experimental-strip-types lib/challenge.test.ts",
-    "receipt:verify": "node scripts/verify-receipt.mjs"
+    "proof:verify": "node scripts/verify-receipt.mjs"
   },
   "dependencies": {
     "@aztec/bb.js": "5.2.0",

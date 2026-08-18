@@ -85,19 +85,15 @@ export async function proveChallenge(
   }
 }
 
-export async function verifyChallengeProof(proof: string, publicInputs: string) {
-  const proofBytes = decodeBase64(proof);
-  const publicBytes = decodeBase64(publicInputs);
+type EncodedProof = {
+  proof: string;
+  publicInputs: string;
+};
 
-  if (
-    proofBytes.length === 0 ||
-    proofBytes.length > 65536 ||
-    proofBytes.length % 32 !== 0 ||
-    publicBytes.length !== PUBLIC_BYTES
-  ) {
-    return false;
-  }
-
+export async function verifyChallengeProofs(
+  proofs: readonly EncodedProof[],
+  onVerified?: (index: number) => void,
+) {
   const { BackendType, Barretenberg, UltraHonkBackend, deflattenFields } = await import(
     "@aztec/bb.js"
   );
@@ -106,13 +102,36 @@ export async function verifyChallengeProof(proof: string, publicInputs: string) 
   try {
     const backend = new UltraHonkBackend(circuit.bytecode, api);
 
-    return backend.verifyProof(
-      {
-        proof: proofBytes,
-        publicInputs: deflattenFields(publicBytes),
-      },
-      { verifierTarget: "noir-recursive" },
-    );
+    for (let i = 0; i < proofs.length; i += 1) {
+      const proof = proofs[i];
+      const proofBytes = decodeBase64(proof.proof);
+      const publicInputs = decodeBase64(proof.publicInputs);
+
+      if (
+        proofBytes.length === 0 ||
+        proofBytes.length > 65536 ||
+        proofBytes.length % 32 !== 0 ||
+        publicInputs.length !== PUBLIC_BYTES
+      ) {
+        return false;
+      }
+
+      const verified = await backend.verifyProof(
+        {
+          proof: proofBytes,
+          publicInputs: deflattenFields(publicInputs),
+        },
+        { verifierTarget: "noir-recursive" },
+      );
+
+      if (!verified) {
+        return false;
+      }
+
+      onVerified?.(i);
+    }
+
+    return true;
   } finally {
     await api.destroy();
   }

@@ -87,7 +87,6 @@ export type View = {
 type TableProps = {
   view: View;
   viewer: number;
-  label?: string;
   error?: string;
   disabled?: boolean;
   raiseTo: number;
@@ -96,12 +95,11 @@ type TableProps = {
   onCheck: () => void;
   onCall: () => void;
   onRaise: () => void;
-  onNewHand?: () => void;
-  onReady?: () => void;
-  contract?: ContractView;
-  onChooseContract?: () => void;
-  onDrawContract?: () => void;
-  onGenerateProof?: () => void;
+  onReady: () => void;
+  contract: ContractView;
+  onCommitContract: () => void;
+  onVerifyDraw: () => void;
+  onGenerateProof: () => void;
 };
 
 const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
@@ -113,7 +111,6 @@ function playerName(player: number, viewer: number) {
 export function Table({
   view,
   viewer,
-  label = "Local game",
   error,
   disabled = false,
   raiseTo,
@@ -122,11 +119,10 @@ export function Table({
   onCheck,
   onCall,
   onRaise,
-  onNewHand,
   onReady,
   contract,
-  onChooseContract,
-  onDrawContract,
+  onCommitContract,
+  onVerifyDraw,
   onGenerateProof,
 }: TableProps) {
   const hole = [view.hole[0].value, view.hole[1].value] as const;
@@ -177,7 +173,7 @@ export function Table({
       <div className="table-stage">
         <div className="table-surface">
           <div className="table-label">
-            <span>{label}</span>
+            <span>Live game</span>
             <strong>{view.street}</strong>
           </div>
 
@@ -228,16 +224,6 @@ export function Table({
         })}
       </div>
 
-      {contract && onChooseContract && onDrawContract && onGenerateProof && (
-        <Contract
-          view={contract}
-          disabled={disabled}
-          onChoose={onChooseContract}
-          onDraw={onDrawContract}
-          onProve={onGenerateProof}
-        />
-      )}
-
       <div className="action-bar" aria-label="Player actions">
         <div className="action-copy" aria-live="polite">
           <span>{status}</span>
@@ -277,19 +263,9 @@ export function Table({
           >
             Raise
           </button>
-          {view.settled && onNewHand && (
+          {view.settled && view.ready && (
             <button
-              className="new-hand-button"
-              type="button"
-              onClick={onNewHand}
-              disabled={disabled}
-            >
-              New hand
-            </button>
-          )}
-          {view.settled && onReady && view.ready && (
-            <button
-              className="new-hand-button"
+              className="ready-button"
               type="button"
               onClick={onReady}
               disabled={
@@ -306,6 +282,14 @@ export function Table({
           )}
         </div>
       </div>
+
+      <Contract
+        view={contract}
+        disabled={disabled}
+        onCommit={onCommitContract}
+        onVerifyDraw={onVerifyDraw}
+        onProve={onGenerateProof}
+      />
     </section>
   );
 }

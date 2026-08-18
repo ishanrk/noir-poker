@@ -21,7 +21,7 @@ const artifact = JSON.parse(source);
 const input = process.argv[2];
 
 if (!input) {
-  throw new Error("usage node scripts/verify-receipt.mjs receipt.json");
+  throw new Error("usage npm run proof:verify -- receipt.json");
 }
 
 if (createHash("sha256").update(source).digest("hex") !== ARTIFACT_SHA256) {

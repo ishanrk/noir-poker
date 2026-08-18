@@ -10,9 +10,9 @@ export default async function TablePage({ params }: TablePageProps) {
   return (
     <main className="page">
       <header className="page-header">
-        <p className="eyebrow">Private table</p>
+        <p className="eyebrow">Live / Fair draw</p>
         <h1>Noir Poker</h1>
-        <p>Server authoritative hand</p>
+        <p>server-authoritative poker · private objectives · local proving</p>
       </header>
 
       <MultiplayerGame key={room} room={room} />

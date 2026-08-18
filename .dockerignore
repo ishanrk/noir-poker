@@ -11,8 +11,6 @@ out
 **/out
 .vercel
 **/.vercel
-apps/web/wasm
-crates/game-wasm/pkg
 apps/web/zk
 apps/server/zk
 *.tsbuildinfo

@@ -119,7 +119,7 @@ function privateObjective(
   const stored = loadChallengeSecret(room, assignment.hand_no, seat);
 
   if (!stored) {
-    return { error: "Contract secret unavailable" };
+    return { error: "Draw secret unavailable" };
   }
 
   try {
@@ -129,14 +129,14 @@ function privateObjective(
     const root = encodeHex(catalogRoot());
 
     if (root !== assignment.catalog_root) {
-      return { error: "Contract catalog mismatch" };
+      return { error: "Catalog root mismatch" };
     }
 
     if (
       stored.commitment !== assignment.commitment ||
       expected !== assignment.commitment
     ) {
-      return { error: "Contract commitment mismatch" };
+      return { error: "Commitment mismatch" };
     }
 
     const index = objectiveIndex(
@@ -148,7 +148,7 @@ function privateObjective(
 
     return { objective: objectiveAt(index).description, index };
   } catch {
-    return { error: "Invalid contract assignment" };
+    return { error: "Invalid draw assignment" };
   }
 }
 
@@ -167,12 +167,12 @@ function contractCompletion(
     );
 
     if (hash !== claim.facts_hash) {
-      return { error: "Contract facts mismatch" };
+      return { error: "Facts commitment mismatch" };
     }
 
     return { completed: objectiveMet(objectiveAt(index), claim.facts) };
   } catch {
-    return { error: "Invalid contract facts" };
+    return { error: "Invalid hand facts" };
   }
 }
 
@@ -350,13 +350,24 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
           setDrawState("failed");
         }
 
+        if (claiming.current) {
+          claiming.current = false;
+          setClaimState("failed");
+        }
+
         setConnecting(false);
+        setPending(false);
         setError("Connection failed");
       }
     };
 
     next.onclose = () => {
       if (socket.current === next) {
+        if (drawing.current) {
+          drawing.current = false;
+          setDrawState("failed");
+        }
+
         if (claiming.current) {
           claiming.current = false;
           setClaimState("failed");
@@ -412,7 +423,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
     current.send(JSON.stringify(action));
   }
 
-  function chooseChallenge() {
+  function commitChallenge() {
     const challenge = view?.challenge;
 
     if (
@@ -424,23 +435,33 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
     }
 
     try {
-      const secret = crypto.getRandomValues(new Uint8Array(32));
+      const stored = loadChallengeSecret(room, challenge.hand_no, seat);
+      const secret = stored
+        ? decodeHex(stored.secret)
+        : crypto.getRandomValues(new Uint8Array(32));
       const value = encodeHex(
         challengeCommitment(decodeHex(challenge.hand_tag), seat, secret),
       );
 
-      saveChallengeSecret(room, challenge.hand_no, seat, {
-        version: CHALLENGE_VERSION,
-        secret: encodeHex(secret),
-        commitment: value,
-      });
+      if (stored && stored.commitment !== value) {
+        throw new Error("challenge mismatch");
+      }
+
+      if (!stored) {
+        saveChallengeSecret(room, challenge.hand_no, seat, {
+          version: CHALLENGE_VERSION,
+          secret: encodeHex(secret),
+          commitment: value,
+        });
+      }
+
       send({
         type: "challenge_commit",
         hand_no: challenge.hand_no,
         commitment: value,
       });
     } catch {
-      setChallengeError("Contract setup failed");
+      setChallengeError("Fair draw setup failed");
     }
   }
 
@@ -464,7 +485,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
     const stored = loadChallengeSecret(room, assignment.hand_no, seat);
 
     if (!stored) {
-      setChallengeError("Contract secret unavailable");
+      setChallengeError("Draw secret unavailable");
       setDrawState("failed");
       return;
     }
@@ -554,7 +575,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
     const stored = loadChallengeSecret(room, claim.hand_no, seat);
 
     if (!stored) {
-      setChallengeError("Contract secret unavailable");
+      setChallengeError("Draw secret unavailable");
       setClaimState("failed");
       return;
     }
@@ -586,7 +607,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
 
       if (!objectiveMet(objective, claim.facts)) {
         setClaimCompleted(false);
-        setChallengeError("Contract not completed");
+        setChallengeError("Objective not completed");
         return;
       }
 
@@ -634,7 +655,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
       claiming.current = false;
       setPending(false);
       setClaimState("failed");
-      setChallengeError("Contract proof failed");
+      setChallengeError("Completion proof failed");
     }
   }
 
@@ -687,7 +708,7 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
     assignment: !view.challenge
       ? { kind: "available" }
       : !view.challenge.assigned
-        ? { kind: "choose", handNo: view.challenge.hand_no }
+        ? { kind: "draw", handNo: view.challenge.hand_no }
         : {
             kind: "assigned",
             handNo: view.challenge.hand_no,
@@ -696,6 +717,9 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
             active: !view.settled,
             drawVerified: view.challenge.draw_verified,
             drawState,
+            commitment: view.challenge.commitment ?? "",
+            nonce: view.challenge.nonce ?? "",
+            catalogRoot: view.challenge.catalog_root ?? "",
           },
     claim: view.claim
       ? {
@@ -727,7 +751,6 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
       <Table
         view={view}
         viewer={seat}
-        label="Live game"
         error={error}
         disabled={pending || !connected}
         raiseTo={raiseTo}
@@ -738,8 +761,8 @@ export function MultiplayerGame({ room }: MultiplayerGameProps) {
         onRaise={() => send({ type: "raise_to", to: raiseTo })}
         onReady={() => send({ type: "ready" })}
         contract={contract}
-        onChooseContract={chooseChallenge}
-        onDrawContract={() => void drawChallenge()}
+        onCommitContract={commitChallenge}
+        onVerifyDraw={() => void drawChallenge()}
         onGenerateProof={() => void claimChallenge()}
       />
     </>

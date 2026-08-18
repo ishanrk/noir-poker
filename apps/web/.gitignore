@@ -1,9 +1,5 @@
 node_modules/
 .next/
-wasm/*
-!wasm/game_wasm.js
-!wasm/game_wasm_bg.wasm
-!wasm/game_wasm.d.ts
 out/
 .vercel/
 *.tsbuildinfo

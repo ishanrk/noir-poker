@@ -4,9 +4,9 @@ export default function Home() {
   return (
     <main className="page">
       <header className="page-header">
-        <p className="eyebrow">Private tables</p>
+        <p className="eyebrow">Noir / UltraHonk</p>
         <h1>Noir Poker</h1>
-        <p>Private poker with secret contracts proved in zero knowledge</p>
+        <p>private poker · fair hidden objectives · zero-knowledge receipts</p>
       </header>
 
       <Lobby />

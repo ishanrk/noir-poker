@@ -1,6 +1,6 @@
 import {
   decodePublicInputs,
-  verifyChallengeProof,
+  verifyChallengeProofs,
   type ChallengePublicInputs,
 } from "@/lib/challenge-proof";
 import { CHALLENGE_POINTS, CHALLENGE_VERSION, catalogRoot, decodeHex, encodeHex } from "@/lib/challenge";
@@ -13,15 +13,24 @@ const ARTIFACT_SHA256 = "83a9a72327d42546fe6449306b916c993d1df820717f8bccd2dd6c9
 const VK_SHA256 = "b435db9d240683e181d8bad47203bf85d57ca27982bc676cf2686b5cf3de1d67";
 const ZERO = "00".repeat(32);
 
-export async function verifyReceipt(receipt: ProofReceipt) {
+export type ReceiptProof = "draw" | "completion";
+
+export async function verifyReceipt(
+  receipt: ProofReceipt,
+  onVerified?: (proof: ReceiptProof) => void,
+) {
   validateReceipt(receipt);
 
-  if (!(await verifyChallengeProof(receipt.draw_proof, receipt.draw_public_inputs))) {
-    throw new Error("draw proof failed");
-  }
+  const verified = await verifyChallengeProofs(
+    [
+      { proof: receipt.draw_proof, publicInputs: receipt.draw_public_inputs },
+      { proof: receipt.completion_proof, publicInputs: receipt.completion_public_inputs },
+    ],
+    (index) => onVerified?.(index === 0 ? "draw" : "completion"),
+  );
 
-  if (!(await verifyChallengeProof(receipt.completion_proof, receipt.completion_public_inputs))) {
-    throw new Error("completion proof failed");
+  if (!verified) {
+    throw new Error("proof verification failed");
   }
 }
 
