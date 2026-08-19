@@ -17,6 +17,12 @@ def sub_one(text: str, pattern: str, replacement: str, label: str) -> str:
     return updated
 
 
+def cfg_test_one(text: str, needle: str, label: str) -> str:
+    if text.count(needle) != 1:
+        raise RuntimeError(f"expected one {label} found {text.count(needle)}")
+    return text.replace(needle, f"#[cfg(test)]\n{needle}", 1)
+
+
 def fix_main() -> None:
     if not MAIN.exists():
         return
@@ -65,16 +71,10 @@ def fix_main() -> None:
     text = text.replace("    ReadyUpdate, ", "    ", 1)
     text = text.replace("PendingDraw, PendingFairReady, PlayedAction", "PendingDraw, PlayedAction", 1)
 
-    text = sub_one(
+    text = cfg_test_one(text, "async fn ready_room(", "legacy ready_room")
+    text = cfg_test_one(
         text,
-        r"\nasync fn ready_room\(.*?\n\}\n\n(?=async fn |fn )",
-        "\n",
-        "legacy ready_room",
-    )
-    text = sub_one(
-        text,
-        r"\nfn secure_seed\(\) -> Result<\[u8; 32\], getrandom::Error> \{.*?\n\}\n",
-        "\n",
+        "fn secure_seed() -> Result<[u8; 32], getrandom::Error> {",
         "legacy secure_seed",
     )
 
@@ -86,30 +86,10 @@ def fix_db() -> None:
         return
 
     text = DB.read_text()
-    text = sub_one(
-        text,
-        r"\npub struct ReadyUpdate<'a> \{.*?\n\}\n",
-        "\n",
-        "ReadyUpdate",
-    )
-    text = sub_one(
-        text,
-        r"\n    pub async fn create_room\(.*?\n    \}\n\n(?=    pub async fn join_room\()",
-        "\n",
-        "legacy Db create_room",
-    )
-    text = sub_one(
-        text,
-        r"\n    pub async fn join_room\(.*?\n    \}\n\n(?=    pub async fn ready\()",
-        "\n",
-        "legacy Db join_room",
-    )
-    text = sub_one(
-        text,
-        r"\n    pub async fn ready\(.*?\n    \}\n\n(?=    pub async fn commit_challenge\()",
-        "\n",
-        "legacy Db ready",
-    )
+    text = cfg_test_one(text, "pub struct ReadyUpdate<'a> {", "ReadyUpdate")
+    text = cfg_test_one(text, "    pub async fn create_room(", "legacy Db create_room")
+    text = cfg_test_one(text, "    pub async fn join_room(", "legacy Db join_room")
+    text = cfg_test_one(text, "    pub async fn ready(&self, ready: ReadyUpdate<'_>)", "legacy Db ready")
     DB.write_text(text)
 
 
@@ -118,12 +98,7 @@ def fix_room() -> None:
         return
 
     text = ROOM.read_text()
-    text = sub_one(
-        text,
-        r"\n    pub\(super\) fn commit_join\(.*?\n    \}\n\n(?=    pub\(super\) fn stage_ready\()",
-        "\n",
-        "legacy Room commit_join",
-    )
+    text = cfg_test_one(text, "    pub(super) fn commit_join(", "legacy Room commit_join")
     ROOM.write_text(text)
 
 
