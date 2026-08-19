@@ -1,30 +1,25 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses";
 import { Fr } from "@aztec/aztec.js/fields";
-import { createAztecNodeClient } from "@aztec/aztec.js/node";
 import type { Wallet } from "@aztec/aztec.js/wallet";
 
 import {
   PlayChipsContract,
   PlayChipsContractArtifact,
 } from "./artifacts/PlayChips";
-import {
-  AZTEC_TESTNET_NODE_URL,
-  requirePlayChipsAddress,
-} from "./config";
+import { requirePlayChipsAddress } from "./config";
 import { sponsoredFeePayment } from "./fees";
 
 export type PlayChips = PlayChipsContract;
 
 export async function attachPlayChips(wallet: Wallet) {
   const address = AztecAddress.fromString(requirePlayChipsAddress());
-  const node = createAztecNodeClient(AZTEC_TESTNET_NODE_URL);
-  const instance = await node.getContract(address);
+  const metadata = await wallet.getContractMetadata(address);
 
-  if (!instance) {
-    throw new Error("play chips contract is not deployed on the configured Aztec node");
+  if (!metadata.instance) {
+    throw new Error("play chips contract is not deployed on the configured Aztec network");
   }
 
-  await wallet.registerContract(instance, PlayChipsContractArtifact);
+  await wallet.registerContract(metadata.instance, PlayChipsContractArtifact);
   return PlayChipsContract.at(address, wallet);
 }
 
