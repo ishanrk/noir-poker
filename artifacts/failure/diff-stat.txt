@@ -21,27 +21,27 @@
  apps/web/lib/server.ts                     |   61 +-
  apps/web/package.json                      |    5 +-
  apps/web/scripts/verify-receipt.mjs        |   48 +-
- artifacts/failure/cargo-check.log          |  420 ++++----
- artifacts/failure/cargo-clippy.log         |   26 +-
- artifacts/failure/cargo-test.log           |  265 +++--
+ artifacts/failure/cargo-check.log          |  416 ++++----
+ artifacts/failure/cargo-clippy.log         |    2 +-
+ artifacts/failure/cargo-test.log           |  132 +--
  artifacts/failure/challenge-test.log       |    2 +-
- artifacts/failure/deal-test.log            |   28 +-
- artifacts/failure/diff-check.log           |    8 +
- artifacts/failure/diff-stat.txt            |   35 -
- artifacts/failure/eslint.log               |    9 -
- artifacts/failure/next-build.log           |   38 +-
- artifacts/failure/receipt-test.log         |   22 +-
+ artifacts/failure/deal-test.log            |    2 +-
+ artifacts/failure/diff-check.log           |    8 -
+ artifacts/failure/diff-stat.txt            |   47 -
+ artifacts/failure/next-build.log           |    8 +-
+ artifacts/failure/npm-ci.log               |    2 +-
+ artifacts/failure/receipt-test.log         |    2 +-
  artifacts/failure/source/deal-core.rs      |  166 ----
- artifacts/failure/source/deal.test.ts      |   58 --
+ artifacts/failure/source/deal.test.ts      |   60 --
  artifacts/failure/source/deal.ts           |  168 ----
  artifacts/failure/source/protocol-demo.tsx |   50 -
  artifacts/failure/source/protocol-page.tsx |   94 --
  artifacts/failure/source/receipt.test.ts   |   51 -
  artifacts/failure/source/receipt.ts        |   98 --
- artifacts/failure/status-short.txt         |   12 +
- artifacts/failure/status.txt               |   12 +-
+ artifacts/failure/status-short.txt         |    8 +-
+ artifacts/failure/status.txt               |   12 +
  crates/challenge-core/src/lib.rs           |    4 +-
  crates/game-core/Cargo.toml                |    3 +-
  crates/game-core/src/card.rs               |   19 +-
  crates/game-core/src/deck.rs               |   86 +-
- 46 files changed, 2287 insertions(+), 3301 deletions(-)
+ 46 files changed, 2113 insertions(+), 3241 deletions(-)

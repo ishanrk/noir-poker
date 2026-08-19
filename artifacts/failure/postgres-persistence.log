@@ -1,0 +1,18 @@
+[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+[1m[92m     Running[0m unittests src/main.rs (target/debug/deps/server-3e49819e4ce08812)
+
+running 1 test
+
+thread 'tests::persistence' (8686) panicked at apps/server/src/main.rs:3152:14:
+called `Result::unwrap()` on an `Err` value: Database(PgDatabaseError { severity: Error, code: "0A000", message: "cannot truncate a table referenced in a foreign key constraint", detail: Some("Table \"hand_ceremonies\" references \"rooms\"."), hint: Some("Truncate table \"hand_ceremonies\" at the same time, or use TRUNCATE ... CASCADE."), position: None, where: None, schema: None, table: None, column: None, data_type: None, constraint: None, file: Some("heap.c"), line: Some(3777), routine: Some("heap_truncate_check_FKs") })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test tests::persistence ... FAILED
+
+failures:
+
+failures:
+    tests::persistence
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 40 filtered out; finished in 0.18s
+
+[1m[91merror[0m: test failed, to rerun pass `-p server --bin server`

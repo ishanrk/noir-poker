@@ -1,0 +1,68 @@
+error: patch failed: Cargo.lock:239
+error: Cargo.lock: patch does not apply
+error: patch failed: Cargo.toml:1
+error: Cargo.toml: patch does not apply
+error: patch failed: apps/server/Cargo.toml:8
+error: apps/server/Cargo.toml: patch does not apply
+error: apps/server/migrations/20260822000000_fair_deals.sql: already exists in working directory
+error: patch failed: apps/server/src/db.rs:21
+error: apps/server/src/db.rs: patch does not apply
+error: apps/server/src/fairness.rs: already exists in working directory
+error: patch failed: apps/server/src/main.rs:1
+error: apps/server/src/main.rs: patch does not apply
+error: patch failed: apps/server/src/room.rs:47
+error: apps/server/src/room.rs: patch does not apply
+error: apps/web/app/audit/[room]/[hand]/page.tsx: already exists in working directory
+error: patch failed: apps/web/app/globals.css:1
+error: apps/web/app/globals.css: patch does not apply
+error: patch failed: apps/web/app/layout.tsx:5
+error: apps/web/app/layout.tsx: patch does not apply
+error: patch failed: apps/web/app/page.tsx:1
+error: apps/web/app/page.tsx: patch does not apply
+error: patch failed: apps/web/app/proof/[nullifier]/page.tsx:1
+error: apps/web/app/proof/[nullifier]/page.tsx: patch does not apply
+error: apps/web/app/protocol/page.tsx: already exists in working directory
+error: patch failed: apps/web/app/table/[room]/page.tsx:1
+error: apps/web/app/table/[room]/page.tsx: patch does not apply
+error: patch failed: apps/web/components/card.tsx:1
+error: apps/web/components/card.tsx: patch does not apply
+error: patch failed: apps/web/components/contract.tsx:1
+error: apps/web/components/contract.tsx: patch does not apply
+error: apps/web/components/deal-audit.tsx: already exists in working directory
+error: apps/web/components/deal-integrity.tsx: already exists in working directory
+error: patch failed: apps/web/components/lobby.tsx:1
+error: apps/web/components/lobby.tsx: patch does not apply
+error: patch failed: apps/web/components/multiplayer-game.tsx:4
+error: apps/web/components/multiplayer-game.tsx: patch does not apply
+error: patch failed: apps/web/components/proof-receipt.tsx:1
+error: apps/web/components/proof-receipt.tsx: patch does not apply
+error: apps/web/components/protocol-demo.tsx: already exists in working directory
+error: patch failed: apps/web/components/seat.tsx:29
+error: apps/web/components/seat.tsx: patch does not apply
+error: apps/web/components/site-header.tsx: already exists in working directory
+error: patch failed: apps/web/components/table.tsx:1
+error: apps/web/components/table.tsx: patch does not apply
+error: patch failed: apps/web/lib/challenge-proof.ts:1
+error: apps/web/lib/challenge-proof.ts: patch does not apply
+error: apps/web/lib/deal.test.ts: already exists in working directory
+error: apps/web/lib/deal.ts: already exists in working directory
+error: apps/web/lib/receipt.test.ts: already exists in working directory
+error: patch failed: apps/web/lib/receipt.ts:2
+error: apps/web/lib/receipt.ts: patch does not apply
+error: patch failed: apps/web/lib/server.ts:15
+error: apps/web/lib/server.ts: patch does not apply
+error: patch failed: apps/web/package.json:10
+error: apps/web/package.json: patch does not apply
+error: apps/web/scripts/verify-deal.mjs: already exists in working directory
+error: patch failed: apps/web/scripts/verify-receipt.mjs:20
+error: apps/web/scripts/verify-receipt.mjs: patch does not apply
+error: patch failed: crates/challenge-core/src/lib.rs:381
+error: crates/challenge-core/src/lib.rs: patch does not apply
+error: crates/deal-core/Cargo.toml: already exists in working directory
+error: crates/deal-core/src/lib.rs: already exists in working directory
+error: patch failed: crates/game-core/Cargo.toml:4
+error: crates/game-core/Cargo.toml: patch does not apply
+error: patch failed: crates/game-core/src/card.rs:1
+error: crates/game-core/src/card.rs: patch does not apply
+error: patch failed: crates/game-core/src/deck.rs:1
+error: crates/game-core/src/deck.rs: patch does not apply

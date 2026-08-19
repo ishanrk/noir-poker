@@ -1,8 +1,0 @@
-artifacts/failure/cargo-test.log:364: new blank line at EOF.
-artifacts/failure/next-build.log:22: trailing whitespace.
-+  Generating static pages using 3 workers (1/4) 
-artifacts/failure/next-build.log:23: trailing whitespace.
-+  Generating static pages using 3 workers (2/4) 
-artifacts/failure/next-build.log:24: trailing whitespace.
-+  Generating static pages using 3 workers (3/4) 
-artifacts/failure/next-build.log:39: new blank line at EOF.
