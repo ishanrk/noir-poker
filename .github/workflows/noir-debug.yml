@@ -50,7 +50,8 @@ jobs:
         shell: bash
         run: |
           set +e
-          mkdir -p artifacts/failure
+          rm -rf artifacts/failure
+          mkdir -p artifacts/failure/source
           : > artifacts/failure/status.txt
           run() {
             name="$1"
@@ -74,6 +75,13 @@ jobs:
           git diff --check > artifacts/failure/diff-check.log 2>&1
           git status --short > artifacts/failure/status-short.txt
           git diff --stat > artifacts/failure/diff-stat.txt
+          cp apps/web/lib/deal.ts artifacts/failure/source/deal.ts
+          cp apps/web/lib/deal.test.ts artifacts/failure/source/deal.test.ts
+          cp apps/web/lib/receipt.ts artifacts/failure/source/receipt.ts
+          cp apps/web/lib/receipt.test.ts artifacts/failure/source/receipt.test.ts
+          cp apps/web/components/protocol-demo.tsx artifacts/failure/source/protocol-demo.tsx
+          cp apps/web/app/protocol/page.tsx artifacts/failure/source/protocol-page.tsx
+          cp crates/deal-core/src/lib.rs artifacts/failure/source/deal-core.rs
 
       - name: Persist diagnostics on isolated branch
         shell: bash
