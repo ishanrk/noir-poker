@@ -150,12 +150,20 @@ jobs:
             cargo test -p server real_proof -- --ignored --nocapture |& tee artifacts/logs/real-proof.log
           BB_PATH="$BB_PATH" CHALLENGE_VK_PATH="$CHALLENGE_VK_PATH" TEST_DATABASE_URL="$TEST_DATABASE_URL" \
             cargo test -p server real_claim -- --ignored --nocapture |& tee artifacts/logs/real-claim.log
-          if grep -R --include='*.tsx' 'type="number"' apps/web; then
+          bad=0
+          if grep -R --include='*.tsx' 'type="number"' apps/web | tee artifacts/logs/numeric-spinner.log; then
             echo "numeric spinner found" >&2
-            exit 1
+            bad=1
           fi
-          ! grep -R --include='*.rs' -E 'SliceRandom|ChaCha20Rng|rand_chacha' crates apps/server
-          ! grep -R --include='*.css' -E 'linear-gradient|radial-gradient|backdrop-filter' apps/web/app/globals.css
+          if grep -R --include='*.rs' -E 'SliceRandom|ChaCha20Rng|rand_chacha' crates apps/server | tee artifacts/logs/dependency-shuffle.log; then
+            echo "dependency-defined shuffle found" >&2
+            bad=1
+          fi
+          if grep -R --include='*.css' -E 'linear-gradient|radial-gradient|backdrop-filter' apps/web/app/globals.css | tee artifacts/logs/ai-style.log; then
+            echo "forbidden generic styling found" >&2
+            bad=1
+          fi
+          test "$bad" -eq 0
 
       - name: Generate self-contained patch
         shell: bash
