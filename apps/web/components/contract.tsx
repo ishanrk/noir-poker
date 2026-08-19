@@ -61,11 +61,11 @@ function ProofRail({ state }: { state: ProofState }) {
   );
 }
 
-function SealedBounty({ verified = false }: { verified?: boolean }) {
+function SealedChallenge({ verified = false }: { verified?: boolean }) {
   return (
-    <div className="sealed-bounty" data-verified={verified} aria-label="Hidden bounty remains sealed">
+    <div className="sealed-bounty" data-verified={verified} aria-label="Hidden challenge remains sealed">
       <div className="sealed-bounty-face">
-        <span>Private bounty</span>
+        <span>Private challenge</span>
         <strong>?</strong>
         <small>{verified ? "proof accepted" : "objective concealed"}</small>
       </div>
@@ -78,17 +78,17 @@ export function Contract({ view, disabled = false, onCommit, onVerifyDraw, onPro
   const { assignment, claim } = view;
 
   return (
-    <section className="contract-panel" aria-label="Private bounty protocol">
+    <section className="contract-panel" aria-label="Private challenge protocol">
       <header className="contract-header">
         <div>
-          <p className="protocol-label">ZK bounty</p>
-          <h2>Prove the sealed objective.</h2>
+          <p className="protocol-label">ZK challenge</p>
+          <h2>Prove the private challenge.</h2>
         </div>
-        <Link href="/protocol#bounties">What a verifier learns →</Link>
+        <Link href="/protocol#challenge">Verifier details →</Link>
       </header>
 
       <div className="contract-layout">
-        <SealedBounty verified={claim?.state === "verified"} />
+        <SealedChallenge verified={claim?.state === "verified"} />
 
         <div className="contract-work">
           {claim && (
@@ -100,13 +100,13 @@ export function Contract({ view, disabled = false, onCommit, onVerifyDraw, onPro
               {claim.state === "verified" ? (
                 <div className="proof-award">
                   <strong>+{claim.reward} proof points</strong>
-                  <span>objective still hidden</span>
+                  <span>challenge still hidden</span>
                   {claim.receipt && <Link href={claim.receipt}>Open public verifier →</Link>}
                 </div>
               ) : (
                 <>
                   {claim.objective && <p className="private-copy">Only you see: {claim.objective}</p>}
-                  {claim.completed === false && <p className="contract-note">Objective missed. No proof can be generated.</p>}
+                  {claim.completed === false && <p className="contract-note">Challenge missed. No proof can be generated.</p>}
                   {claim.completed && (
                     <>
                       <ProofRail state={claim.state} />
@@ -123,7 +123,7 @@ export function Contract({ view, disabled = false, onCommit, onVerifyDraw, onPro
           )}
 
           {assignment.kind === "available" && (
-            <p className="contract-empty">The next sealed bounty appears when this hand settles.</p>
+            <p className="contract-empty">The next private challenge appears when this hand settles.</p>
           )}
 
           {assignment.kind === "draw" && (
@@ -133,8 +133,8 @@ export function Contract({ view, disabled = false, onCommit, onVerifyDraw, onPro
                 <strong>not drawn</strong>
               </div>
               <p>
-                Lock a browser secret first. The server then adds fresh entropy. Neither side can
-                choose the objective after seeing the other side&apos;s value.
+                Lock a browser secret first. The server then adds fresh randomness. Neither side can
+                choose the challenge after seeing the other side&apos;s value.
               </p>
               <button type="button" onClick={onCommit} disabled={disabled}>Commit & draw →</button>
             </section>
@@ -157,7 +157,7 @@ export function Contract({ view, disabled = false, onCommit, onVerifyDraw, onPro
               <div className="private-copy">
                 <span>Only this browser knows</span>
                 <strong>{assignment.objective}</strong>
-                <small>{assignment.reward} points — {assignment.active ? "in play" : "ready for next hand"}</small>
+                <small>{assignment.reward} points, {assignment.active ? "in play" : "ready for next hand"}</small>
               </div>
               <details className="protocol-details">
                 <summary>Inspect public bindings</summary>
