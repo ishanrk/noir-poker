@@ -1,0 +1,254 @@
+.home-page .hero {
+  min-height: 390px;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 42px;
+  padding-top: 46px;
+  padding-bottom: 54px;
+}
+
+.home-page .hero-copy h1 {
+  max-width: none;
+  margin-bottom: 18px;
+  font-size: clamp(54px, 6vw, 74px);
+}
+
+.home-page .hero-copy > p {
+  max-width: 650px;
+  font-size: clamp(16px, 1.8vw, 19px);
+  line-height: 1.55;
+}
+
+.home-page .hero-deck {
+  min-height: 255px;
+  border-left: 0;
+}
+
+.home-page .hero-card {
+  top: 5px;
+  left: 42%;
+  width: 148px;
+}
+
+.home-page .lobby-wrap {
+  padding-top: 46px;
+  padding-bottom: 72px;
+}
+
+.home-page .lobby {
+  margin-top: 24px;
+}
+
+.motivation-hero {
+  width: min(100% - 40px, 1040px);
+  margin: 0 auto;
+  padding: 70px 0 60px;
+  border-bottom: 4px solid var(--blue);
+}
+
+.motivation-hero h1 {
+  margin: 0 0 18px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(48px, 6vw, 72px);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.motivation-hero p {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1.65;
+}
+
+.motivation-section {
+  width: min(100% - 40px, 840px);
+  margin: 0 auto;
+  padding: 54px 0;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.motivation-section h2 {
+  margin: 0 0 22px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(32px, 4vw, 44px);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+}
+
+.motivation-section p {
+  max-width: 780px;
+  margin: 0 0 18px;
+  color: #505760;
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+.motivation-example {
+  margin-top: 26px;
+  padding: 17px 0 1px 20px;
+  border-left: 4px solid var(--lime);
+}
+
+.motivation-example span {
+  color: var(--blue);
+  font-family: "Courier New", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.motivation-example p {
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+.motivation-last a {
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 700;
+  text-underline-offset: 4px;
+}
+
+.protocol-copy h3 {
+  margin: 34px 0 10px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.protocol-artifacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 30px;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.protocol-artifacts article {
+  padding: 24px 28px 24px 0;
+}
+
+.protocol-artifacts article + article {
+  padding-left: 28px;
+  border-left: 1px solid var(--line);
+}
+
+.protocol-artifacts h3 {
+  margin: 0 0 12px;
+}
+
+.protocol-artifacts p {
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.protocol-artifacts code,
+.protocol-formula {
+  overflow-wrap: anywhere;
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+}
+
+.protocol-formula {
+  display: block;
+  margin: 10px 0 22px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--blue);
+  background: var(--paper);
+  color: var(--ink) !important;
+}
+
+.protocol-note {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 22px;
+  margin-top: 30px;
+  padding: 20px 0;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line);
+}
+
+.protocol-note strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.protocol-note p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+@media (max-width: 900px) {
+  .home-page .hero {
+    min-height: auto;
+    grid-template-columns: minmax(0, 1fr) 260px;
+  }
+
+  .home-page .hero-deck {
+    min-height: 230px;
+    border-top: 0;
+  }
+
+  .home-page .hero-card {
+    left: 34%;
+    width: 138px;
+  }
+}
+
+@media (max-width: 660px) {
+  .home-page .hero {
+    grid-template-columns: 1fr;
+    padding-top: 42px;
+    padding-bottom: 42px;
+  }
+
+  .home-page .hero-deck {
+    min-height: 220px;
+  }
+
+  .home-page .hero-card {
+    left: 30%;
+  }
+
+  .home-page .lobby-wrap {
+    padding-top: 38px;
+  }
+
+  .motivation-hero,
+  .motivation-section {
+    width: calc(100% - 32px);
+  }
+
+  .motivation-hero {
+    padding: 52px 0 46px;
+  }
+
+  .motivation-section {
+    padding: 44px 0;
+  }
+
+  .protocol-artifacts {
+    grid-template-columns: 1fr;
+  }
+
+  .protocol-artifacts article,
+  .protocol-artifacts article + article {
+    padding: 20px 0;
+    border-left: 0;
+  }
+
+  .protocol-artifacts article + article {
+    border-top: 1px solid var(--line);
+  }
+
+  .protocol-note {
+    grid-template-columns: 1fr;
+  }
+}
