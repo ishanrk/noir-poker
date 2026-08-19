@@ -21,7 +21,7 @@ export function DealIntegrity({
 }) {
   const label =
     deal.state === "collecting"
-      ? `${deal.contributors}/${deal.required} entropy shares`
+      ? `${deal.contributors}/${deal.required} randomness shares`
       : deal.state === "sealed"
         ? "deck fixed before play"
         : "transcript open for replay";
@@ -44,7 +44,7 @@ export function DealIntegrity({
         {deal.audit ? (
           <Link href={`/audit/${room}/${deal.hand_no}`}>Replay deal →</Link>
         ) : (
-          <Link href="/protocol">How this works →</Link>
+          <Link href="/protocol">Protocol →</Link>
         )}
       </div>
     </section>
