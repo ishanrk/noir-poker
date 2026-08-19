@@ -10,13 +10,13 @@ permissions:
 
 concurrency:
   group: aztec-play-money
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   validate:
     if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
@@ -27,97 +27,107 @@ jobs:
         with:
           node-version: 24
 
-      - name: Install Aztec 5.1.0
+      - name: Validate and publish diagnostics
         shell: bash
-        run: |
-          set -euo pipefail
-          VERSION=5.1.0 bash -i <(curl -fsSL https://install.aztec.network/5.1.0)
-          echo "$HOME/.aztec/bin" >> "$GITHUB_PATH"
-
-      - name: Install Aztec dependencies
-        working-directory: aztec
-        run: npm install
-
-      - name: Check contract policy
-        working-directory: aztec
-        run: npm run test:protocol
-
-      - name: Compile contract and generate bindings
-        working-directory: aztec
-        run: npm run build
-
-      - name: Copy binding into the web app
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf apps/web/lib/aztec/artifacts
-          mkdir -p apps/web/lib/aztec/artifacts
-          cp -R aztec/artifacts/. apps/web/lib/aztec/artifacts/
-          test -s apps/web/lib/aztec/artifacts/PlayChips.ts
-
-      - name: Install web dependencies
-        working-directory: apps/web
-        run: npm install
-
-      - name: Validate web app
-        working-directory: apps/web
         env:
           NEXT_PUBLIC_AZTEC_NODE_URL: https://v5.testnet.rpc.aztec-labs.com
           NEXT_PUBLIC_AZTEC_PLAY_CHIPS_ADDRESS: 0x1111111111111111111111111111111111111111111111111111111111111111
           NEXT_PUBLIC_SERVER_URL: https://example.com
-        run: |
-          set -euo pipefail
-          npm run challenge:test
-          npm run deal:test
-          npm run receipt:test
-          npm run aztec:test
-          npm run lint
-          npm run build
-
-      - name: Validate Rust workspace
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo fmt --all -- --check
-          cargo test --workspace --locked
-          cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      - name: Start local Aztec network
-        shell: bash
-        run: |
-          set -euo pipefail
-          aztec start --local-network > "$RUNNER_TEMP/aztec-local.log" 2>&1 &
-          echo $! > "$RUNNER_TEMP/aztec-local.pid"
-
-      - name: Run contract integration
-        working-directory: aztec
-        env:
           AZTEC_NODE_URL: http://127.0.0.1:8080
-        run: timeout 20m npm run test:local
-
-      - name: Check generated source
-        shell: bash
         run: |
-          set -euo pipefail
-          git diff --check
-          test -s aztec/package-lock.json
-          test -s apps/web/package-lock.json
-          test -s apps/web/lib/aztec/artifacts/PlayChips.ts
+          set -uo pipefail
 
-      - name: Commit validated generated files
-        shell: bash
-        run: |
-          set -euo pipefail
+          out="artifacts/aztec-ci"
+          rm -rf "$out"
+          mkdir -p "$out"
+          : > "$out/status.tsv"
+          failed=0
+
+          check() {
+            name="$1"
+            command="$2"
+            log="$out/$name.log"
+            printf '$ %s\n\n' "$command" > "$log"
+            bash -lc "$command" >> "$log" 2>&1
+            code=$?
+            printf '%s\t%s\n' "$name" "$code" >> "$out/status.tsv"
+            if [ "$code" -ne 0 ]; then
+              failed=1
+            fi
+          }
+
+          check install-aztec 'VERSION=5.1.0 bash -i <(curl -fsSL https://install.aztec.network/5.1.0)'
+          export PATH="$HOME/.aztec/bin:$PATH"
+          check aztec-version 'aztec --version'
+          check install-contract-deps 'cd aztec && npm install'
+          check contract-policy 'cd aztec && npm run test:protocol'
+          check contract-build 'cd aztec && npm run build'
+
+          if [ -s aztec/artifacts/PlayChips.ts ]; then
+            rm -rf apps/web/lib/aztec/artifacts
+            mkdir -p apps/web/lib/aztec/artifacts
+            cp -R aztec/artifacts/. apps/web/lib/aztec/artifacts/
+          else
+            printf 'generated PlayChips.ts missing\n' > "$out/copy-binding.log"
+            printf 'copy-binding\t1\n' >> "$out/status.tsv"
+            failed=1
+          fi
+
+          check install-web-deps 'cd apps/web && npm install'
+          check challenge-test 'cd apps/web && npm run challenge:test'
+          check deal-test 'cd apps/web && npm run deal:test'
+          check receipt-test 'cd apps/web && npm run receipt:test'
+          check aztec-id-test 'cd apps/web && npm run aztec:test'
+          check web-lint 'cd apps/web && npm run lint'
+          check web-build 'cd apps/web && npm run build'
+          check rust-format 'cargo fmt --all -- --check'
+          check rust-test 'cargo test --workspace --locked'
+          check rust-clippy 'cargo clippy --workspace --all-targets --locked -- -D warnings'
+
+          if command -v aztec >/dev/null && [ -s aztec/artifacts/PlayChips.ts ]; then
+            aztec start --local-network > "$out/aztec-local.log" 2>&1 &
+            node_pid=$!
+            check contract-integration 'cd aztec && timeout 20m npm run test:local'
+            kill "$node_pid" 2>/dev/null || true
+          else
+            printf 'local network skipped because contract tooling did not build\n' > "$out/contract-integration.log"
+            printf 'contract-integration\t1\n' >> "$out/status.tsv"
+            failed=1
+          fi
+
+          check diff-check 'git diff --check'
+
+          {
+            printf '# Aztec mode validation\n\n'
+            if [ "$failed" -eq 0 ]; then
+              printf '**PASS**\n\n'
+            else
+              printf '**FAIL**\n\n'
+            fi
+            printf '| check | exit |\n|---|---:|\n'
+            while IFS=$'\t' read -r name code; do
+              printf '| `%s` | %s |\n' "$name" "$code"
+            done < "$out/status.tsv"
+          } > "$out/README.md"
+
           git config user.name "noir-poker-aztec-validation"
           git config user.email "actions@users.noreply.github.com"
-          git add \
-            aztec/package-lock.json \
-            apps/web/package-lock.json \
-            apps/web/lib/aztec/artifacts
+          git add artifacts/aztec-ci
+          if [ -s aztec/package-lock.json ]; then
+            git add aztec/package-lock.json
+          fi
+          if [ -s apps/web/package-lock.json ]; then
+            git add apps/web/package-lock.json
+          fi
+          if [ -s apps/web/lib/aztec/artifacts/PlayChips.ts ]; then
+            git add apps/web/lib/aztec/artifacts
+          fi
           if ! git diff --cached --quiet; then
-            git commit -m "record validated aztec artifacts [skip ci]"
+            git commit -m "record aztec validation [skip ci]"
             git push origin HEAD:agent/noir-poker-aztec-play-money
           fi
+
+          exit "$failed"
 
       - name: Upload validation files
         if: always()
@@ -125,11 +135,11 @@ jobs:
         with:
           name: aztec-play-money-validation
           path: |
+            artifacts/aztec-ci
             aztec/artifacts
             aztec/target
             aztec/package-lock.json
             apps/web/lib/aztec/artifacts
             apps/web/package-lock.json
-            ${{ runner.temp }}/aztec-local.log
           if-no-files-found: warn
           retention-days: 14
