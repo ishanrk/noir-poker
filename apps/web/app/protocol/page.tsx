@@ -1,4 +1,3 @@
-import { ProtocolDemo } from "@/components/protocol-demo";
 import { SiteHeader } from "@/components/site-header";
 
 export default function ProtocolPage() {
@@ -7,87 +6,190 @@ export default function ProtocolPage() {
       <SiteHeader compact />
 
       <header className="protocol-hero">
-        <h1>Protocol and verification.</h1>
-        <p>
-          Every settled hand has a public deal audit. Every bounty award has a zero-knowledge
-          receipt. Both can be checked independently in the browser or from the command line.
-        </p>
+        <h1>Protocol</h1>
+        <p>Exact artifacts, constructions, circuit inputs and verifier steps used by Noir Poker.</p>
       </header>
 
-      <section className="protocol-section">
+      <section className="protocol-section" id="verification">
         <div className="protocol-copy">
-          <h2>Why it matters</h2>
-          <p>
-            Server-authoritative poker usually requires players to trust the backend shuffle. Noir
-            Poker commits the server&apos;s randomness before player entropy is known. After settlement,
-            the complete transcript is revealed and the deck can be reconstructed exactly.
-          </p>
-          <p>
-            Bounties use a separate Noir proof. A verifier can confirm that a hidden objective came
-            from the fixed catalog and was completed using the recorded hand facts while the
-            objective remains private.
-          </p>
+          <h2>Available verification</h2>
+          <div className="protocol-artifacts">
+            <article>
+              <h3>Settled deal audit</h3>
+              <code>/audit/&lt;room&gt;/&lt;hand&gt;</code>
+              <p>
+                The browser verifies the server commitment opening, ordered player entropy, final
+                seed, all Fisher Yates swaps, both hole card rounds, three burn cards and the five
+                board cards.
+              </p>
+              <p>The audit can be exported as JSON and checked with the source controlled verifier.</p>
+              <code>npm --prefix apps/web run deal:verify -- audit.json</code>
+            </article>
+            <article>
+              <h3>Bounty receipt</h3>
+              <code>/proof/&lt;nullifier&gt;</code>
+              <p>
+                The browser verifies the draw proof and completion proof with the pinned Noir circuit
+                artifact and Barretenberg. The hidden challenge and private witness stay absent from
+                the receipt.
+              </p>
+              <p>The receipt can be exported as JSON and verified from the command line.</p>
+              <code>npm --prefix apps/web run proof:verify -- receipt.json</code>
+            </article>
+          </div>
         </div>
       </section>
 
       <section className="protocol-section" id="deals">
         <div className="protocol-copy">
-          <h2>Deal protocol</h2>
+          <h2>Deal integrity protocol</h2>
           <p>
-            For room <code>R</code> and hand <code>h</code>, the server samples a 32-byte secret
-            <code> S</code> and durably stores
-            <code> SHA256(&quot;NPDEAL01&quot; || R || u64_be(h) || S)</code> before player shares are
-            accepted.
-          </p>
-          <p>
-            Seat <code>i</code> samples a fresh 32-byte share <code>E_i</code> with the browser
-            cryptographic RNG. The final seed is
-            <code>
-              SHA256(&quot;NPSEED01&quot; || R || u64_be(h) || player_count || ordered(u8(i), E_i) || S)
-            </code>
-            . Seat indices are encoded explicitly, so changing share order changes the seed.
-          </p>
-          <p>
-            Card ids 0 through 51 use suit-major order: clubs, diamonds, hearts, spades; each suit
-            contains ranks 2 through ace. Fisher–Yates consumes 32-bit words from
-            <code> SHA256(&quot;NPSTRM01&quot; || seed || u64_be(counter))</code>. Rejection sampling removes
-            modulo bias. Hole cards are dealt in two clockwise rounds starting left of the dealer,
-            followed by burn, flop, burn, turn, burn, river.
+            Deck generation uses SHA 256 commitments and deterministic public replay. Noir is used
+            for the challenge system.
           </p>
 
-          <ProtocolDemo />
+          <h3>1. Server commitment</h3>
+          <p>
+            For room <code>R</code> and hand number <code>h</code>, the server samples a 32 byte secret
+            <code>S</code> and persists the commitment before player shares are accepted.
+          </p>
+          <code className="protocol-formula">
+            SHA256(&quot;NPDEAL01&quot; || R[16] || u64_be(h) || S[32])
+          </code>
 
-          <div className="protocol-facts">
-            <article>
-              <span>Before the hand</span>
-              <strong>Server commitment and contribution count</strong>
-            </article>
-            <article>
-              <span>During the hand</span>
-              <strong>Secret, shares and final seed stay sealed</strong>
-            </article>
-            <article>
-              <span>After settlement</span>
-              <strong>Secret, ordered shares, seed and all 52 positions</strong>
-            </article>
+          <h3>2. Player entropy</h3>
+          <p>
+            Every occupied seat samples a fresh 32 byte value with the browser cryptographic random
+            generator. Shares are ordered by seat. The seat byte is included in the seed input.
+          </p>
+          <code className="protocol-formula">
+            SHA256(&quot;NPSEED01&quot; || R || u64_be(h) || player_count || seat_0 || share_0 || ... || S)
+          </code>
+
+          <h3>3. Shuffle</h3>
+          <p>
+            Card ids 0 through 51 use suit major order. Suits are clubs, diamonds, hearts, spades.
+            Each suit contains ranks 2 through ace. The byte stream is generated from consecutive
+            SHA 256 blocks.
+          </p>
+          <code className="protocol-formula">
+            SHA256(&quot;NPSTRM01&quot; || seed || u64_be(counter))
+          </code>
+          <p>
+            Each block is read as 32 bit unsigned words. For a Fisher Yates step with range size
+            <code> n</code>, values at or above <code>floor(2^32 / n) * n</code> are rejected. The
+            accepted word modulo <code>n</code> selects the swap position. This removes modulo bias.
+          </p>
+
+          <h3>4. Deal map</h3>
+          <p>
+            Hole cards are dealt in two clockwise rounds beginning left of the dealer. The remaining
+            positions are consumed as burn, flop, burn, turn, burn, river.
+          </p>
+
+          <h3>5. Public audit</h3>
+          <p>
+            The server secret, ordered player shares, final seed and complete deck become available
+            only after settlement. The browser recomputes the commitment, seed and permutation from
+            those values. A mismatch invalidates the audit.
+          </p>
+
+          <div className="protocol-note">
+            <strong>Guarantee</strong>
+            <p>
+              If at least one player contribution is unpredictable and noncolluding, the server
+              cannot choose the completed hand seed after seeing all player shares without breaking
+              its earlier commitment. The server still sees the cards during play and can abort a
+              ceremony before settlement.
+            </p>
           </div>
+        </div>
+      </section>
+
+      <section className="protocol-section" id="challenge-draw">
+        <div className="protocol-copy">
+          <h2>Challenge selection proof</h2>
+          <p>
+            After a hand, each player prepares a private challenge for the next hand. The browser
+            samples a private 32 byte secret. The server receives only a commitment to that secret,
+            persists it, then returns a fresh 32 byte nonce.
+          </p>
+
+          <code className="protocol-formula">
+            hand_tag = BLAKE2s(&quot;NPHAND02&quot; || room[16] || u64_be(hand))
+          </code>
+          <code className="protocol-formula">
+            commitment = BLAKE2s(&quot;NPCOMM02&quot; || hand_tag || seat || secret)
+          </code>
+          <code className="protocol-formula">
+            selector = BLAKE2s(&quot;NPSELE02&quot; || hand_tag || seat || nonce || secret)
+          </code>
+          <code className="protocol-formula">objective_index = selector[0] &amp; 7</code>
 
           <p>
-            If at least one player share is unpredictable and comes from a non-colluding player, the
-            server cannot choose the completed seed after seeing all player entropy without breaking
-            its earlier commitment.
+            The eight challenge definitions are leaves in a fixed depth three Merkle tree. A leaf
+            contains the selected index plus six required true bits and six required false bits. The
+            leaf and internal nodes use BLAKE2s domain separators <code>NPLEAF02</code> and
+            <code>NPNODE02</code>.
+          </p>
+          <p>
+            Draw mode proves that the committed secret produces the selected index and that the
+            hidden challenge leaf belongs to the published catalog root. In draw mode
+            <code>facts_hash</code> and <code>nullifier</code> are both zero.
           </p>
         </div>
       </section>
 
-      <section className="protocol-section" id="bounties">
+      <section className="protocol-section" id="challenge-completion">
         <div className="protocol-copy">
-          <h2>Private bounty protocol</h2>
+          <h2>Challenge completion proof</h2>
+          <p>The server derives six Boolean hand facts after settlement:</p>
+          <ul className="protocol-list">
+            <li>saw the flop</li>
+            <li>raised before the flop</li>
+            <li>called before the flop</li>
+            <li>checked on the flop</li>
+            <li>reached showdown</li>
+            <li>finished with a net profit</li>
+          </ul>
+
+          <p>A fresh private salt hides the six bit fact vector inside a public commitment.</p>
+          <code className="protocol-formula">
+            facts_hash = BLAKE2s(&quot;NPFACT02&quot; || hand_tag || seat || facts_salt || facts[6])
+          </code>
+          <code className="protocol-formula">
+            nullifier = BLAKE2s(&quot;NPNULL02&quot; || hand_tag || seat || secret)
+          </code>
+
           <p>
-            The browser commits to a private 32-byte secret before the server returns its nonce. The
-            selector hashes the hand tag, seat, nonce and secret, then uses the low three bits to
-            choose one of eight objective leaves. A private three-level Merkle path proves that the
-            selected objective belongs to the published catalog root.
+            Completion mode checks the same secret commitment, selector and Merkle path used during
+            draw mode. It then checks the private fact vector against <code>facts_hash</code>, applies
+            the hidden challenge literals to those facts, and checks the nullifier. A successful
+            claim awards 20 proof points. PostgreSQL enforces a unique nullifier.
+          </p>
+
+          <div className="protocol-note">
+            <strong>Current boundary</strong>
+            <p>
+              The public receipt verifies challenge satisfaction against the server committed hand
+              facts. The receipt does not currently reconstruct those six facts from a public action
+              transcript. The zero knowledge layer therefore removes disclosure of the challenge,
+              while full server independent verification of fact derivation still needs an additional
+              public action audit.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="protocol-section" id="noir">
+        <div className="protocol-copy">
+          <h2>Noir and UltraHonk</h2>
+          <p>
+            The challenge circuit is written in Noir at
+            <code> circuits/challenge-v2/src/main.nr</code>. Nargo 1.0.0 beta 26 compiles the program
+            to the circuit artifact used by the browser. NoirJS executes the circuit inputs and
+            produces the witness. Barretenberg 5.2.0 receives the circuit bytecode and witness and
+            generates an UltraHonk proof in a WebAssembly worker.
           </p>
 
           <div className="circuit-statement">
@@ -97,71 +199,45 @@ export default function ProtocolPage() {
             </div>
             <div>
               <span>Private witness</span>
-              <code>secret facts_salt six hand facts objective literals Merkle siblings</code>
+              <code>secret facts_salt facts must_true must_false Merkle siblings</code>
             </div>
           </div>
 
           <p>
-            Draw mode proves fair objective selection before the next hand starts. Completion mode
-            proves that the same hidden objective is satisfied by the server-bound facts commitment.
-            The six facts are: saw flop, raised preflop, called preflop, checked flop, reached
-            showdown and net profit.
-          </p>
-          <p>
-            NoirJS executes the circuit in the browser. Barretenberg generates an UltraHonk proof.
-            The Rust server verifies the proof and exact public inputs before awarding 20 proof
-            points. The public receipt viewer runs the same proof verification again in the visitor&apos;s
-            browser.
+            The browser uses <code>UltraHonkBackend</code> with verifier target
+            <code> noir-recursive</code>. The proof exposes 194 public field elements. The server uses
+            <code>barretenberg-rs</code> with the pinned Barretenberg binary and verification key to
+            verify the same proof before accepting a claim.
           </p>
 
           <dl className="protocol-stack">
-            <div><dt>Circuit</dt><dd>Noir 1.0.0-beta.26</dd></div>
+            <div><dt>Circuit</dt><dd>challenge_v2</dd></div>
             <div><dt>Proof system</dt><dd>UltraHonk</dd></div>
-            <div><dt>Backend</dt><dd>Barretenberg 5.2.0</dd></div>
-            <div><dt>Deal hash</dt><dd>SHA-256</dd></div>
-            <div><dt>Bounty hash</dt><dd>BLAKE2s-256</dd></div>
-            <div><dt>Circuit artifact</dt><dd>1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d</dd></div>
-            <div><dt>Verification key</dt><dd>b435db9d240683e181d8bad47203bf85d57ca27982bc676cf2686b5cf3de1d67</dd></div>
+            <div><dt>Noir</dt><dd>1.0.0 beta 26</dd></div>
+            <div><dt>Barretenberg</dt><dd>5.2.0</dd></div>
+            <div><dt>Public fields</dt><dd>194</dd></div>
+            <div><dt>Maximum proof bytes</dt><dd>65,536</dd></div>
+            <div><dt>Circuit artifact SHA 256</dt><dd>1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d</dd></div>
+            <div><dt>Verification key SHA 256</dt><dd>b435db9d240683e181d8bad47203bf85d57ca27982bc676cf2686b5cf3de1d67</dd></div>
           </dl>
         </div>
       </section>
 
-      <section className="protocol-section" id="verify">
-        <div className="protocol-copy verifier-commands">
-          <h2>Verify it yourself</h2>
-
-          <h3>Settled hand</h3>
-          <p>
-            Open <code>/audit/&lt;room&gt;/&lt;hand&gt;</code>. The browser checks the server commitment
-            opening, ordered player shares, derived seed, complete 52-card permutation, both hole-card
-            rounds, all three burns and the five board positions.
-          </p>
-          <code>npm --prefix apps/web run deal:verify -- audit.json</code>
-
-          <h3>Bounty award</h3>
-          <p>
-            Open <code>/proof/&lt;nullifier&gt;</code>. The browser verifies both UltraHonk proofs and
-            checks that draw and completion use the same hand tag, seat, commitment, nonce and catalog
-            root. It also checks the completion facts hash, nullifier and 20-point award binding.
-          </p>
-          <code>npm --prefix apps/web run proof:verify -- receipt.json</code>
-
-          <p>
-            The proof establishes the hidden objective statement. PostgreSQL separately enforces one
-            accepted claim per nullifier and persists the awarded points.
-          </p>
-        </div>
-      </section>
-
-      <section className="protocol-section">
+      <section className="protocol-section" id="receipt-checks">
         <div className="protocol-copy">
-          <h2>Security limits</h2>
-          <ul className="protocol-list">
-            <li>The authoritative server sees every card during play.</li>
-            <li>The server can abort a ceremony before a completed transcript is published.</li>
-            <li>The deal guarantee requires one unpredictable non-colluding player contribution.</li>
-            <li>Full server and player collusion defeats the honest-contribution assumption.</li>
-          </ul>
+          <h2>Bounty receipt checks</h2>
+          <p>The browser performs these checks before displaying a verified receipt:</p>
+          <ol className="protocol-list">
+            <li>protocol version, proof system, circuit id and Barretenberg version match</li>
+            <li>circuit artifact and verification key hashes match the pinned values</li>
+            <li>the hand tag recomputes from room id and hand number</li>
+            <li>the catalog root recomputes from the eight fixed challenge leaves</li>
+            <li>draw and completion public inputs bind the same hand, seat, commitment, nonce and catalog root</li>
+            <li>draw mode has zero facts hash and zero nullifier</li>
+            <li>completion mode contains the receipt facts hash and nullifier</li>
+            <li>both UltraHonk proofs verify locally</li>
+            <li>the receipt award is exactly 20 proof points</li>
+          </ol>
         </div>
       </section>
     </main>
