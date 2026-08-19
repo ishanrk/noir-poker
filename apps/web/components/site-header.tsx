@@ -11,7 +11,6 @@ export function SiteHeader({ compact = false }: { compact?: boolean }) {
       </Link>
       <nav aria-label="Primary navigation">
         <Link href="/">Play</Link>
-        <Link href="/chips">Play chips</Link>
         <Link href="/rules">Rules</Link>
         <Link href="/motivation">Motivation</Link>
         <Link href="/protocol">Protocol</Link>
