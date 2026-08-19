@@ -40,7 +40,7 @@ export default function MotivationPage() {
         </article>
       </section>
 
-      <section className="motivation-story motivation-story-deck">
+      <section className="motivation-story motivation-story-deck motivation-story-text-only">
         <div className="motivation-story-copy">
           <p className="motivation-kicker">The deck</p>
           <h2>The server has to commit before it sees player randomness.</h2>
@@ -53,12 +53,6 @@ export default function MotivationPage() {
             So the server cannot keep trying completed decks until one favors a particular seat and
             then pretend that was the original random result.
           </p>
-        </div>
-        <div className="motivation-deck-scene" aria-hidden="true">
-          <span className="motivation-server-card">server</span>
-          <span className="motivation-player-card">player</span>
-          <span className="motivation-deck-card">?</span>
-          <i />
         </div>
       </section>
 
