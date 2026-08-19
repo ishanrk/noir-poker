@@ -8,7 +8,7 @@ import "./pages.css";
 
 export const metadata: Metadata = {
   title: "Noir Poker",
-  description: "Six-max poker with auditable deals and private zero-knowledge bounties",
+  description: "Six-max Texas Hold’em with auditable dealing and private zero-knowledge challenges",
   icons: { icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" },
 };
 
