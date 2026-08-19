@@ -11,33 +11,10 @@ const CHALLENGES = [
   { title: "Bluff and win with seven-deuce", kind: "seven-two" },
 ] as const;
 
-const CHALLENGE_RULES = [
-  {
-    title: "A challenge is dealt between hands",
-    body: "Every active player receives one random challenge for the next hand. The selection uses randomness from the player and server.",
-    kind: "draw",
-  },
-  {
-    title: "The challenge stays private",
-    body: "Only that player’s browser learns the challenge. The server and other players do not need the objective or the player’s hole cards while the hand is being played.",
-    kind: "private",
-  },
-  {
-    title: "The browser proves completion",
-    body: "After the hand, the browser checks whether the private condition was met. If it was, the browser generates a Noir proof for the same hidden challenge.",
-    kind: "proof",
-  },
-  {
-    title: "The proof is accepted once",
-    body: "The server verifies the UltraHonk proof before awarding 20 proof points. A nullifier prevents the same challenge from being claimed twice.",
-    kind: "once",
-  },
-] as const;
-
 function ChallengeVisual({ kind }: { kind: (typeof CHALLENGES)[number]["kind"] }) {
   if (kind === "flop") {
     return (
-      <div className="example-flop-clean" aria-hidden="true">
+      <div className="challenge-example-flop" aria-hidden="true">
         <span>2♣</span><span>8♥</span><span>K♠</span>
       </div>
     );
@@ -45,16 +22,17 @@ function ChallengeVisual({ kind }: { kind: (typeof CHALLENGES)[number]["kind"] }
 
   if (kind === "raise") {
     return (
-      <div className="example-raise-clean" aria-hidden="true">
-        <div className="raise-chip-stack"><i /><i /><i /></div>
-        <b>raise</b>
+      <div className="challenge-example-raise" aria-hidden="true">
+        <div className="raise-stack raise-stack-before"><i /><i /><i /></div>
+        <span>preflop raise</span>
+        <div className="raise-stack raise-stack-after"><i /><i /><i /><i /><i /></div>
       </div>
     );
   }
 
   if (kind === "showdown") {
     return (
-      <div className="example-showdown-clean" aria-hidden="true">
+      <div className="challenge-example-showdown" aria-hidden="true">
         <div><span>A♠</span><span>Q♦</span></div>
         <b>showdown</b>
       </div>
@@ -62,51 +40,54 @@ function ChallengeVisual({ kind }: { kind: (typeof CHALLENGES)[number]["kind"] }
   }
 
   return (
-    <div className="example-seven-two-clean" aria-hidden="true">
+    <div className="challenge-example-seven-two" aria-hidden="true">
       <div><span>7♠</span><span>2♥</span></div>
-      <b>bluff</b>
+      <b>win by fold</b>
     </div>
   );
 }
 
-function RuleVisual({ kind }: { kind: (typeof CHALLENGE_RULES)[number]["kind"] }) {
-  if (kind === "draw") {
+function ChallengePanel({ state }: { state: "assigned" | "hit" | "miss" | "verified" }) {
+  if (state === "assigned") {
     return (
-      <div className="rule-symbol rule-symbol-draw-clean" aria-hidden="true">
-        <span>?</span>
-      </div>
+      <article className="challenge-ui-sample">
+        <div className="challenge-ui-line"><span>Selection / next hand</span><strong>verified</strong></div>
+        <div className="challenge-ui-private"><span>Only this browser knows</span><strong>Reach showdown</strong><small>20 points, ready for next hand</small></div>
+      </article>
     );
   }
 
-  if (kind === "private") {
+  if (state === "hit") {
     return (
-      <div className="rule-symbol rule-symbol-private-clean" aria-hidden="true">
-        <span>?</span>
-        <b>private</b>
-      </div>
+      <article className="challenge-ui-sample">
+        <div className="challenge-ui-line"><span>Completion / hand 12</span><strong>ready</strong></div>
+        <p className="challenge-ui-objective">Only you see: Reach showdown</p>
+        <button type="button" tabIndex={-1}>Prove completion →</button>
+      </article>
     );
   }
 
-  if (kind === "proof") {
+  if (state === "miss") {
     return (
-      <div className="rule-symbol rule-symbol-proof-clean" aria-hidden="true">
-        <span className="rule-hidden-challenge">?</span>
-        <span className="rule-proof-check">✓</span>
-      </div>
+      <article className="challenge-ui-sample">
+        <div className="challenge-ui-line"><span>Completion / hand 12</span><strong>missed</strong></div>
+        <p>Challenge missed. No proof can be generated.</p>
+        <b className="challenge-ui-zero">+0 proof points</b>
+      </article>
     );
   }
 
   return (
-    <div className="rule-symbol rule-symbol-once-clean" aria-hidden="true">
-      <span className="rule-first-claim">✓</span>
-      <span className="rule-second-claim">×</span>
-    </div>
+    <article className="challenge-ui-sample challenge-ui-verified">
+      <div className="challenge-ui-line"><span>Completion / hand 12</span><strong>verified</strong></div>
+      <div className="challenge-ui-award"><strong>+20 proof points</strong><span>challenge still hidden</span><em>Open public verifier →</em></div>
+    </article>
   );
 }
 
 export default function RulesPage() {
   return (
-    <main className="site-shell rules-page">
+    <main className="site-shell rules-page rules-page-clear">
       <SiteHeader compact />
 
       <header className="rules-hero">
@@ -120,9 +101,9 @@ export default function RulesPage() {
       <section className="challenge-examples" aria-labelledby="challenge-examples-title">
         <div>
           <h2 id="challenge-examples-title">Challenge examples</h2>
-          <p>Examples of the private goals a player can be asked to complete.</p>
+          <p>The first three are in the current circuit catalog. Seven-deuce is the card-specific challenge design.</p>
         </div>
-        <div className="challenge-example-grid challenge-example-grid-clean">
+        <div className="challenge-example-grid challenge-example-grid-clear">
           {CHALLENGES.map((challenge) => (
             <article key={challenge.title}>
               <ChallengeVisual kind={challenge.kind} />
@@ -132,38 +113,51 @@ export default function RulesPage() {
         </div>
       </section>
 
-      <section className="rules-list" aria-label="Private challenge rules">
-        {CHALLENGE_RULES.map((rule) => (
-          <article className="rule-row rule-row-clean" key={rule.title}>
-            <div className="rule-copy">
-              <h2>{rule.title}</h2>
-              <p>{rule.body}</p>
-            </div>
-            <RuleVisual kind={rule.kind} />
-          </article>
-        ))}
+      <section className="challenge-ui-guide" aria-labelledby="challenge-ui-guide-title">
+        <header>
+          <h2 id="challenge-ui-guide-title">How one challenge works in the game</h2>
+          <p>These are small versions of the states shown by the real in-game challenge panel.</p>
+        </header>
+        <div className="challenge-ui-grid">
+          <div><h3>Dealt between hands</h3><ChallengePanel state="assigned" /></div>
+          <div><h3>If you complete it</h3><ChallengePanel state="hit" /></div>
+          <div><h3>If you miss it</h3><ChallengePanel state="miss" /></div>
+          <div><h3>After verification</h3><ChallengePanel state="verified" /></div>
+        </div>
       </section>
 
-      <section className="challenge-proof-help" aria-labelledby="challenge-proof-help-title">
-        <div>
-          <h2 id="challenge-proof-help-title">Checking another player&apos;s proof</h2>
-          <p>
-            Every accepted challenge has a public receipt at <code>/proof/&lt;nullifier&gt;</code>. Open
-            that link and the browser verifies both UltraHonk proofs locally. The challenge and hole
-            cards are not revealed.
-          </p>
+      <section className="proof-check-guide" aria-labelledby="proof-check-title">
+        <div className="proof-receipt-sample" aria-hidden="true">
+          <span>Public challenge verifier</span>
+          <h3>The challenge was completed.</h3>
+          <dl>
+            <div><dt>Private selection proof</dt><dd>verified</dd></div>
+            <div><dt>Completion proof</dt><dd>verified</dd></div>
+            <div><dt>Proof points</dt><dd>+20</dd></div>
+          </dl>
+          <div><button type="button" tabIndex={-1}>Run again</button><button type="button" tabIndex={-1}>Export JSON</button></div>
         </div>
-        <div>
-          <h3>Download</h3>
-          <p>Use <strong>Export JSON</strong> on the receipt page to save the proof receipt.</p>
-          <h3>Verify from the repository</h3>
-          <code>npm --prefix apps/web run proof:verify -- receipt.json</code>
+        <div className="proof-check-copy">
+          <h2 id="proof-check-title">Checking another player&apos;s proof</h2>
+          <p>
+            A public receipt exists only after the server accepts that player&apos;s completion proof. Its
+            page is <code>/proof/&lt;nullifier&gt;</code>, where the nullifier is the public id for that one-time claim.
+          </p>
+          <p>
+            Share that URL. Opening it downloads the receipt and verifies both UltraHonk proofs in the
+            visitor&apos;s browser. The challenge and the player&apos;s hole cards are not included in the receipt.
+          </p>
+          <p>
+            For an independent command-line check, choose <strong>Export JSON</strong> on the receipt page,
+            then run:
+          </p>
+          <code className="proof-check-command">npm --prefix apps/web run proof:verify -- receipt.json</code>
         </div>
       </section>
 
       <footer className="rules-links">
         <Link href="/motivation">Motivation</Link>
-        <Link href="/protocol">Cryptographic protocol</Link>
+        <Link href="/protocol">Protocol</Link>
       </footer>
     </main>
   );
