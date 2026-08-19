@@ -9,6 +9,7 @@ import "./refine.css";
 import "./finish.css";
 import "./protocol-v2.css";
 import "./semantic.css";
+import "./visual-cleanup.css";
 
 export const metadata: Metadata = {
   title: "Noir Poker",
