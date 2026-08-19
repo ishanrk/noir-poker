@@ -15,9 +15,9 @@
     "deploy:testnet": "bash scripts/deploy-testnet.sh"
   },
   "dependencies": {
-    "@aztec/accounts": "5.2.0",
-    "@aztec/aztec.js": "5.2.0",
-    "@aztec/wallets": "5.2.0"
+    "@aztec/accounts": "5.1.0",
+    "@aztec/aztec.js": "5.1.0",
+    "@aztec/wallets": "5.1.0"
   },
   "devDependencies": {
     "@types/node": "22.20.1",
