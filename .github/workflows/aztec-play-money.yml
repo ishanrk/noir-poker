@@ -1,0 +1,135 @@
+name: validate aztec play money
+
+on:
+  push:
+    branches:
+      - agent/noir-poker-aztec-play-money
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aztec-play-money
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/noir-poker-aztec-play-money
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install Aztec 5.1.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=5.1.0 bash -i <(curl -fsSL https://install.aztec.network/5.1.0)
+          echo "$HOME/.aztec/bin" >> "$GITHUB_PATH"
+
+      - name: Install Aztec dependencies
+        working-directory: aztec
+        run: npm install
+
+      - name: Check contract policy
+        working-directory: aztec
+        run: npm run test:protocol
+
+      - name: Compile contract and generate bindings
+        working-directory: aztec
+        run: npm run build
+
+      - name: Copy binding into the web app
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf apps/web/lib/aztec/artifacts
+          mkdir -p apps/web/lib/aztec/artifacts
+          cp -R aztec/artifacts/. apps/web/lib/aztec/artifacts/
+          test -s apps/web/lib/aztec/artifacts/PlayChips.ts
+
+      - name: Install web dependencies
+        working-directory: apps/web
+        run: npm install
+
+      - name: Validate web app
+        working-directory: apps/web
+        env:
+          NEXT_PUBLIC_AZTEC_NODE_URL: https://v5.testnet.rpc.aztec-labs.com
+          NEXT_PUBLIC_AZTEC_PLAY_CHIPS_ADDRESS: 0x1111111111111111111111111111111111111111111111111111111111111111
+          NEXT_PUBLIC_SERVER_URL: https://example.com
+        run: |
+          set -euo pipefail
+          npm run challenge:test
+          npm run deal:test
+          npm run receipt:test
+          npm run aztec:test
+          npm run lint
+          npm run build
+
+      - name: Validate Rust workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo test --workspace --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Start local Aztec network
+        shell: bash
+        run: |
+          set -euo pipefail
+          aztec start --local-network > "$RUNNER_TEMP/aztec-local.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/aztec-local.pid"
+
+      - name: Run contract integration
+        working-directory: aztec
+        env:
+          AZTEC_NODE_URL: http://127.0.0.1:8080
+        run: timeout 20m npm run test:local
+
+      - name: Check generated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          test -s aztec/package-lock.json
+          test -s apps/web/package-lock.json
+          test -s apps/web/lib/aztec/artifacts/PlayChips.ts
+
+      - name: Commit validated generated files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "noir-poker-aztec-validation"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            aztec/package-lock.json \
+            apps/web/package-lock.json \
+            apps/web/lib/aztec/artifacts
+          if ! git diff --cached --quiet; then
+            git commit -m "record validated aztec artifacts [skip ci]"
+            git push origin HEAD:agent/noir-poker-aztec-play-money
+          fi
+
+      - name: Upload validation files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aztec-play-money-validation
+          path: |
+            aztec/artifacts
+            aztec/target
+            aztec/package-lock.json
+            apps/web/lib/aztec/artifacts
+            apps/web/package-lock.json
+            ${{ runner.temp }}/aztec-local.log
+          if-no-files-found: warn
+          retention-days: 14
