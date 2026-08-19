@@ -129,6 +129,7 @@ jobs:
           echo "$?" >> artifacts/failure/status.txt
           git status --short > artifacts/failure/status-short.txt
           git diff --stat > artifacts/failure/diff-stat.txt
+          nl -ba apps/server/src/main.rs | sed -n '4135,4205p' > artifacts/failure/source/persistence-window.txt
           cp apps/web/lib/deal.ts artifacts/failure/source/deal.ts
           cp apps/web/lib/deal.test.ts artifacts/failure/source/deal.test.ts
           cp apps/web/lib/receipt.ts artifacts/failure/source/receipt.ts
