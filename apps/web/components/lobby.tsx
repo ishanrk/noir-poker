@@ -101,8 +101,7 @@ export function Lobby() {
     <div className="lobby">
       <form className="lobby-create" onSubmit={create}>
         <div className="form-heading">
-          <span>Create</span>
-          <h3>New table</h3>
+          <h3>New game</h3>
         </div>
 
         <fieldset className="seat-scale">
@@ -141,26 +140,22 @@ export function Lobby() {
 
         {!valid && <p className="form-error">Big blind must cover the small blind and stack.</p>}
         <button className="primary-action" type="submit" disabled={busy || !valid}>
-          Create fair table <span>→</span>
+          Create game <span>→</span>
         </button>
       </form>
 
       <form className="lobby-join" onSubmit={join}>
         <div className="form-heading">
-          <span>Join</span>
-          <h3>Existing table</h3>
+          <h3>Join game</h3>
         </div>
         <label className="line-input">
           Room id
           <input name="room" type="text" autoComplete="off" spellCheck="false" required />
         </label>
         <button className="text-action" type="submit" disabled={busy}>
-          Take a seat →
+          Join game →
         </button>
-        <p>
-          Your browser contributes 256 fresh random bits when you enter. The contribution
-          becomes public only after the hand is over.
-        </p>
+        <p>Your browser adds fresh randomness before the hand starts.</p>
       </form>
 
       {error && <p className="lobby-error">{error}</p>}
