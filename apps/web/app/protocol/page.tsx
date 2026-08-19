@@ -1,3 +1,4 @@
+import { ChallengeProofDemo } from "@/components/challenge-proof-demo";
 import { ProtocolDemo } from "@/components/protocol-demo";
 import { SiteHeader } from "@/components/site-header";
 
@@ -8,76 +9,71 @@ export default function ProtocolPage() {
 
       <header className="protocol-hero protocol-hero-new">
         <p className="protocol-kicker">Protocol</p>
-        <h1>Everything a player can verify.</h1>
-        <p>
-          The deck audit and challenge proof are public. The exact constructions are below for anyone
-          who wants to reproduce them from source.
-        </p>
+        <h1>Verify the deck. Verify a challenge.</h1>
+        <p>Start with the public verifier. Open the technical construction only if you need it.</p>
       </header>
 
       <section className="verify-board" aria-label="Available verification">
         <article>
           <span>Deal audit</span>
-          <h2>Rebuild the complete hand.</h2>
+          <h2>Rebuild all 52 card positions.</h2>
           <p>
             Open <code>/audit/&lt;room&gt;/&lt;hand&gt;</code>. The browser checks the server commitment,
-            player randomness, final seed, all 52 shuffle positions, hole cards, burns and board.
+            player randomness, final seed, shuffle, hole cards, burns and board.
           </p>
+          <p><strong>Download:</strong> choose Export JSON on the audit page.</p>
           <code>npm --prefix apps/web run deal:verify -- audit.json</code>
         </article>
         <article>
           <span>Challenge receipt</span>
           <h2>Verify selection and completion.</h2>
           <p>
-            Open <code>/proof/&lt;nullifier&gt;</code>. The browser checks both UltraHonk proofs while the
-            challenge, player secret and hole cards remain private.
+            Open <code>/proof/&lt;nullifier&gt;</code>. The browser verifies both UltraHonk proofs while the
+            challenge and hole cards remain private.
           </p>
+          <p><strong>Download:</strong> choose Export JSON on the receipt page.</p>
           <code>npm --prefix apps/web run proof:verify -- receipt.json</code>
         </article>
       </section>
 
-      <section className="protocol-demo-wrap" aria-label="Interactive deal construction">
-        <div className="protocol-demo-intro">
-          <h2>Deal construction</h2>
-          <p>Click through the same deterministic steps used by the Rust server and browser verifier.</p>
+      <section className="protocol-demo-wrap protocol-two-demos" aria-label="Interactive protocol demos">
+        <div className="protocol-demo-panel">
+          <div className="protocol-demo-intro">
+            <h2>Deal construction</h2>
+            <p>Click through the exact public sequence.</p>
+          </div>
+          <ProtocolDemo />
         </div>
-        <ProtocolDemo />
+        <div className="protocol-demo-panel">
+          <div className="protocol-demo-intro">
+            <h2>Challenge proof</h2>
+            <p>Move from a hidden challenge to a public result.</p>
+          </div>
+          <ChallengeProofDemo />
+        </div>
       </section>
 
       <section className="protocol-details-list">
         <details className="protocol-detail" open>
           <summary>
             <span>Deal generation</span>
-            <strong>commitment, player randomness, SHA 256 stream, Fisher Yates</strong>
+            <strong>commitment, player randomness, SHA 256, Fisher Yates</strong>
           </summary>
           <div className="protocol-detail-body">
             <h3>Server commitment</h3>
-            <p>
-              For room <code>R</code> and hand <code>h</code>, the server samples a 32 byte secret
-              <code>S</code> and persists this commitment before player randomness is accepted.
-            </p>
-            <code className="protocol-formula">SHA256(&quot;NPDEAL01&quot; || R[16] || u64_be(h) || S[32])</code>
+            <p>The server persists this value before player randomness is accepted.</p>
+            <code className="protocol-formula">SHA256(&quot;NPDEAL01&quot; || room[16] || u64_be(hand) || secret[32])</code>
 
-            <h3>Player randomness</h3>
-            <p>
-              Every occupied seat samples a fresh 32 byte value with the browser cryptographic random
-              generator. Seat order is encoded into the final seed input.
-            </p>
+            <h3>Final seed</h3>
+            <p>Every occupied seat adds a fresh 32 byte random value in fixed seat order.</p>
             <code className="protocol-formula">
-              SHA256(&quot;NPSEED01&quot; || R || u64_be(h) || player_count || seat_0 || share_0 || ... || S)
+              SHA256(&quot;NPSEED01&quot; || room || hand || player_count || seat_0 || share_0 || ... || secret)
             </code>
 
-            <h3>Shuffle</h3>
+            <h3>Shuffle and deal</h3>
             <p>
-              Card ids 0 through 51 use suit major order. SHA 256 counter blocks produce 32 bit words.
-              Rejection sampling removes modulo bias before each Fisher Yates swap.
-            </p>
-            <code className="protocol-formula">SHA256(&quot;NPSTRM01&quot; || seed || u64_be(counter))</code>
-
-            <h3>Deal map</h3>
-            <p>
-              Hole cards are dealt in two clockwise rounds beginning left of the dealer. The remaining
-              positions are burn, flop, burn, turn, burn, river.
+              SHA 256 counter output feeds rejection sampling and Fisher Yates. Hole cards are dealt
+              in two clockwise rounds, followed by burn, flop, burn, turn, burn, river.
             </p>
           </div>
         </details>
@@ -85,13 +81,12 @@ export default function ProtocolPage() {
         <details className="protocol-detail" id="challenge">
           <summary>
             <span>Challenge selection</span>
-            <strong>private secret, server randomness, fixed eight challenge catalog</strong>
+            <strong>private browser secret, server randomness, fixed eight challenge catalog</strong>
           </summary>
           <div className="protocol-detail-body">
             <p>
-              The browser first commits to a private 32 byte secret. The server persists that
-              commitment, then returns fresh randomness. The two values select one challenge from the
-              fixed eight leaf Merkle catalog.
+              The browser commits to a private secret first. The server then returns fresh randomness.
+              Together they select one of eight fixed challenge leaves.
             </p>
             <code className="protocol-formula">
               commitment = BLAKE2s(&quot;NPCOMM02&quot; || hand_tag || seat || secret)
@@ -100,8 +95,8 @@ export default function ProtocolPage() {
               selector = BLAKE2s(&quot;NPSELE02&quot; || hand_tag || seat || nonce || secret)
             </code>
             <p>
-              The draw proof shows that the committed secret produced the hidden catalog leaf and that
-              the leaf belongs to the published Merkle root. The challenge itself is not public.
+              The draw proof shows that this hidden leaf came from the published challenge catalog.
+              Examples include see the flop, raise before the flop, reach showdown and finish ahead.
             </p>
           </div>
         </details>
@@ -109,10 +104,10 @@ export default function ProtocolPage() {
         <details className="protocol-detail">
           <summary>
             <span>Challenge completion</span>
-            <strong>same hidden challenge, committed hand facts, one time claim</strong>
+            <strong>same hidden challenge, committed hand facts, one claim</strong>
           </summary>
           <div className="protocol-detail-body">
-            <p>The server commits six Boolean hand facts after settlement:</p>
+            <p>The circuit can use six hand facts:</p>
             <ul className="protocol-list">
               <li>saw the flop</li>
               <li>raised before the flop</li>
@@ -128,8 +123,8 @@ export default function ProtocolPage() {
               nullifier = BLAKE2s(&quot;NPNULL02&quot; || hand_tag || seat || secret)
             </code>
             <p>
-              Completion mode proves that the same hidden challenge is satisfied by those committed
-              facts. A valid claim awards 20 proof points. The nullifier prevents a second claim.
+              A valid completion proof awards 20 proof points. The nullifier prevents the same
+              challenge from being claimed twice.
             </p>
           </div>
         </details>
@@ -137,13 +132,13 @@ export default function ProtocolPage() {
         <details className="protocol-detail">
           <summary>
             <span>Noir and UltraHonk</span>
-            <strong>circuit source, public inputs, private witness, browser verifier</strong>
+            <strong>circuit source, witness, proof, browser verification</strong>
           </summary>
           <div className="protocol-detail-body">
             <p>
               The circuit is <code>circuits/challenge-v2/src/main.nr</code>. Nargo 1.0.0 beta 26
               compiles it. NoirJS builds the witness. Barretenberg 5.2.0 generates and verifies the
-              UltraHonk proof in the browser.
+              UltraHonk proof.
             </p>
             <div className="circuit-statement">
               <div>
@@ -172,13 +167,12 @@ export default function ProtocolPage() {
           </summary>
           <div className="protocol-detail-body">
             <p>
-              The server still sees cards during play and can abort before a hand settles. Deal
-              selection is protected when at least one player contributes unpredictable randomness.
+              The server still sees cards during play and can abort before settlement. Deal selection
+              is protected when at least one player contributes unpredictable randomness.
             </p>
             <p>
               Challenge completion is currently proven against hand facts committed by the server.
-              The challenge and hole cards stay private, but fully server independent challenge
-              verification still needs a public action transcript that reconstructs those facts.
+              Full server independent reconstruction of those facts still needs a public action transcript.
             </p>
           </div>
         </details>
