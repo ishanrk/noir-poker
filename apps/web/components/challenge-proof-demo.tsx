@@ -4,19 +4,28 @@ import { useState } from "react";
 
 const STEPS = [
   {
-    label: "Hidden challenge",
-    title: "Reach showdown",
-    copy: "Only the player browser sees the selected challenge.",
+    label: "Commit",
+    title: "The browser commits to a private secret.",
+    copy: "The server sees only a BLAKE2s commitment. After storing it, the server returns fresh public randomness.",
+    code: "commitment = BLAKE2s(hand, seat, secret)",
   },
   {
-    label: "Hand completes",
-    title: "Private evidence stays private",
-    copy: "The browser checks the hand facts needed by the hidden challenge.",
+    label: "Assign",
+    title: "Secret plus server randomness selects one challenge.",
+    copy: "The Noir circuit proves the hidden challenge is one of the eight fixed catalog definitions without revealing which definition was selected.",
+    code: "index = BLAKE2s(hand, seat, nonce, secret)[0] & 7",
   },
   {
-    label: "Public proof",
-    title: "Verified without opening it",
-    copy: "Anyone can verify the proof receipt. The challenge and hole cards stay hidden.",
+    label: "Complete",
+    title: "The same hidden challenge is checked against the hand.",
+    copy: "The circuit receives six private hand facts and proves that every required condition of the hidden challenge is satisfied.",
+    code: "objective_met(hidden challenge, private facts) = true",
+  },
+  {
+    label: "Verify",
+    title: "Anyone can verify both UltraHonk proofs.",
+    copy: "The receipt contains public bindings and proof bytes. The challenge definition, browser secret and private fact vector are not disclosed.",
+    code: "UltraHonkBackend.verifyProof(proof, publicInputs)",
   },
 ] as const;
 
@@ -44,9 +53,10 @@ export function ChallengeProofDemo() {
           <span className="challenge-demo-hole">A♠</span>
           <span className="challenge-demo-proof">✓</span>
         </div>
-        <div>
+        <div className="challenge-demo-copy">
           <strong>{value.title}</strong>
           <p>{value.copy}</p>
+          <code>{value.code}</code>
         </div>
       </div>
     </div>
