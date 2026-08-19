@@ -1,0 +1,39 @@
+
+> noir-poker-web@0.1.0 build
+> next build
+
+▲ Next.js 16.3.1 (Turbopack)
+✓ Running next.config.ts took 19ms
+⚠ No build cache found. Please configure build caching for faster rebuilds. Read more: https://nextjs.org/docs/messages/no-cache
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
+
+- Experiments (use with caution):
+  ⨯ useTypeScriptCli
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 3.8s
+  Running TypeScript ...
+  Finished TypeScript in 2.5s ...
+  Collecting page data using 3 workers ...
+  Generating static pages using 3 workers (0/4) ...
+  Generating static pages using 3 workers (1/4) 
+  Generating static pages using 3 workers (2/4) 
+  Generating static pages using 3 workers (3/4) 
+✓ Generating static pages using 3 workers (4/4) in 170ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /audit/[room]/[hand]
+├ ƒ /proof/[nullifier]
+├ ○ /protocol
+└ ƒ /table/[room]
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

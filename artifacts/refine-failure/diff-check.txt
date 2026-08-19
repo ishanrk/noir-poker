@@ -1,0 +1,14 @@
+artifacts/noir-poker-redesign-fairness.patch:975: trailing whitespace.
++ 
+artifacts/noir-poker-redesign-fairness.patch:994: trailing whitespace.
++ 
+artifacts/noir-poker-redesign-fairness.patch:3491: trailing whitespace.
++ 
+artifacts/noir-poker-redesign-fairness.patch:6611: trailing whitespace.
++ 
+artifacts/noir-poker-redesign-fairness.patch:6706: trailing whitespace.
++ 
+artifacts/noir-poker-redesign-fairness.patch:6724: trailing whitespace.
++ 
+artifacts/noir-poker-redesign-fairness.patch:6728: trailing whitespace.
++ 
