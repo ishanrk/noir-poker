@@ -15,6 +15,7 @@ RECEIPT = ROOT / "apps/web/lib/receipt.ts"
 CHALLENGE_PROOF = ROOT / "apps/web/lib/challenge-proof.ts"
 PROTOCOL_DEMO = ROOT / "apps/web/components/protocol-demo.tsx"
 PROTOCOL_PAGE = ROOT / "apps/web/app/protocol/page.tsx"
+GLOBALS = ROOT / "apps/web/app/globals.css"
 
 OLD_SEED = "7ee43ff91db755fb8deb2734d1c484ef9dcdfd0249cdab154ba10c467783db1f"
 NEW_SEED = "2804b581997cff7e45e6801f10130d4638188c6c19115f7741273282cbef08bd"
@@ -236,6 +237,12 @@ def fix_web() -> None:
     for path in (DEAL_TS, DEAL_TEST, PROTOCOL_DEMO):
         text = re.sub(r"\b(\d+)n\b", r"BigInt(\1)", path.read_text())
         path.write_text(text)
+
+    styles = GLOBALS.read_text()
+    blur = "  backdrop-filter: blur(10px);\n"
+    if styles.count(blur) != 1:
+        raise RuntimeError(f"expected one backdrop blur found {styles.count(blur)}")
+    GLOBALS.write_text(styles.replace(blur, "", 1))
 
 
 def fix_generated_source() -> None:
