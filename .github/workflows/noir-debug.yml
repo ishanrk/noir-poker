@@ -60,8 +60,9 @@ jobs:
           cat tools/regen/noir-tools.part.* | base64 --decode > "$RUNNER_TEMP/noir-tools.tar.xz"
           echo "db20d0ff5ffcb9541da5e09ec84b27d4ea7c6e9064dba4bd51f562fe5a449ec7  $RUNNER_TEMP/noir-tools.tar.xz" | sha256sum -c -
           tar -xJf "$RUNNER_TEMP/noir-tools.tar.xz" -C tools/regen
-          python -m py_compile tools/regen/common.py tools/regen/backend.py tools/regen/frontend.py tools/regen/apply.py
+          python -m py_compile tools/regen/common.py tools/regen/backend.py tools/regen/frontend.py tools/regen/apply.py tools/regen/persistence_fix.py
           PYTHONPATH=tools/regen python tools/regen/apply.py
+          python -S tools/regen/persistence_fix.py
           cargo fmt --all
 
       - name: Install pinned Noir and Barretenberg
