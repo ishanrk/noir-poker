@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-AZTEC_VERSION="${AZTEC_VERSION:-5.2.0}"
+AZTEC_VERSION="${AZTEC_VERSION:-5.1.0}"
 NODE_URL="${AZTEC_NODE_URL:-https://v5.testnet.rpc.aztec-labs.com}"
 SPONSORED_FPC_ADDRESS="${SPONSORED_FPC_ADDRESS:-0x130925fbd734a252e3d8ddff87f6c346052dd5c13314eb96026b32baa1923296}"
 ACCOUNT_ALIAS="${AZTEC_ACCOUNT_ALIAS:-noir-poker-deployer}"
