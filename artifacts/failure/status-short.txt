@@ -26,7 +26,6 @@
  M artifacts/failure/cargo-test.log
  M artifacts/failure/challenge-test.log
  M artifacts/failure/deal-test.log
- M artifacts/failure/diff-check.log
  D artifacts/failure/diff-stat.txt
  M artifacts/failure/generated.patch
  M artifacts/failure/next-build.log

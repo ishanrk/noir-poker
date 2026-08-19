@@ -2,4 +2,4 @@
 [1m[92m    Checking[0m challenge-core v0.1.0 (/home/runner/work/noir-poker/noir-poker/crates/challenge-core)
 [1m[92m    Checking[0m game-core v0.1.0 (/home/runner/work/noir-poker/noir-poker/crates/game-core)
 [1m[92m    Checking[0m server v0.1.0 (/home/runner/work/noir-poker/noir-poker/apps/server)
-[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 2.31s
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 2.57s

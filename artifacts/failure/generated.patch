@@ -784,7 +784,7 @@ index 0000000..71a23ba
 +    }
 +}
 diff --git a/apps/server/src/main.rs b/apps/server/src/main.rs
-index 058be4d..9493cc4 100644
+index 058be4d..1e5b5dc 100644
 --- a/apps/server/src/main.rs
 +++ b/apps/server/src/main.rs
 @@ -1,4 +1,5 @@
@@ -1419,6 +1419,15 @@ index 058be4d..9493cc4 100644
              .execute(db.pool())
              .await
              .unwrap();
+@@ -3283,7 +3554,7 @@ mod tests {
+         assert_eq!(restored_hand.game.pot, 0);
+ 
+         let latest_id = Uuid::new_v4();
+-        let latest_seed = [0x24; 32];
++        let latest_seed = [0x24u8; 32];
+ 
+         sqlx::query(
+             "INSERT INTO hands (id, room_id, hand_no, seed, dealer, starting_stacks) \
 @@ -3297,13 +3568,20 @@ mod tests {
          .await
          .unwrap();

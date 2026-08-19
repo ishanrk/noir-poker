@@ -2,11 +2,11 @@
 [1m[92m     Running[0m unittests src/main.rs (target/debug/deps/server-3e49819e4ce08812)
 
 running 1 test
-Scheme is: ultra_honk, num threads: 4 (mem: 11.90 MiB)
-UltraVerifier: verification failed at reduction step (mem: 11.90 MiB)
-Proof verification failed (mem: 11.90 MiB)
-Proof verified successfully (mem: 11.90 MiB)
+Scheme is: ultra_honk, num threads: 4 (mem: 11.89 MiB)
+UltraVerifier: verification failed at reduction step (mem: 11.89 MiB)
+Proof verification failed (mem: 11.89 MiB)
+Proof verified successfully (mem: 11.89 MiB)
 test tests::real_claim ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 40 filtered out; finished in 13.44s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 40 filtered out; finished in 13.51s
 
