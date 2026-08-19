@@ -352,11 +352,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(())
 }
 
-#[cfg(test)]
-fn app(state: AppState, origin: HeaderValue) -> Router {
-    app_with_origins(state, vec![origin])
-}
-
 fn app_with_origins(state: AppState, origins: Vec<HeaderValue>) -> Router {
     Router::new()
         .route("/health", get(health))

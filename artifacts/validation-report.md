@@ -1,32 +1,26 @@
-# Noir Poker redesign and fairness patch
+# Noir Poker validated redesign
 
 Baseline: `340a9be579c2ca26715146b4c79ff0c8f681a1b5`
 
-Branch: `agent/noir-poker-ui-zk-redesign`
+Patch SHA-256: `b629d18bf102601d5315c2365a0008e0b3f1f325898cdeeb72feea300db016eb`
 
-Patch SHA-256: `623ce984c5e9378437cc6a07f9915c5799d3caa52113dc9e296e3059a4ac7196`
+## Validation
 
-Source files changed: 41
-
-Insertions: 3246
-
-Deletions: 2245
-
-## Validated
-
-- patch applies cleanly to a second detached worktree at the exact baseline
-- source and reapplied patch diffs are byte-for-byte identical
-- Rust formatting, workspace tests and Clippy with warnings denied
-- TypeScript challenge, deal and receipt binding tests
+- Rust format, workspace tests and Clippy with warnings denied
+- challenge, deal and receipt binding tests
 - ESLint and production Next.js build
-- PostgreSQL persistence and restart recovery tests
 - pinned Noir 1.0.0-beta.26 artifact rebuild
-- pinned Barretenberg 5.2.0 real proof generation and native server verification
-- public two-proof bounty receipt path
-- no numeric spinner controls
-- no dependency-defined shuffle implementation
-- no gradients, glass blur or generic pill-card styling
+- pinned Barretenberg 5.2.0 real proof verification
+- PostgreSQL persistence/restart and real bounty claim tests
+- full patch applied to a detached checkout at the exact baseline
+- complete suite executed against the reapplied patch
+- reapplied source diff byte-for-byte identical to the stored patch
+- no numeric spinners, gradients, glass blur, dot-separated product copy or hosted localhost fallback
+
+## Deployment
+
+Hosted web builds require `NEXT_PUBLIC_SERVER_URL`. The Rust server accepts comma-separated `WEB_ORIGINS` and remains compatible with a single `WEB_ORIGIN`. SQLx migrations run automatically during server startup.
 
 ## Security scope
 
-The deal transcript is commit/reveal auditable after settlement. The authoritative server still sees cards during play. This is not mental poker, does not prevent aborts, and assumes at least one non-colluding player supplies unpredictable entropy after the server commitment is durable.
+Settled deals are independently auditable. The authoritative server still sees cards and can abort. The completed-seed selection guarantee requires at least one unpredictable non-colluding player entropy share.

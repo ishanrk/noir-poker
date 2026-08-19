@@ -33,7 +33,7 @@ export function ProtocolDemo() {
           <span>{labels[step]}</span>
           <code>
             {step === 0 && `${encodeHex(values.commitment).slice(0, 32)}…`}
-            {step === 1 && "seat 0 · seat 1 · seat 2"}
+            {step === 1 && "seat 0, seat 1, seat 2"}
             {step === 2 && values.deck.slice(0, 12).map(cardValue).join("  ")}
             {step === 3 && values.layout.board.map(cardValue).join("  ")}
           </code>

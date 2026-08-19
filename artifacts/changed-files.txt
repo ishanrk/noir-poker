@@ -22,6 +22,7 @@ M	apps/web/components/multiplayer-game.tsx
 M	apps/web/components/proof-receipt.tsx
 A	apps/web/components/protocol-demo.tsx
 M	apps/web/components/seat.tsx
+A	apps/web/components/site-footer.tsx
 A	apps/web/components/site-header.tsx
 M	apps/web/components/table.tsx
 M	apps/web/lib/challenge-proof.ts

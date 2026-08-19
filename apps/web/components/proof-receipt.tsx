@@ -164,7 +164,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
               <article>
                 <span>Public</span>
                 <strong>
-                  Room {receipt.room.slice(0, 8)} · hand {receipt.hand_no} · seat {receipt.seat + 1}
+                  Room {receipt.room.slice(0, 8)}, hand {receipt.hand_no}, seat {receipt.seat + 1}
                 </strong>
               </article>
               <article>
@@ -173,7 +173,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
               </article>
               <article>
                 <span>Toolchain</span>
-                <strong>Noir · UltraHonk · Barretenberg {receipt.bb_version}</strong>
+                <strong>Noir, UltraHonk, Barretenberg {receipt.bb_version}</strong>
               </article>
               <article>
                 <span>Replay guard</span>

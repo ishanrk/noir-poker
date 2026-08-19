@@ -784,7 +784,7 @@ index 0000000..71a23ba
 +    }
 +}
 diff --git a/apps/server/src/main.rs b/apps/server/src/main.rs
-index 058be4d..3f37e5b 100644
+index 058be4d..32a57ca 100644
 --- a/apps/server/src/main.rs
 +++ b/apps/server/src/main.rs
 @@ -1,4 +1,5 @@
@@ -793,7 +793,13 @@ index 058be4d..3f37e5b 100644
  mod proof;
  mod room;
  
-@@ -30,14 +31,14 @@ use uuid::Uuid;
+@@ -25,19 +26,19 @@ use serde::{Deserialize, Serialize};
+ use sha2::{Digest, Sha256};
+ use tokio::net::TcpListener;
+ use tokio::sync::{Mutex, broadcast};
+-use tower_http::cors::CorsLayer;
++use tower_http::cors::{AllowOrigin, CorsLayer};
+ use uuid::Uuid;
  
  use crate::db::{
      ChallengeEntropy, ClaimUpdate, Db, DrawUpdate, NewAction, NewChallenge, NewHand, ProofReceipt,
@@ -937,7 +943,17 @@ index 058be4d..3f37e5b 100644
      proof_system: &'static str,
      circuit_id: &'static str,
      bb_version: &'static str,
-@@ -257,9 +339,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+@@ -248,44 +330,128 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+     let port: u16 = env::var("PORT")
+         .unwrap_or_else(|_| "3001".to_owned())
+         .parse()?;
+-    let origin: HeaderValue = env::var("WEB_ORIGIN")
+-        .unwrap_or_else(|_| "http://localhost:3000".to_owned())
+-        .parse()?;
++    let origins = web_origins()?;
+     let database_url =
+         env::var("DATABASE_URL").map_err(|_| io::Error::other("DATABASE_URL missing"))?;
+     let bb = env::var("BB_PATH").map_err(|_| io::Error::other("BB_PATH missing"))?;
      let vk = env::var("CHALLENGE_VK_PATH")
          .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/zk/challenge_v2.vk").to_owned());
      let db = Db::connect(&database_url).await?;
@@ -948,8 +964,20 @@ index 058be4d..3f37e5b 100644
 +    attach_fairness(&db, &rooms).await?;
      let listener = TcpListener::bind(("0.0.0.0", port)).await?;
  
-     axum::serve(listener, app(AppState::new(db, rooms, proof), origin)).await?;
-@@ -273,6 +357,7 @@ fn app(state: AppState, origin: HeaderValue) -> Router {
+-    axum::serve(listener, app(AppState::new(db, rooms, proof), origin)).await?;
++    axum::serve(
++        listener,
++        app_with_origins(AppState::new(db, rooms, proof), origins),
++    )
++    .await?;
+     Ok(())
+ }
+ 
+-fn app(state: AppState, origin: HeaderValue) -> Router {
++fn app_with_origins(state: AppState, origins: Vec<HeaderValue>) -> Router {
+     Router::new()
+         .route("/health", get(health))
+         .route("/rooms", post(create_room))
          .route("/rooms/{room}/join", post(join_room))
          .route("/rooms/{room}/ws", get(room_ws))
          .route("/proofs/{nullifier}", get(proof_receipt))
@@ -957,7 +985,32 @@ index 058be4d..3f37e5b 100644
          .with_state(state)
          .layer(
              CorsLayer::new()
-@@ -286,6 +371,67 @@ async fn health() -> &'static str {
+-                .allow_origin(origin)
++                .allow_origin(AllowOrigin::list(origins))
+                 .allow_methods([Method::GET, Method::POST])
+                 .allow_headers([CONTENT_TYPE]),
+         )
+ }
+ 
++fn web_origins() -> Result<Vec<HeaderValue>, Box<dyn std::error::Error + Send + Sync>> {
++    let raw = env::var("WEB_ORIGINS")
++        .or_else(|_| env::var("WEB_ORIGIN"))
++        .unwrap_or_else(|_| "http://localhost:3000".to_owned());
++    let origins = raw
++        .split(',')
++        .map(str::trim)
++        .filter(|origin| !origin.is_empty())
++        .map(str::parse)
++        .collect::<Result<Vec<HeaderValue>, _>>()?;
++
++    if origins.is_empty() {
++        return Err(io::Error::other("WEB_ORIGINS empty").into());
++    }
++
++    Ok(origins)
++}
++
+ async fn health() -> &'static str {
      "ok"
  }
  
@@ -1025,7 +1078,7 @@ index 058be4d..3f37e5b 100644
  async fn proof_receipt(
      AxumState(state): AxumState<AppState>,
      Path(nullifier): Path<String>,
-@@ -305,6 +451,7 @@ async fn proof_receipt(
+@@ -305,6 +471,7 @@ async fn proof_receipt(
  }
  
  fn receipt_view(receipt: ProofReceipt) -> Result<ReceiptView, ()> {
@@ -1033,7 +1086,7 @@ index 058be4d..3f37e5b 100644
      let hand_tag = receipt.hand_tag.try_into().map_err(|_| ())?;
      let commitment = receipt.commitment.try_into().map_err(|_| ())?;
      let nonce = receipt.nonce.try_into().map_err(|_| ())?;
-@@ -320,6 +467,8 @@ fn receipt_view(receipt: ProofReceipt) -> Result<ReceiptView, ()> {
+@@ -320,6 +487,8 @@ fn receipt_view(receipt: ProofReceipt) -> Result<ReceiptView, ()> {
  
      Ok(ReceiptView {
          protocol_version: PROTOCOL_VERSION,
@@ -1042,7 +1095,7 @@ index 058be4d..3f37e5b 100644
          proof_system: PROOF_SYSTEM,
          circuit_id: CIRCUIT_ID,
          bb_version: BB_VERSION,
-@@ -342,23 +491,27 @@ fn receipt_view(receipt: ProofReceipt) -> Result<ReceiptView, ()> {
+@@ -342,23 +511,27 @@ fn receipt_view(receipt: ProofReceipt) -> Result<ReceiptView, ()> {
  
  async fn create_room(
      AxumState(state): AxumState<AppState>,
@@ -1082,7 +1135,7 @@ index 058be4d..3f37e5b 100644
          .await
          .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot create room"))?;
      state
-@@ -380,7 +533,10 @@ async fn create_room(
+@@ -380,7 +553,10 @@ async fn create_room(
  async fn join_room(
      AxumState(state): AxumState<AppState>,
      Path(id): Path<Uuid>,
@@ -1093,7 +1146,7 @@ index 058be4d..3f37e5b 100644
      let room = find_room(&state, id)
          .await
          .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
-@@ -395,7 +551,13 @@ async fn join_room(
+@@ -395,7 +571,13 @@ async fn join_room(
          .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "revision limit reached"))?;
      let final_join = seat + 1 == room.config.players;
      let seed = if final_join {
@@ -1108,7 +1161,7 @@ index 058be4d..3f37e5b 100644
      } else {
          None
      };
-@@ -418,13 +580,38 @@ async fn join_room(
+@@ -418,13 +600,38 @@ async fn join_room(
          next_seq: 0,
          actions: Vec::new(),
      });
@@ -1154,7 +1207,7 @@ index 058be4d..3f37e5b 100644
  
      Ok(Json(SeatResponse {
          room: id,
-@@ -521,7 +708,10 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
+@@ -521,7 +728,10 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                      } => {
                          claim_room(&state, id, seat, hand_no, &proof, &public_inputs).await
                      }
@@ -1166,7 +1219,7 @@ index 058be4d..3f37e5b 100644
                      ClientMessage::Auth { .. } => {
                          send_error(&mut socket, "already authenticated").await;
                          continue;
-@@ -829,51 +1019,71 @@ fn claim_matches(inputs: ProofInputs, claim: PendingClaim) -> bool {
+@@ -829,51 +1039,71 @@ fn claim_matches(inputs: ProofInputs, claim: PendingClaim) -> bool {
          && inputs.nullifier != [0; 32]
  }
  
@@ -1273,7 +1326,7 @@ index 058be4d..3f37e5b 100644
      Ok(())
  }
  
-@@ -890,9 +1100,16 @@ fn room_message(id: Uuid, room: &Room, seat: usize) -> ServerMessage {
+@@ -890,9 +1120,16 @@ fn room_message(id: Uuid, room: &Room, seat: usize) -> ServerMessage {
              rev: room.rev,
              view: Box::new(room_view(id, room, hand, seat)),
          },
@@ -1293,7 +1346,7 @@ index 058be4d..3f37e5b 100644
          },
      }
  }
-@@ -900,6 +1117,21 @@ fn room_message(id: Uuid, room: &Room, seat: usize) -> ServerMessage {
+@@ -900,6 +1137,21 @@ fn room_message(id: Uuid, room: &Room, seat: usize) -> ServerMessage {
  fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
      let mut view = seat_view(&hand.game, seat);
  
@@ -1315,7 +1368,7 @@ index 058be4d..3f37e5b 100644
      for (player, stored) in view.players.iter_mut().zip(&room.seats) {
          player.proof_points = stored.proof_points;
      }
-@@ -923,6 +1155,10 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
+@@ -923,6 +1175,10 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
          });
  
          let next_no = hand.no.checked_add(1).expect("valid hand number");
@@ -1326,7 +1379,7 @@ index 058be4d..3f37e5b 100644
          view.challenge = Some(challenge_view(
              next_no,
              hand_tag(*id.as_bytes(), next_no),
-@@ -963,6 +1199,21 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
+@@ -963,6 +1219,21 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
      view
  }
  
@@ -1348,7 +1401,7 @@ index 058be4d..3f37e5b 100644
  fn challenge_view(
      hand_no: u64,
      hand_tag: [u8; 32],
-@@ -1015,13 +1266,6 @@ fn seat_for_token(room: &Room, token: Uuid) -> Option<usize> {
+@@ -1015,13 +1286,6 @@ fn seat_for_token(room: &Room, token: Uuid) -> Option<usize> {
  }
  
  // server seed for new hand
@@ -1362,7 +1415,7 @@ index 058be4d..3f37e5b 100644
  fn secure_nonce() -> Result<[u8; 32], getrandom::Error> {
      let mut nonce = [0u8; 32];
  
-@@ -1093,6 +1337,28 @@ const fn hex_nibble(byte: u8) -> Option<u8> {
+@@ -1093,6 +1357,28 @@ const fn hex_nibble(byte: u8) -> Option<u8> {
      }
  }
  
@@ -1391,7 +1444,7 @@ index 058be4d..3f37e5b 100644
  fn restore_rooms(stored: Vec<StoredRoom>) -> Result<HashMap<Uuid, Arc<Mutex<Room>>>, io::Error> {
      let mut rooms = HashMap::with_capacity(stored.len());
  
-@@ -1258,6 +1524,8 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
+@@ -1258,6 +1544,8 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
          config,
          seats,
          hand,
@@ -1400,7 +1453,7 @@ index 058be4d..3f37e5b 100644
          current_challenges,
          next_challenges,
          rev,
-@@ -1606,6 +1874,9 @@ fn seat_view(game: &State, seat: usize) -> SeatView {
+@@ -1606,6 +1894,9 @@ fn seat_view(game: &State, seat: usize) -> SeatView {
  
      SeatView {
          players,
@@ -1410,7 +1463,7 @@ index 058be4d..3f37e5b 100644
          hole: game.hole[seat].map(card_view),
          board: game.board.iter().copied().map(card_view).collect(),
          pot: game.pot,
-@@ -1925,8 +2196,12 @@ mod tests {
+@@ -1925,8 +2216,12 @@ mod tests {
              .into_iter()
              .find(|room| room.id == id)
              .unwrap();
@@ -1424,7 +1477,7 @@ index 058be4d..3f37e5b 100644
      }
  
      async fn persist(db: &Db, id: Uuid, room: &mut Room, seat: usize, action: Action) {
-@@ -2875,7 +3150,7 @@ mod tests {
+@@ -2875,7 +3170,7 @@ mod tests {
          let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
          let db = Db::connect(&url).await.unwrap();
  
@@ -1433,7 +1486,7 @@ index 058be4d..3f37e5b 100644
              .execute(db.pool())
              .await
              .unwrap();
-@@ -3283,7 +3558,7 @@ mod tests {
+@@ -3283,7 +3578,7 @@ mod tests {
          assert_eq!(restored_hand.game.pot, 0);
  
          let latest_id = Uuid::new_v4();
@@ -1442,7 +1495,7 @@ index 058be4d..3f37e5b 100644
  
          sqlx::query(
              "INSERT INTO hands (id, room_id, hand_no, seed, dealer, starting_stacks) \
-@@ -3297,13 +3572,20 @@ mod tests {
+@@ -3297,13 +3592,20 @@ mod tests {
          .await
          .unwrap();
  
@@ -1469,7 +1522,7 @@ index 058be4d..3f37e5b 100644
  
          let ready_id = Uuid::new_v4();
          let ready_first = Uuid::new_v4();
-@@ -3316,44 +3598,68 @@ mod tests {
+@@ -3316,44 +3618,68 @@ mod tests {
              big_blind: 10,
          };
          let ready_stacks = vec![100, 100];
@@ -1551,7 +1604,7 @@ index 058be4d..3f37e5b 100644
              1,
          );
  
-@@ -3810,37 +4116,61 @@ mod tests {
+@@ -3810,37 +4136,61 @@ mod tests {
              ..ready_config
          };
          let short_stacks = vec![10, 10];
@@ -1621,7 +1674,7 @@ index 058be4d..3f37e5b 100644
              1,
          );
  
-@@ -3903,7 +4233,7 @@ mod tests {
+@@ -3903,7 +4253,7 @@ mod tests {
          let bb = std::env::var("BB_PATH").expect("BB_PATH");
          let db = Db::connect(&url).await.unwrap();
  
@@ -1858,10 +1911,10 @@ index 0000000..ae255af
 +  return <DealAuditView room={room} hand={handNo} />;
 +}
 diff --git a/apps/web/app/globals.css b/apps/web/app/globals.css
-index 0060232..7bb248a 100644
+index 0060232..5873664 100644
 --- a/apps/web/app/globals.css
 +++ b/apps/web/app/globals.css
-@@ -1,1017 +1,586 @@
+@@ -1,1017 +1,616 @@
  :root {
 -  color-scheme: dark;
 -  --page: #090b0b;
@@ -1963,7 +2016,7 @@ index 0060232..7bb248a 100644
 +  top: 0;
 +  height: 66px;
 +  display: grid;
-+  grid-template-columns: 1fr auto 1fr;
++  grid-template-columns: 1fr auto;
 +  align-items: center;
 +  gap: 28px;
 +  padding: 0 max(24px, calc((100vw - 1120px) / 2));
@@ -1999,8 +2052,7 @@ index 0060232..7bb248a 100644
    font-weight: 700;
 -  letter-spacing: 0.18em;
 -  text-transform: uppercase;
-+  text-decoration: none;
- }
+-}
 -
 -.lobby {
 -  display: grid;
@@ -2016,7 +2068,8 @@ index 0060232..7bb248a 100644
 -  align-content: start;
 -  gap: 17px;
 -  padding: 28px 0 32px;
--}
++  text-decoration: none;
+ }
 -
 -.lobby-section + .lobby-section {
 -  margin-left: 32px;
@@ -2212,7 +2265,7 @@ index 0060232..7bb248a 100644
 +  border-radius: 50%;
    content: "";
 -  pointer-events: none;
--}
+ }
 -
 -.table-label {
 -  position: absolute;
@@ -2242,7 +2295,7 @@ index 0060232..7bb248a 100644
 -  gap: 12px;
 -  width: max-content;
 -  transform: translate(-50%, -50%);
- }
+-}
 -
 -.board {
 -  display: flex;
@@ -2259,7 +2312,7 @@ index 0060232..7bb248a 100644
 +.hero-copy { position: relative; z-index: 2; }
 +.hero-copy h1 {
 +  max-width: 800px;
-+  margin: 12px 0 24px;
++  margin: 0 0 24px;
 +  font-family: Georgia, "Times New Roman", serif;
 +  font-size: clamp(48px, 6.4vw, 80px);
 +  font-weight: 500;
@@ -2376,11 +2429,11 @@ index 0060232..7bb248a 100644
 -
 -.seat-4 {
 -  top: 18%;
--  right: 0;
+   right: 0;
 -}
 -
 -.seat-5 {
-   right: 0;
+-  right: 0;
 -  bottom: 18%;
 -}
 -
@@ -2414,7 +2467,7 @@ index 0060232..7bb248a 100644
 -  border-bottom: 1px solid var(--line);
 -  background: rgb(9 11 11 / 94%);
 -  text-align: center;
--}
+ }
 -
 -.seat-panel strong {
 -  overflow: hidden;
@@ -2445,7 +2498,7 @@ index 0060232..7bb248a 100644
 -
 -.seat-winner .seat-panel {
 -  background: #151711;
- }
+-}
 -
 -.seat-panel .seat-award {
 -  color: #efd78e;
@@ -2521,6 +2574,11 @@ index 0060232..7bb248a 100644
 -.state-ok,
 -.protocol-list .state-ok {
 -  color: var(--success);
+-}
+-
+-.contract-block {
+-  display: grid;
+-  gap: 10px;
 +.hero-proof-line span::before {
 +  position: absolute;
 +  top: -4px;
@@ -2531,17 +2589,10 @@ index 0060232..7bb248a 100644
 +  content: "";
  }
  
--.contract-block {
-+.lobby-wrap {
-   display: grid;
--  gap: 10px;
--}
--
 -.contract-divider {
 -  height: 1px;
 -  background: var(--line);
-+  grid-template-columns: 180px minmax(0, 1fr);
-+  gap: 30px;
++.lobby-wrap {
 +  width: min(100% - 40px, 1040px);
 +  margin: 0 auto;
 +  padding: 90px 0 100px;
@@ -2713,7 +2764,7 @@ index 0060232..7bb248a 100644
 +.lobby { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(260px, 0.75fr); margin-top: 42px; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
 +.lobby-create, .lobby-join { display: grid; align-content: start; gap: 24px; padding: 32px 0 38px; }
 +.lobby-join { margin-left: 40px; padding-left: 40px; border-left: 1px solid var(--line); }
-+.form-heading h3 { margin: 7px 0 0; font-family: Georgia, "Times New Roman", serif; font-size: 27px; font-weight: 500; }
++.form-heading h3 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 27px; font-weight: 500; }
 +.seat-scale { margin: 0; padding: 0; border: 0; }
 +.seat-scale legend, .scale-control > span:first-child, .line-input {
 +  color: #535a63;
@@ -2725,14 +2776,14 @@ index 0060232..7bb248a 100644
 -
 -.action-copy strong {
 -  font-size: 13px;
- }
+-}
 -
 -.actions {
 -  display: grid;
 -  flex: 1;
 -  grid-template-columns: repeat(5, minmax(0, 1fr));
 -  gap: 7px;
--}
+ }
 -
 -.actions button,
 -.actions input {
@@ -2865,8 +2916,258 @@ index 0060232..7bb248a 100644
 -}
 -
 -.proof-privacy > div {
--  display: flex;
--  justify-content: space-between;
++  font-weight: 700;
++  letter-spacing: 0.03em;
++}
++.primary-action { color: white; background: var(--blue); box-shadow: 6px 6px 0 var(--lime); }
++.primary-action:hover { background: var(--blue-dark); transform: translate(2px, 2px); box-shadow: 4px 4px 0 var(--lime); }
++.text-action { min-height: auto; padding: 0 0 3px; border-width: 0 0 2px; }
++.lobby-join > p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
++.form-error, .lobby-error, .proof-error { margin: 0; color: var(--danger); font-size: 12px; line-height: 1.5; }
++.lobby-error { grid-column: 1 / -1; padding: 14px 0; border-top: 1px solid var(--line); }
++.trust-strip { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); background: var(--paper); }
++.trust-strip article { min-height: 210px; padding: 34px max(24px, calc((100vw - 1120px) / 6)); }
++.trust-strip article + article { border-left: 1px solid var(--line); }
++.trust-strip span { color: var(--blue); font-family: "Courier New", monospace; font-size: 10px; font-weight: 700; text-transform: uppercase; }
++.trust-strip strong { display: block; margin: 18px 0 10px; font-family: Georgia, "Times New Roman", serif; font-size: 23px; font-weight: 500; }
++.trust-strip p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
++
++.table-page { padding-bottom: 80px; }
++.table-page-header { display: flex; justify-content: space-between; align-items: end; gap: 30px; width: min(100% - 40px, 1120px); margin: 0 auto; padding: 34px 0 24px; border-bottom: 1px solid var(--line); }
++.table-page-header h1 { margin: 5px 0 0; font-family: Georgia, "Times New Roman", serif; font-size: 42px; font-weight: 500; letter-spacing: -0.035em; }
++.table-page-header > p { max-width: 470px; margin: 0; color: var(--muted); font-size: 12px; text-align: right; }
++.table-shell { width: min(100% - 24px, 1120px); margin: 20px auto 0; }
++.table-status, .room-status, .waiting-room { display: grid; min-height: 480px; place-content: center; justify-items: center; gap: 15px; text-align: center; }
++.room-status strong, .waiting-room h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 31px; font-weight: 500; }
++.waiting-room { width: min(720px, calc(100% - 40px)); margin: 0 auto; }
++.waiting-room > p:last-of-type { max-width: 540px; margin: 0; color: var(--muted); line-height: 1.6; }
++.connection-bar { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 9px; color: var(--danger); font-size: 12px; }
++.connection-bar button { border: 0; border-bottom: 1px solid currentColor; background: none; color: inherit; cursor: pointer; }
++
++.deal-integrity { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 20px; align-items: center; padding: 18px 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
++.deal-integrity-compact { width: min(820px, 100%); margin: 0 auto 8px; padding: 11px 0; }
++.deal-stack { position: relative; width: 62px; height: 44px; }
++.deal-stack i { position: absolute; width: 36px; height: 48px; border: 1px solid var(--ink); background: var(--paper); }
++.deal-stack i:nth-child(1) { left: 0; top: 0; }
++.deal-stack i:nth-child(2) { left: 7px; top: -4px; background: var(--blue); }
++.deal-stack i:nth-child(3) { left: 14px; top: -8px; background: var(--lime); }
++.deal-stack span { position: absolute; z-index: 2; top: 6px; left: 26px; display: grid; width: 21px; height: 21px; place-items: center; color: var(--blue-dark); font-size: 12px; font-weight: 800; }
++.deal-stack[data-state="sealed"] i:nth-child(3) { animation: seal-breathe 2.6s ease-in-out infinite; }
++.deal-stack[data-state="revealed"] i:nth-child(3) { background: var(--paper); }
++.deal-copy { min-width: 0; display: grid; gap: 4px; }
++.deal-copy strong { font-family: Georgia, "Times New Roman", serif; font-size: 18px; font-weight: 500; }
++.deal-copy code { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; }
++.deal-actions { display: grid; justify-items: end; gap: 7px; }
++.deal-actions a { color: var(--blue); font-size: 11px; font-weight: 700; text-decoration-thickness: 1px; text-underline-offset: 3px; }
++.deal-state { color: var(--success); font-family: "Courier New", monospace; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
++
++.table-stage { position: relative; width: 100%; height: clamp(580px, 64vw, 720px); }
++.table-surface { position: absolute; inset: 14% 9%; overflow: hidden; border: 10px solid var(--ink); border-radius: 50%; background: var(--felt); box-shadow: 9px 9px 0 var(--lime); }
++.table-surface::after { position: absolute; inset: 16px; border: 1px solid rgb(255 255 255 / 58%); border-radius: inherit; content: ""; pointer-events: none; }
++.table-watermark { position: absolute; top: 50%; left: 50%; color: rgb(255 255 255 / 8%); font-family: Georgia, "Times New Roman", serif; font-size: clamp(150px, 23vw, 270px); font-weight: 700; transform: translate(-50%, -50%); }
++.board-area { position: absolute; z-index: 2; top: 52%; left: 50%; display: grid; justify-items: center; gap: 12px; transform: translate(-50%, -50%); }
++.board { display: flex; gap: clamp(4px, 0.7vw, 8px); }
++.pot { display: flex; align-items: baseline; gap: 8px; color: white; }
++.pot span, .street-label { font-family: "Courier New", monospace; font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
++.pot strong { font-family: Georgia, "Times New Roman", serif; font-size: 20px; }
++.street-label { color: var(--lime); }
++.card { display: grid; width: clamp(42px, 5.7vw, 62px); aspect-ratio: 5 / 7; place-items: center; border: 1px solid var(--ink); border-radius: 3px; background: #fffef9; color: var(--ink); font-family: Georgia, "Times New Roman", serif; font-size: clamp(17px, 2.2vw, 25px); font-weight: 700; transform-origin: 50% 110%; }
++.card[data-filled="true"] { animation: card-deal 520ms cubic-bezier(0.2, 0.78, 0.2, 1) both; animation-delay: var(--deal-delay); }
++.card-red { color: var(--card-red); }
++.card-hidden { position: relative; overflow: hidden; color: var(--lime); background: var(--blue-dark); font-family: "Courier New", monospace; font-size: 10px; letter-spacing: 0.1em; }
++.card-hidden::after { position: absolute; inset: 5px; border: 1px solid rgb(199 255 50 / 60%); content: ""; }
++.card-hidden i { position: relative; z-index: 2; font-style: normal; }
++.card-empty { border-color: rgb(255 255 255 / 45%); background: rgb(255 255 255 / 8%); }
++.seat { position: absolute; z-index: 4; width: clamp(114px, 15vw, 154px); }
++.seat-0 { bottom: 0; left: 50%; transform: translateX(-50%); }
++.seat-1 { bottom: 18%; left: 0; }
++.seat-2 { top: 18%; left: 0; }
++.seat-3 { top: 0; left: 50%; transform: translateX(-50%); }
++.seat-4 { top: 18%; right: 0; }
++.seat-5 { right: 0; bottom: 18%; }
++.seat-cards { position: relative; z-index: 1; display: flex; justify-content: center; gap: 3px; margin-bottom: -7px; }
++.seat-cards .card { width: 35px; font-size: 13px; }
++.seat-panel { position: relative; display: grid; min-height: 64px; align-content: center; justify-items: center; gap: 3px; padding: 11px 9px 9px; border: 1px solid var(--ink); background: var(--paper); text-align: center; }
++.seat-line { position: absolute; top: -1px; right: -1px; left: -1px; height: 3px; background: transparent; overflow: hidden; }
++.seat-acting .seat-line { background: var(--lime); }
++.seat-acting .seat-line::after { display: block; width: 38%; height: 100%; background: var(--blue); content: ""; animation: acting-line 1.35s linear infinite; }
++.seat-winner .seat-panel { box-shadow: 6px 6px 0 var(--lime); }
++.seat-panel strong { overflow: hidden; max-width: 100%; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
++.seat-panel > span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
++.seat-panel small { color: var(--blue); font-family: "Courier New", monospace; font-size: 8px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
++.seat-panel .seat-award { color: var(--success); }
++.seat-empty .seat-panel { border-style: dashed; color: var(--muted); background: transparent; }
++.dealer-marker { position: absolute; top: 50%; right: -14px; display: grid; width: 27px; height: 27px; place-items: center; border: 1px solid var(--ink); border-radius: 50%; color: var(--ink); background: var(--lime); font-size: 10px; font-weight: 800; transform: translateY(-50%); }
++
++.action-bar { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 28px; width: min(900px, 100%); margin: 12px auto 38px; padding: 22px 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
++.action-copy { display: grid; align-content: start; gap: 7px; }
++.action-copy span { color: var(--blue); font-family: "Courier New", monospace; font-size: 10px; font-weight: 700; text-transform: uppercase; }
++.action-copy strong { font-family: Georgia, "Times New Roman", serif; font-size: 20px; font-weight: 500; }
++.action-controls { display: grid; gap: 17px; }
++.plain-actions { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line-strong); }
++.plain-actions button { min-height: 42px; border: 0; border-radius: 0; background: var(--paper); color: var(--ink); cursor: pointer; font-size: 12px; font-weight: 700; }
++.plain-actions button + button { border-left: 1px solid var(--line); }
++.plain-actions button:not(:disabled):hover { color: white; background: var(--blue); }
++.raise-control { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr) auto; gap: 16px; align-items: center; }
++.raise-heading { display: flex; justify-content: space-between; gap: 12px; font-size: 10px; text-transform: uppercase; }
++.raise-heading output { color: var(--blue); font-family: "Courier New", monospace; font-size: 12px; }
++.raise-presets { display: flex; border-bottom: 1px solid var(--line-strong); }
++.raise-presets button { flex: 1; padding: 6px 5px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 9px; text-transform: uppercase; }
++.raise-presets button:hover:not(:disabled) { color: var(--blue); }
++.raise-submit, .next-hand-action { min-height: 40px; padding: 0 14px; border: 1px solid var(--blue); border-radius: 0; background: var(--blue); color: white; cursor: pointer; font-size: 11px; font-weight: 700; }
++.next-hand-action { width: 100%; box-shadow: inset 5px 0 0 var(--lime); }
++
++.contract-panel { width: min(900px, 100%); margin: 0 auto; padding: 38px 0 28px; border-top: 4px solid var(--blue); border-bottom: 1px solid var(--line-strong); }
++.contract-header { display: flex; justify-content: space-between; align-items: end; gap: 24px; }
++.contract-header h2 { margin-top: 7px; font-size: clamp(30px, 4vw, 44px); }
++.contract-header > a { color: var(--blue); font-size: 11px; font-weight: 700; }
++.contract-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 42px; margin-top: 32px; }
++.sealed-bounty { position: relative; height: 292px; perspective: 900px; }
++.sealed-bounty-face { position: relative; z-index: 2; display: grid; height: 268px; align-content: space-between; padding: 22px; border: 1px solid var(--ink); color: white; background: var(--blue); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 28%), 7px 7px 0 var(--lime); overflow: hidden; }
++.sealed-bounty-face::after { position: absolute; top: -30%; left: -65%; width: 45%; height: 160%; background: rgb(255 255 255 / 18%); content: ""; transform: rotate(14deg); animation: proof-scan 3.8s ease-in-out infinite; }
++.sealed-bounty-face span, .sealed-bounty-face small { position: relative; z-index: 2; font-family: "Courier New", monospace; font-size: 9px; letter-spacing: 0.09em; text-transform: uppercase; }
++.sealed-bounty-face strong { position: relative; z-index: 2; justify-self: center; font-family: Georgia, "Times New Roman", serif; font-size: 90px; font-weight: 500; }
++.sealed-bounty[data-verified="true"] .sealed-bounty-face { color: var(--ink); background: var(--lime); }
++.sealed-bounty > i { position: absolute; z-index: 1; right: -7px; bottom: 7px; width: 100%; height: 268px; border: 1px solid var(--line-strong); }
++.contract-work { display: grid; gap: 26px; }
++.contract-phase { display: grid; gap: 16px; padding-bottom: 25px; border-bottom: 1px solid var(--line); }
++.contract-line { display: flex; justify-content: space-between; gap: 20px; color: var(--muted); font-size: 10px; text-transform: uppercase; }
++.contract-line strong { color: var(--ink); font-size: 10px; letter-spacing: 0.06em; }
++.contract-line strong[data-state="verified"] { color: var(--success); }
++.contract-phase > p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
++.contract-panel button { margin-top: 2px; }
++.contract-empty { margin: 0; color: var(--muted); line-height: 1.6; }
++.private-copy { display: grid; gap: 6px; margin: 0; padding: 14px 0 14px 16px; border-left: 4px solid var(--lime); background: #f0f1ff; }
++.private-copy > span { color: var(--blue); font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
++.private-copy > strong { font-family: Georgia, "Times New Roman", serif; font-size: 23px; font-weight: 500; }
++.private-copy > small { color: var(--muted); font-size: 10px; }
++.proof-rail { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; padding: 0; border-top: 1px solid var(--line-strong); list-style: none; }
++.proof-rail li { position: relative; padding: 15px 0 0; color: #8a9097; font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
++.proof-rail li::before { position: absolute; top: -1px; right: 0; left: 0; height: 2px; background: transparent; content: ""; }
++.proof-rail li i { position: absolute; top: -4px; left: 0; width: 7px; height: 7px; background: var(--line-strong); }
++.proof-rail li[data-active="true"]::before, .proof-rail li[data-complete="true"]::before { background: var(--blue); }
++.proof-rail li[data-active="true"] i { background: var(--lime); animation: proof-dot 900ms ease-in-out infinite alternate; }
++.proof-rail li[data-complete="true"] i { background: var(--blue); }
++.proof-award { display: grid; grid-template-columns: 1fr auto; gap: 8px 20px; align-items: baseline; }
++.proof-award > strong { color: var(--success); font-family: Georgia, "Times New Roman", serif; font-size: 26px; font-weight: 500; }
++.proof-award > span { color: var(--muted); font-size: 10px; }
++.proof-award > a { grid-column: 1 / -1; color: var(--blue); font-size: 11px; font-weight: 700; }
++.protocol-details summary { color: var(--blue); cursor: pointer; font-size: 11px; font-weight: 700; }
++.protocol-details dl { display: grid; margin: 14px 0 0; border-top: 1px solid var(--line); }
++.protocol-details dl > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
++.protocol-details dt { color: var(--muted); font-size: 10px; }
++.protocol-details dd { overflow-wrap: anywhere; margin: 0; font-family: "Courier New", monospace; font-size: 9px; }
++
++.proof-page, .audit-page, .protocol-page { padding-bottom: 90px; }
++.receipt-hero, .audit-hero, .protocol-hero { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 60px; align-items: center; width: min(100% - 40px, 1040px); margin: 0 auto; padding: 72px 0 78px; border-bottom: 4px solid var(--blue); }
++.receipt-hero h1, .audit-hero h1, .protocol-hero h1 { max-width: 770px; margin: 10px 0 20px; font-family: Georgia, "Times New Roman", serif; font-size: clamp(44px, 6vw, 68px); font-weight: 500; line-height: 1; letter-spacing: -0.04em; }
++.receipt-hero p:not(.eyebrow), .audit-hero p:not(.eyebrow), .protocol-hero > p { max-width: 700px; margin: 0; color: var(--muted); font-size: 17px; line-height: 1.65; }
++.receipt-seal { position: relative; display: grid; width: 220px; height: 292px; align-content: space-between; justify-self: end; padding: 20px; border: 2px solid var(--ink); color: white; background: var(--blue); box-shadow: 10px 10px 0 var(--lime); overflow: hidden; }
++.receipt-seal span, .receipt-seal small { z-index: 2; font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
++.receipt-seal strong { z-index: 2; justify-self: center; font-family: Georgia, "Times New Roman", serif; font-size: 86px; font-weight: 500; }
++.receipt-seal i { position: absolute; top: -20%; left: -70%; width: 45%; height: 150%; background: rgb(255 255 255 / 18%); transform: rotate(14deg); animation: proof-scan 3.2s ease-in-out infinite; }
++.receipt-seal[data-verified="true"] { color: var(--ink); background: var(--lime); }
++.verification-timeline, .audit-steps { display: grid; grid-template-columns: repeat(4, 1fr); width: min(100% - 40px, 1040px); margin: 34px auto 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
++.verification-timeline > div, .audit-steps > div { display: grid; min-height: 112px; align-content: center; gap: 6px; padding: 18px; }
++.verification-timeline > div + div, .audit-steps > div + div { border-left: 1px solid var(--line); }
++.verification-timeline span, .audit-steps span { color: var(--blue); font-family: "Courier New", monospace; font-size: 10px; }
++.verification-timeline p { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 16px; }
++.verification-timeline strong, .audit-steps i { color: var(--muted); font-family: "Courier New", monospace; font-size: 9px; font-style: normal; text-transform: uppercase; }
++.verification-timeline [data-state="verified"] strong, .audit-steps [data-state="verified"] i { color: var(--success); }
++.verification-timeline [data-state="verifying"] { box-shadow: inset 0 -4px 0 var(--lime); }
++.proof-error { width: min(100% - 40px, 1040px); margin: 20px auto; padding: 14px 0; border-bottom: 1px solid currentColor; }
++.receipt-statement, .audit-transcript { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 30px; width: min(100% - 40px, 1040px); margin: 0 auto; padding: 82px 0; border-bottom: 1px solid var(--line-strong); }
++.protocol-section { width: min(100% - 40px, 1040px); margin: 0 auto; padding: 72px 0; border-bottom: 1px solid var(--line-strong); }
++.receipt-statement h2 { max-width: 800px; font-size: clamp(28px, 4vw, 43px); }
++.statement-grid { display: grid; grid-template-columns: repeat(2, 1fr); margin-top: 34px; border-top: 1px solid var(--line-strong); }
++.statement-grid article { display: grid; gap: 8px; padding: 19px 0; border-bottom: 1px solid var(--line); }
++.statement-grid article:nth-child(odd) { padding-right: 26px; }
++.statement-grid article:nth-child(even) { padding-left: 26px; border-left: 1px solid var(--line); }
++.statement-grid span { color: var(--blue); font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
++.statement-grid strong { font-size: 13px; line-height: 1.5; }
++.receipt-actions { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; width: min(100% - 40px, 1040px); margin: 34px auto 0; }
++.receipt-actions a { color: var(--blue); font-size: 12px; font-weight: 700; }
++.receipt-actions details { position: relative; }
++.receipt-actions summary { color: var(--blue); cursor: pointer; font-size: 12px; font-weight: 700; }
++.receipt-actions details code { display: block; margin: 12px 0; padding: 12px; border: 1px solid var(--line); background: var(--paper); font-size: 10px; }
++
++.audit-hero { grid-template-columns: minmax(0, 1fr) 300px; }
++.audit-deck { position: relative; width: 250px; height: 270px; justify-self: end; }
++.audit-deck i { position: absolute; top: calc(36px + var(--card-index) * 3px); left: calc(36px + var(--card-index) * 4px); width: 132px; height: 185px; border: 2px solid var(--ink); border-radius: 3px; background: var(--blue); transform: rotate(calc((var(--card-index) - 4) * 1.8deg)); transform-origin: 50% 120%; animation: audit-riffle 1.2s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: calc(var(--card-index) * 70ms); }
++.audit-deck i:nth-child(odd) { background: var(--paper); }
++.audit-deck strong { position: absolute; z-index: 10; right: 0; bottom: 8px; padding: 8px; color: white; background: var(--ink); font-family: "Courier New", monospace; font-size: 11px; }
++.audit-steps { margin-top: 34px; }
++.audit-steps > div { grid-template-columns: auto 1fr; }
++.audit-steps strong { font-family: Georgia, "Times New Roman", serif; font-size: 16px; font-weight: 500; }
++.audit-steps i { grid-column: 2; }
++.audit-transcript dl { margin: 0; border-top: 1px solid var(--line-strong); }
++.audit-transcript dl > div { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--line); }
++.audit-transcript dt { color: var(--muted); font-size: 11px; }
++.audit-transcript dd { overflow-wrap: anywhere; margin: 0; font-family: "Courier New", monospace; font-size: 10px; }
++.deal-replay { width: min(100% - 40px, 1040px); margin: 0 auto; padding: 76px 0; border-bottom: 1px solid var(--line-strong); }
++.deal-replay > header { display: flex; justify-content: space-between; align-items: end; gap: 24px; }
++.deal-replay h2 { margin-top: 7px; }
++.audit-table { position: relative; height: 570px; margin-top: 36px; border: 2px solid var(--ink); border-radius: 50%; background: var(--blue); box-shadow: 9px 9px 0 var(--lime); }
++.audit-board { position: absolute; top: 50%; left: 50%; display: flex; gap: 7px; transform: translate(-50%, -50%); }
++.audit-seat { position: absolute; color: white; text-align: center; }
++.audit-seat > span { display: block; margin-bottom: 6px; font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
++.audit-seat > div { display: flex; gap: 3px; }
++.audit-seat .card { width: 37px; font-size: 13px; }
++.audit-seat-0 { bottom: 24px; left: 50%; transform: translateX(-50%); }
++.audit-seat-1 { top: 24px; left: 17%; }
++.audit-seat-2 { top: 24px; right: 17%; }
++.audit-seat-3 { right: 20px; bottom: 24%; }
++.audit-seat-4 { top: 24%; left: 20px; }
++.audit-seat-5 { right: 20px; bottom: 24%; }
++.burn-cards { position: absolute; bottom: 22%; left: 50%; color: rgb(255 255 255 / 72%); font-family: "Courier New", monospace; font-size: 9px; transform: translateX(-50%); }
++.burn-cards span { margin-right: 10px; color: var(--lime); text-transform: uppercase; }
++.audit-footnote { margin: 19px 0 0; color: var(--muted); font-size: 12px; }
++
++.protocol-hero { display: block; }
++.protocol-hero > p { max-width: 820px; }
++.protocol-section { display: block; }
++.protocol-copy { min-width: 0; }
++.protocol-copy > h2 { max-width: 820px; }
++.protocol-copy > p { max-width: 790px; color: #505760; font-size: 16px; line-height: 1.75; }
++.protocol-copy code { padding: 2px 4px; color: var(--blue-dark); background: #eff0ff; font-size: 0.88em; }
++.protocol-copy aside { display: grid; grid-template-columns: 145px minmax(0, 1fr); gap: 22px; margin-top: 32px; padding: 22px 0; border-top: 4px solid var(--lime); border-bottom: 1px solid var(--line); }
++.protocol-copy aside strong { font-family: Georgia, "Times New Roman", serif; font-size: 18px; font-weight: 500; }
++.protocol-copy aside p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
++.protocol-demo { margin: 36px 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
++.demo-controls { display: grid; grid-template-columns: repeat(4, 1fr); }
++.demo-controls button { display: grid; gap: 7px; min-height: 78px; padding: 13px; border: 0; border-radius: 0; border-bottom: 1px solid var(--line); color: var(--muted); background: transparent; cursor: pointer; font-size: 11px; text-align: left; }
++.demo-controls button + button { border-left: 1px solid var(--line); }
++.demo-controls button span { color: var(--blue); font-family: "Courier New", monospace; font-size: 9px; }
++.demo-controls button[data-active="true"] { color: white; background: var(--blue); }
++.demo-controls button[data-active="true"] span { color: var(--lime); }
++.demo-stage { display: grid; grid-template-columns: 180px minmax(0, 1fr); min-height: 220px; gap: 34px; align-items: center; padding: 30px; background: var(--paper); }
++.demo-stack { position: relative; height: 150px; }
++.demo-stack i { position: absolute; top: 8px; left: 40px; width: 82px; height: 116px; border: 1px solid var(--ink); background: var(--blue); transform: rotate(calc((var(--i, 0) - 2) * 2deg)); }
++.demo-stack i:nth-child(2) { left: 46px; top: 5px; }
++.demo-stack i:nth-child(3) { left: 52px; top: 2px; background: var(--paper); }
++.demo-stack i:nth-child(4) { left: 58px; top: -1px; }
++.demo-stack i:nth-child(5) { left: 64px; top: -4px; background: var(--lime); }
++.demo-stack i:nth-child(6) { left: 70px; top: -7px; }
++.demo-stage[data-step="2"] .demo-stack i { animation: demo-shuffle 720ms ease-in-out both; animation-delay: calc((var(--i, 1)) * 60ms); }
++.demo-output { display: grid; gap: 12px; }
++.demo-output > span { color: var(--blue); font-family: "Courier New", monospace; font-size: 10px; font-weight: 700; text-transform: uppercase; }
++.demo-output > code { overflow-wrap: anywhere; padding: 0; background: transparent; color: var(--ink); font-size: 12px; line-height: 1.7; }
++.demo-output > p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
++.protocol-facts { display: grid; grid-template-columns: repeat(3, 1fr); margin: 34px 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
++.protocol-facts article { min-height: 130px; padding: 18px 15px 18px 0; }
++.protocol-facts article + article { padding-left: 15px; border-left: 1px solid var(--line); }
++.protocol-facts span { color: var(--blue); font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
++.protocol-facts strong { display: block; margin-top: 13px; font-family: Georgia, "Times New Roman", serif; font-size: 17px; font-weight: 500; line-height: 1.35; }
++.circuit-statement { display: grid; margin: 30px 0; border-top: 1px solid var(--line-strong); }
++.circuit-statement > div { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 20px; padding: 15px 0; border-bottom: 1px solid var(--line); }
++.circuit-statement span { color: var(--blue); font-family: "Courier New", monospace; font-size: 10px; text-transform: uppercase; }
++.circuit-statement code { overflow-wrap: anywhere; padding: 0; background: transparent; color: var(--ink); font-size: 11px; }
++.verifier-commands > code { display: block; margin: 10px 0; padding: 14px; border-left: 4px solid var(--lime); background: var(--paper); color: var(--ink); }
++.protocol-meta { color: var(--blue) !important; font-family: "Courier New", monospace; font-size: 10px !important; text-transform: uppercase; }
++
++.site-footer {
+   display: flex;
+   justify-content: space-between;
 -  gap: 18px;
 -  padding: 16px 0;
 -}
@@ -2893,14 +3194,25 @@ index 0060232..7bb248a 100644
 -  gap: 18px;
 -  padding: 9px 0;
 -  border-bottom: 1px solid var(--line);
--}
++  align-items: end;
++  gap: 28px;
++  width: min(100% - 40px, 1120px);
++  margin: 0 auto;
++  padding: 30px 0 42px;
++  border-top: 1px solid var(--line-strong);
+ }
 -
 -.proof-fields dt {
 -  color: var(--muted);
--  font-size: 9px;
++.site-footer > div { display: grid; gap: 6px; }
++.site-footer span, .protocol-stack dt {
++  color: var(--blue);
++  font-family: "Courier New", monospace;
+   font-size: 9px;
 -  letter-spacing: 0.1em;
--  text-transform: uppercase;
--}
++  font-weight: 700;
+   text-transform: uppercase;
+ }
 -
 -.proof-fields dd {
 -  min-width: 0;
@@ -3070,253 +3382,15 @@ index 0060232..7bb248a 100644
 -    align-items: flex-start;
 -    flex-direction: column;
 -  }
-+  font-weight: 700;
-+  letter-spacing: 0.03em;
-+}
-+.primary-action { color: white; background: var(--blue); box-shadow: 6px 6px 0 var(--lime); }
-+.primary-action:hover { background: var(--blue-dark); transform: translate(2px, 2px); box-shadow: 4px 4px 0 var(--lime); }
-+.text-action { min-height: auto; padding: 0 0 3px; border-width: 0 0 2px; }
-+.lobby-join > p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
-+.form-error, .lobby-error, .proof-error { margin: 0; color: var(--danger); font-size: 12px; line-height: 1.5; }
-+.lobby-error { grid-column: 1 / -1; padding: 14px 0; border-top: 1px solid var(--line); }
-+.trust-strip { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); background: var(--paper); }
-+.trust-strip article { min-height: 210px; padding: 34px max(24px, calc((100vw - 1120px) / 6)); }
-+.trust-strip article + article { border-left: 1px solid var(--line); }
-+.trust-strip span { color: var(--blue); font-family: "Courier New", monospace; font-size: 10px; font-weight: 700; text-transform: uppercase; }
-+.trust-strip strong { display: block; margin: 18px 0 10px; font-family: Georgia, "Times New Roman", serif; font-size: 23px; font-weight: 500; }
-+.trust-strip p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
-+
-+.table-page { padding-bottom: 80px; }
-+.table-page-header { display: flex; justify-content: space-between; align-items: end; gap: 30px; width: min(100% - 40px, 1120px); margin: 0 auto; padding: 34px 0 24px; border-bottom: 1px solid var(--line); }
-+.table-page-header h1 { margin: 5px 0 0; font-family: Georgia, "Times New Roman", serif; font-size: 42px; font-weight: 500; letter-spacing: -0.035em; }
-+.table-page-header > p { max-width: 470px; margin: 0; color: var(--muted); font-size: 12px; text-align: right; }
-+.table-shell { width: min(100% - 24px, 1120px); margin: 20px auto 0; }
-+.table-status, .room-status, .waiting-room { display: grid; min-height: 480px; place-content: center; justify-items: center; gap: 15px; text-align: center; }
-+.room-status strong, .waiting-room h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 31px; font-weight: 500; }
-+.waiting-room { width: min(720px, calc(100% - 40px)); margin: 0 auto; }
-+.waiting-room > p:last-of-type { max-width: 540px; margin: 0; color: var(--muted); line-height: 1.6; }
-+.connection-bar { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 9px; color: var(--danger); font-size: 12px; }
-+.connection-bar button { border: 0; border-bottom: 1px solid currentColor; background: none; color: inherit; cursor: pointer; }
-+
-+.deal-integrity { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 20px; align-items: center; padding: 18px 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
-+.deal-integrity-compact { width: min(820px, 100%); margin: 0 auto 8px; padding: 11px 0; }
-+.deal-stack { position: relative; width: 62px; height: 44px; }
-+.deal-stack i { position: absolute; width: 36px; height: 48px; border: 1px solid var(--ink); background: var(--paper); }
-+.deal-stack i:nth-child(1) { left: 0; top: 0; }
-+.deal-stack i:nth-child(2) { left: 7px; top: -4px; background: var(--blue); }
-+.deal-stack i:nth-child(3) { left: 14px; top: -8px; background: var(--lime); }
-+.deal-stack span { position: absolute; z-index: 2; top: 6px; left: 26px; display: grid; width: 21px; height: 21px; place-items: center; color: var(--blue-dark); font-size: 12px; font-weight: 800; }
-+.deal-stack[data-state="sealed"] i:nth-child(3) { animation: seal-breathe 2.6s ease-in-out infinite; }
-+.deal-stack[data-state="revealed"] i:nth-child(3) { background: var(--paper); }
-+.deal-copy { min-width: 0; display: grid; gap: 4px; }
-+.deal-copy strong { font-family: Georgia, "Times New Roman", serif; font-size: 18px; font-weight: 500; }
-+.deal-copy code { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; }
-+.deal-actions { display: grid; justify-items: end; gap: 7px; }
-+.deal-actions a { color: var(--blue); font-size: 11px; font-weight: 700; text-decoration-thickness: 1px; text-underline-offset: 3px; }
-+.deal-state { color: var(--success); font-family: "Courier New", monospace; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
-+
-+.table-stage { position: relative; width: 100%; height: clamp(580px, 64vw, 720px); }
-+.table-surface { position: absolute; inset: 14% 9%; overflow: hidden; border: 10px solid var(--ink); border-radius: 50%; background: var(--felt); box-shadow: 9px 9px 0 var(--lime); }
-+.table-surface::after { position: absolute; inset: 16px; border: 1px solid rgb(255 255 255 / 58%); border-radius: inherit; content: ""; pointer-events: none; }
-+.table-watermark { position: absolute; top: 50%; left: 50%; color: rgb(255 255 255 / 8%); font-family: Georgia, "Times New Roman", serif; font-size: clamp(150px, 23vw, 270px); font-weight: 700; transform: translate(-50%, -50%); }
-+.board-area { position: absolute; z-index: 2; top: 52%; left: 50%; display: grid; justify-items: center; gap: 12px; transform: translate(-50%, -50%); }
-+.board { display: flex; gap: clamp(4px, 0.7vw, 8px); }
-+.pot { display: flex; align-items: baseline; gap: 8px; color: white; }
-+.pot span, .street-label { font-family: "Courier New", monospace; font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
-+.pot strong { font-family: Georgia, "Times New Roman", serif; font-size: 20px; }
-+.street-label { color: var(--lime); }
-+.card { display: grid; width: clamp(42px, 5.7vw, 62px); aspect-ratio: 5 / 7; place-items: center; border: 1px solid var(--ink); border-radius: 3px; background: #fffef9; color: var(--ink); font-family: Georgia, "Times New Roman", serif; font-size: clamp(17px, 2.2vw, 25px); font-weight: 700; transform-origin: 50% 110%; }
-+.card[data-filled="true"] { animation: card-deal 520ms cubic-bezier(0.2, 0.78, 0.2, 1) both; animation-delay: var(--deal-delay); }
-+.card-red { color: var(--card-red); }
-+.card-hidden { position: relative; overflow: hidden; color: var(--lime); background: var(--blue-dark); font-family: "Courier New", monospace; font-size: 10px; letter-spacing: 0.1em; }
-+.card-hidden::after { position: absolute; inset: 5px; border: 1px solid rgb(199 255 50 / 60%); content: ""; }
-+.card-hidden i { position: relative; z-index: 2; font-style: normal; }
-+.card-empty { border-color: rgb(255 255 255 / 45%); background: rgb(255 255 255 / 8%); }
-+.seat { position: absolute; z-index: 4; width: clamp(114px, 15vw, 154px); }
-+.seat-0 { bottom: 0; left: 50%; transform: translateX(-50%); }
-+.seat-1 { bottom: 18%; left: 0; }
-+.seat-2 { top: 18%; left: 0; }
-+.seat-3 { top: 0; left: 50%; transform: translateX(-50%); }
-+.seat-4 { top: 18%; right: 0; }
-+.seat-5 { right: 0; bottom: 18%; }
-+.seat-cards { position: relative; z-index: 1; display: flex; justify-content: center; gap: 3px; margin-bottom: -7px; }
-+.seat-cards .card { width: 35px; font-size: 13px; }
-+.seat-panel { position: relative; display: grid; min-height: 64px; align-content: center; justify-items: center; gap: 3px; padding: 11px 9px 9px; border: 1px solid var(--ink); background: var(--paper); text-align: center; }
-+.seat-line { position: absolute; top: -1px; right: -1px; left: -1px; height: 3px; background: transparent; overflow: hidden; }
-+.seat-acting .seat-line { background: var(--lime); }
-+.seat-acting .seat-line::after { display: block; width: 38%; height: 100%; background: var(--blue); content: ""; animation: acting-line 1.35s linear infinite; }
-+.seat-winner .seat-panel { box-shadow: 6px 6px 0 var(--lime); }
-+.seat-panel strong { overflow: hidden; max-width: 100%; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-+.seat-panel > span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-+.seat-panel small { color: var(--blue); font-family: "Courier New", monospace; font-size: 8px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
-+.seat-panel .seat-award { color: var(--success); }
-+.seat-empty .seat-panel { border-style: dashed; color: var(--muted); background: transparent; }
-+.dealer-marker { position: absolute; top: 50%; right: -14px; display: grid; width: 27px; height: 27px; place-items: center; border: 1px solid var(--ink); border-radius: 50%; color: var(--ink); background: var(--lime); font-size: 10px; font-weight: 800; transform: translateY(-50%); }
-+
-+.action-bar { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 28px; width: min(900px, 100%); margin: 12px auto 38px; padding: 22px 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
-+.action-copy { display: grid; align-content: start; gap: 7px; }
-+.action-copy span { color: var(--blue); font-family: "Courier New", monospace; font-size: 10px; font-weight: 700; text-transform: uppercase; }
-+.action-copy strong { font-family: Georgia, "Times New Roman", serif; font-size: 20px; font-weight: 500; }
-+.action-controls { display: grid; gap: 17px; }
-+.plain-actions { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line-strong); }
-+.plain-actions button { min-height: 42px; border: 0; border-radius: 0; background: var(--paper); color: var(--ink); cursor: pointer; font-size: 12px; font-weight: 700; }
-+.plain-actions button + button { border-left: 1px solid var(--line); }
-+.plain-actions button:not(:disabled):hover { color: white; background: var(--blue); }
-+.raise-control { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr) auto; gap: 16px; align-items: center; }
-+.raise-heading { display: flex; justify-content: space-between; gap: 12px; font-size: 10px; text-transform: uppercase; }
-+.raise-heading output { color: var(--blue); font-family: "Courier New", monospace; font-size: 12px; }
-+.raise-presets { display: flex; border-bottom: 1px solid var(--line-strong); }
-+.raise-presets button { flex: 1; padding: 6px 5px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 9px; text-transform: uppercase; }
-+.raise-presets button:hover:not(:disabled) { color: var(--blue); }
-+.raise-submit, .next-hand-action { min-height: 40px; padding: 0 14px; border: 1px solid var(--blue); border-radius: 0; background: var(--blue); color: white; cursor: pointer; font-size: 11px; font-weight: 700; }
-+.next-hand-action { width: 100%; box-shadow: inset 5px 0 0 var(--lime); }
-+
-+.contract-panel { width: min(900px, 100%); margin: 0 auto; padding: 38px 0 28px; border-top: 4px solid var(--blue); border-bottom: 1px solid var(--line-strong); }
-+.contract-header { display: flex; justify-content: space-between; align-items: end; gap: 24px; }
-+.contract-header h2 { margin-top: 7px; font-size: clamp(30px, 4vw, 44px); }
-+.contract-header > a { color: var(--blue); font-size: 11px; font-weight: 700; }
-+.contract-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 42px; margin-top: 32px; }
-+.sealed-bounty { position: relative; height: 292px; perspective: 900px; }
-+.sealed-bounty-face { position: relative; z-index: 2; display: grid; height: 268px; align-content: space-between; padding: 22px; border: 2px solid var(--ink); color: white; background: var(--blue); box-shadow: 10px 10px 0 var(--lime); overflow: hidden; }
-+.sealed-bounty-face::after { position: absolute; top: -30%; left: -65%; width: 45%; height: 160%; background: rgb(255 255 255 / 18%); content: ""; transform: rotate(14deg); animation: proof-scan 3.8s ease-in-out infinite; }
-+.sealed-bounty-face span, .sealed-bounty-face small { position: relative; z-index: 2; font-family: "Courier New", monospace; font-size: 9px; letter-spacing: 0.09em; text-transform: uppercase; }
-+.sealed-bounty-face strong { position: relative; z-index: 2; justify-self: center; font-family: Georgia, "Times New Roman", serif; font-size: 90px; font-weight: 500; }
-+.sealed-bounty[data-verified="true"] .sealed-bounty-face { color: var(--ink); background: var(--lime); }
-+.sealed-bounty > i { position: absolute; z-index: 1; right: -12px; bottom: 2px; width: 100%; height: 268px; border: 1px solid var(--line-strong); }
-+.contract-work { display: grid; gap: 26px; }
-+.contract-phase { display: grid; gap: 16px; padding-bottom: 25px; border-bottom: 1px solid var(--line); }
-+.contract-line { display: flex; justify-content: space-between; gap: 20px; color: var(--muted); font-size: 10px; text-transform: uppercase; }
-+.contract-line strong { color: var(--ink); font-size: 10px; letter-spacing: 0.06em; }
-+.contract-line strong[data-state="verified"] { color: var(--success); }
-+.contract-phase > p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
-+.contract-panel button { margin-top: 2px; }
-+.contract-empty { margin: 0; color: var(--muted); line-height: 1.6; }
-+.private-copy { display: grid; gap: 6px; margin: 0; padding: 14px 0 14px 16px; border-left: 4px solid var(--lime); background: #f0f1ff; }
-+.private-copy > span { color: var(--blue); font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
-+.private-copy > strong { font-family: Georgia, "Times New Roman", serif; font-size: 23px; font-weight: 500; }
-+.private-copy > small { color: var(--muted); font-size: 10px; }
-+.proof-rail { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; padding: 0; border-top: 1px solid var(--line-strong); list-style: none; }
-+.proof-rail li { position: relative; padding: 15px 0 0; color: #8a9097; font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
-+.proof-rail li::before { position: absolute; top: -1px; right: 0; left: 0; height: 2px; background: transparent; content: ""; }
-+.proof-rail li i { position: absolute; top: -4px; left: 0; width: 7px; height: 7px; background: var(--line-strong); }
-+.proof-rail li[data-active="true"]::before, .proof-rail li[data-complete="true"]::before { background: var(--blue); }
-+.proof-rail li[data-active="true"] i { background: var(--lime); animation: proof-dot 900ms ease-in-out infinite alternate; }
-+.proof-rail li[data-complete="true"] i { background: var(--blue); }
-+.proof-award { display: grid; grid-template-columns: 1fr auto; gap: 8px 20px; align-items: baseline; }
-+.proof-award > strong { color: var(--success); font-family: Georgia, "Times New Roman", serif; font-size: 26px; font-weight: 500; }
-+.proof-award > span { color: var(--muted); font-size: 10px; }
-+.proof-award > a { grid-column: 1 / -1; color: var(--blue); font-size: 11px; font-weight: 700; }
-+.protocol-details summary { color: var(--blue); cursor: pointer; font-size: 11px; font-weight: 700; }
-+.protocol-details dl { display: grid; margin: 14px 0 0; border-top: 1px solid var(--line); }
-+.protocol-details dl > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
-+.protocol-details dt { color: var(--muted); font-size: 10px; }
-+.protocol-details dd { overflow-wrap: anywhere; margin: 0; font-family: "Courier New", monospace; font-size: 9px; }
-+
-+.proof-page, .audit-page, .protocol-page { padding-bottom: 90px; }
-+.receipt-hero, .audit-hero, .protocol-hero { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 60px; align-items: center; width: min(100% - 40px, 1040px); margin: 0 auto; padding: 72px 0 78px; border-bottom: 4px solid var(--blue); }
-+.receipt-hero h1, .audit-hero h1, .protocol-hero h1 { max-width: 770px; margin: 10px 0 20px; font-family: Georgia, "Times New Roman", serif; font-size: clamp(44px, 6vw, 68px); font-weight: 500; line-height: 1; letter-spacing: -0.04em; }
-+.receipt-hero p:not(.eyebrow), .audit-hero p:not(.eyebrow), .protocol-hero > p { max-width: 700px; margin: 0; color: var(--muted); font-size: 17px; line-height: 1.65; }
-+.receipt-seal { position: relative; display: grid; width: 220px; height: 292px; align-content: space-between; justify-self: end; padding: 20px; border: 2px solid var(--ink); color: white; background: var(--blue); box-shadow: 10px 10px 0 var(--lime); overflow: hidden; }
-+.receipt-seal span, .receipt-seal small { z-index: 2; font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
-+.receipt-seal strong { z-index: 2; justify-self: center; font-family: Georgia, "Times New Roman", serif; font-size: 86px; font-weight: 500; }
-+.receipt-seal i { position: absolute; top: -20%; left: -70%; width: 45%; height: 150%; background: rgb(255 255 255 / 18%); transform: rotate(14deg); animation: proof-scan 3.2s ease-in-out infinite; }
-+.receipt-seal[data-verified="true"] { color: var(--ink); background: var(--lime); }
-+.verification-timeline, .audit-steps { display: grid; grid-template-columns: repeat(4, 1fr); width: min(100% - 40px, 1040px); margin: 34px auto 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
-+.verification-timeline > div, .audit-steps > div { display: grid; min-height: 112px; align-content: center; gap: 6px; padding: 18px; }
-+.verification-timeline > div + div, .audit-steps > div + div { border-left: 1px solid var(--line); }
-+.verification-timeline span, .audit-steps span { color: var(--blue); font-family: "Courier New", monospace; font-size: 10px; }
-+.verification-timeline p { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 16px; }
-+.verification-timeline strong, .audit-steps i { color: var(--muted); font-family: "Courier New", monospace; font-size: 9px; font-style: normal; text-transform: uppercase; }
-+.verification-timeline [data-state="verified"] strong, .audit-steps [data-state="verified"] i { color: var(--success); }
-+.verification-timeline [data-state="verifying"] { box-shadow: inset 0 -4px 0 var(--lime); }
-+.proof-error { width: min(100% - 40px, 1040px); margin: 20px auto; padding: 14px 0; border-bottom: 1px solid currentColor; }
-+.receipt-statement, .audit-transcript, .protocol-section { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 30px; width: min(100% - 40px, 1040px); margin: 0 auto; padding: 82px 0; border-bottom: 1px solid var(--line-strong); }
-+.receipt-statement h2 { max-width: 800px; font-size: clamp(28px, 4vw, 43px); }
-+.statement-grid { display: grid; grid-template-columns: repeat(2, 1fr); margin-top: 34px; border-top: 1px solid var(--line-strong); }
-+.statement-grid article { display: grid; gap: 8px; padding: 19px 0; border-bottom: 1px solid var(--line); }
-+.statement-grid article:nth-child(odd) { padding-right: 26px; }
-+.statement-grid article:nth-child(even) { padding-left: 26px; border-left: 1px solid var(--line); }
-+.statement-grid span { color: var(--blue); font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
-+.statement-grid strong { font-size: 13px; line-height: 1.5; }
-+.receipt-actions { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; width: min(100% - 40px, 1040px); margin: 34px auto 0; }
-+.receipt-actions a { color: var(--blue); font-size: 12px; font-weight: 700; }
-+.receipt-actions details { position: relative; }
-+.receipt-actions summary { color: var(--blue); cursor: pointer; font-size: 12px; font-weight: 700; }
-+.receipt-actions details code { display: block; margin: 12px 0; padding: 12px; border: 1px solid var(--line); background: var(--paper); font-size: 10px; }
-+
-+.audit-hero { grid-template-columns: minmax(0, 1fr) 300px; }
-+.audit-deck { position: relative; width: 250px; height: 270px; justify-self: end; }
-+.audit-deck i { position: absolute; top: calc(36px + var(--card-index) * 3px); left: calc(36px + var(--card-index) * 4px); width: 132px; height: 185px; border: 2px solid var(--ink); border-radius: 3px; background: var(--blue); transform: rotate(calc((var(--card-index) - 4) * 1.8deg)); transform-origin: 50% 120%; animation: audit-riffle 1.2s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: calc(var(--card-index) * 70ms); }
-+.audit-deck i:nth-child(odd) { background: var(--paper); }
-+.audit-deck strong { position: absolute; z-index: 10; right: 0; bottom: 8px; padding: 8px; color: white; background: var(--ink); font-family: "Courier New", monospace; font-size: 11px; }
-+.audit-steps { margin-top: 34px; }
-+.audit-steps > div { grid-template-columns: auto 1fr; }
-+.audit-steps strong { font-family: Georgia, "Times New Roman", serif; font-size: 16px; font-weight: 500; }
-+.audit-steps i { grid-column: 2; }
-+.audit-transcript dl { margin: 0; border-top: 1px solid var(--line-strong); }
-+.audit-transcript dl > div { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--line); }
-+.audit-transcript dt { color: var(--muted); font-size: 11px; }
-+.audit-transcript dd { overflow-wrap: anywhere; margin: 0; font-family: "Courier New", monospace; font-size: 10px; }
-+.deal-replay { width: min(100% - 40px, 1040px); margin: 0 auto; padding: 76px 0; border-bottom: 1px solid var(--line-strong); }
-+.deal-replay > header { display: flex; justify-content: space-between; align-items: end; gap: 24px; }
-+.deal-replay h2 { margin-top: 7px; }
-+.audit-table { position: relative; height: 570px; margin-top: 36px; border: 2px solid var(--ink); border-radius: 50%; background: var(--blue); box-shadow: 9px 9px 0 var(--lime); }
-+.audit-board { position: absolute; top: 50%; left: 50%; display: flex; gap: 7px; transform: translate(-50%, -50%); }
-+.audit-seat { position: absolute; color: white; text-align: center; }
-+.audit-seat > span { display: block; margin-bottom: 6px; font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
-+.audit-seat > div { display: flex; gap: 3px; }
-+.audit-seat .card { width: 37px; font-size: 13px; }
-+.audit-seat-0 { bottom: 24px; left: 50%; transform: translateX(-50%); }
-+.audit-seat-1 { top: 24px; left: 17%; }
-+.audit-seat-2 { top: 24px; right: 17%; }
-+.audit-seat-3 { right: 20px; bottom: 24%; }
-+.audit-seat-4 { top: 24%; left: 20px; }
-+.audit-seat-5 { right: 20px; bottom: 24%; }
-+.burn-cards { position: absolute; bottom: 22%; left: 50%; color: rgb(255 255 255 / 72%); font-family: "Courier New", monospace; font-size: 9px; transform: translateX(-50%); }
-+.burn-cards span { margin-right: 10px; color: var(--lime); text-transform: uppercase; }
-+.audit-footnote { margin: 19px 0 0; color: var(--muted); font-size: 12px; }
-+
-+.protocol-hero { display: block; }
-+.protocol-hero > p { max-width: 820px; }
-+.protocol-section { align-items: start; }
-+.protocol-copy { min-width: 0; }
-+.protocol-copy > h2 { max-width: 820px; }
-+.protocol-copy > p { max-width: 790px; color: #505760; font-size: 16px; line-height: 1.75; }
-+.protocol-copy code { padding: 2px 4px; color: var(--blue-dark); background: #eff0ff; font-size: 0.88em; }
-+.protocol-copy aside { display: grid; grid-template-columns: 145px minmax(0, 1fr); gap: 22px; margin-top: 32px; padding: 22px 0; border-top: 4px solid var(--lime); border-bottom: 1px solid var(--line); }
-+.protocol-copy aside strong { font-family: Georgia, "Times New Roman", serif; font-size: 18px; font-weight: 500; }
-+.protocol-copy aside p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
-+.protocol-demo { margin: 36px 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
-+.demo-controls { display: grid; grid-template-columns: repeat(4, 1fr); }
-+.demo-controls button { display: grid; gap: 7px; min-height: 78px; padding: 13px; border: 0; border-radius: 0; border-bottom: 1px solid var(--line); color: var(--muted); background: transparent; cursor: pointer; font-size: 11px; text-align: left; }
-+.demo-controls button + button { border-left: 1px solid var(--line); }
-+.demo-controls button span { color: var(--blue); font-family: "Courier New", monospace; font-size: 9px; }
-+.demo-controls button[data-active="true"] { color: white; background: var(--blue); }
-+.demo-controls button[data-active="true"] span { color: var(--lime); }
-+.demo-stage { display: grid; grid-template-columns: 180px minmax(0, 1fr); min-height: 220px; gap: 34px; align-items: center; padding: 30px; background: var(--paper); }
-+.demo-stack { position: relative; height: 150px; }
-+.demo-stack i { position: absolute; top: 8px; left: 40px; width: 82px; height: 116px; border: 1px solid var(--ink); background: var(--blue); transform: rotate(calc((var(--i, 0) - 2) * 2deg)); }
-+.demo-stack i:nth-child(2) { left: 46px; top: 5px; }
-+.demo-stack i:nth-child(3) { left: 52px; top: 2px; background: var(--paper); }
-+.demo-stack i:nth-child(4) { left: 58px; top: -1px; }
-+.demo-stack i:nth-child(5) { left: 64px; top: -4px; background: var(--lime); }
-+.demo-stack i:nth-child(6) { left: 70px; top: -7px; }
-+.demo-stage[data-step="2"] .demo-stack i { animation: demo-shuffle 720ms ease-in-out both; animation-delay: calc((var(--i, 1)) * 60ms); }
-+.demo-output { display: grid; gap: 12px; }
-+.demo-output > span { color: var(--blue); font-family: "Courier New", monospace; font-size: 10px; font-weight: 700; text-transform: uppercase; }
-+.demo-output > code { overflow-wrap: anywhere; padding: 0; background: transparent; color: var(--ink); font-size: 12px; line-height: 1.7; }
-+.demo-output > p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
-+.protocol-facts { display: grid; grid-template-columns: repeat(3, 1fr); margin: 34px 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
-+.protocol-facts article { min-height: 130px; padding: 18px 15px 18px 0; }
-+.protocol-facts article + article { padding-left: 15px; border-left: 1px solid var(--line); }
-+.protocol-facts span { color: var(--blue); font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
-+.protocol-facts strong { display: block; margin-top: 13px; font-family: Georgia, "Times New Roman", serif; font-size: 17px; font-weight: 500; line-height: 1.35; }
-+.circuit-statement { display: grid; margin: 30px 0; border-top: 1px solid var(--line-strong); }
-+.circuit-statement > div { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 20px; padding: 15px 0; border-bottom: 1px solid var(--line); }
-+.circuit-statement span { color: var(--blue); font-family: "Courier New", monospace; font-size: 10px; text-transform: uppercase; }
-+.circuit-statement code { overflow-wrap: anywhere; padding: 0; background: transparent; color: var(--ink); font-size: 11px; }
-+.verifier-commands > code { display: block; margin: 10px 0; padding: 14px; border-left: 4px solid var(--lime); background: var(--paper); color: var(--ink); }
-+.protocol-meta { color: var(--blue) !important; font-family: "Courier New", monospace; font-size: 10px !important; text-transform: uppercase; }
++.site-footer > div > a { font-family: Georgia, "Times New Roman", serif; font-size: 20px; text-decoration: none; }
++.site-footer nav { display: flex; gap: 22px; }
++.site-footer nav a { color: var(--blue); font-size: 12px; font-weight: 700; text-underline-offset: 3px; }
++.protocol-stack { margin: 30px 0 0; border-top: 1px solid var(--line-strong); }
++.protocol-stack > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 20px; padding: 11px 0; border-bottom: 1px solid var(--line); }
++.protocol-stack dt { margin: 0; }
++.protocol-stack dd { overflow-wrap: anywhere; margin: 0; font-family: "Courier New", monospace; font-size: 10px; }
++.protocol-list { display: grid; gap: 10px; max-width: 790px; margin: 26px 0 0; padding-left: 20px; color: #505760; font-size: 15px; line-height: 1.6; }
++.verifier-commands h3 { margin: 32px 0 8px; font-family: Georgia, "Times New Roman", serif; font-size: 22px; font-weight: 500; }
 +
 +@keyframes hero-card-one { 0%, 100% { transform: rotate(-7deg) translateY(0); } 50% { transform: rotate(-10deg) translateY(-9px); } }
 +@keyframes hero-card-two { 0%, 100% { transform: rotate(5deg); } 50% { transform: rotate(8deg) translateX(5px); } }
@@ -3335,7 +3409,7 @@ index 0060232..7bb248a 100644
 +  .hero { grid-template-columns: 1fr; }
 +  .hero-deck { min-height: 300px; border-left: 0; border-top: 1px solid var(--line); }
 +  .hero-card { left: 45%; }
-+  .lobby-wrap, .receipt-statement, .audit-transcript, .protocol-section { grid-template-columns: 130px minmax(0, 1fr); }
++  .receipt-statement, .audit-transcript { grid-template-columns: 130px minmax(0, 1fr); }
 +  .lobby { grid-template-columns: 1fr; }
 +  .lobby-join { margin-left: 0; padding-left: 0; border-top: 1px solid var(--line); border-left: 0; }
 +  .trust-strip { grid-template-columns: 1fr; }
@@ -3353,13 +3427,17 @@ index 0060232..7bb248a 100644
 +
 +@media (max-width: 660px) {
 +  .site-header { height: auto; min-height: 62px; gap: 12px; padding: 12px 16px; }
++  .site-footer { display: block; width: calc(100% - 32px); }
++  .site-footer nav { margin-top: 18px; }
++  .protocol-stack > div { grid-template-columns: 1fr; gap: 5px; }
 +  .site-header nav { gap: 12px; }
 +  .site-header nav a { font-size: 11px; }
 +  .hero { min-height: auto; padding: 58px 20px 68px; }
 +  .hero-copy h1 { font-size: clamp(42px, 14vw, 62px); }
 +  .hero-card { left: 30%; width: 145px; }
-+  .lobby-wrap, .receipt-statement, .audit-transcript, .protocol-section { display: block; width: min(100% - 32px, 1040px); padding: 58px 0; }
-+  .lobby-wrap > .section-index, .receipt-statement > .section-index, .audit-transcript > .section-index, .protocol-section > .section-index { margin-bottom: 24px; }
++  .lobby-wrap, .protocol-section { width: min(100% - 32px, 1040px); padding: 58px 0; }
++  .receipt-statement, .audit-transcript { display: block; width: min(100% - 32px, 1040px); padding: 58px 0; }
++  .receipt-statement > .section-index, .audit-transcript > .section-index { margin-bottom: 24px; }
 +  .blind-scales { grid-template-columns: 1fr; }
 +  .table-page-header { display: block; width: calc(100% - 32px); }
 +  .table-page-header > p { margin-top: 12px; text-align: left; }
@@ -3404,16 +3482,21 @@ index 0060232..7bb248a 100644
 +  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
  }
 diff --git a/apps/web/app/layout.tsx b/apps/web/app/layout.tsx
-index 57120e8..d56332a 100644
+index 57120e8..6877837 100644
 --- a/apps/web/app/layout.tsx
 +++ b/apps/web/app/layout.tsx
-@@ -5,13 +5,12 @@ import "./globals.css";
+@@ -1,22 +1,25 @@
+ import type { Metadata } from "next";
+ import type { ReactNode } from "react";
+ 
++import { SiteFooter } from "@/components/site-footer";
++
+ import "./globals.css";
  
  export const metadata: Metadata = {
    title: "Noir Poker",
 -  description: "Six-max poker with fair hidden objectives and zero-knowledge proof receipts",
-+  description:
-+    "Six-max poker with independently auditable deals and private zero-knowledge bounties",
++  description: "Six-max poker with auditable deals and private zero-knowledge bounties",
    icons: { icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" },
  };
  
@@ -3424,11 +3507,20 @@ index 57120e8..d56332a 100644
  
  export default function RootLayout({ children }: LayoutProps) {
    return (
+     <html lang="en">
+-      <body>{children}</body>
++      <body>
++        {children}
++        <SiteFooter />
++      </body>
+     </html>
+   );
+ }
 diff --git a/apps/web/app/page.tsx b/apps/web/app/page.tsx
-index 9b5a496..a9db740 100644
+index 9b5a496..d4e94b1 100644
 --- a/apps/web/app/page.tsx
 +++ b/apps/web/app/page.tsx
-@@ -1,15 +1,69 @@
+@@ -1,15 +1,63 @@
 +import Link from "next/link";
 +
  import { Lobby } from "@/components/lobby";
@@ -3449,16 +3541,14 @@ index 9b5a496..a9db740 100644
 +
 +      <section className="hero" aria-labelledby="home-title">
 +        <div className="hero-copy">
-+          <p className="eyebrow">Noir · UltraHonk · six-max hold&apos;em</p>
-+          <h1 id="home-title">Poker whose hidden parts leave public evidence.</h1>
++          <h1 id="home-title">Poker with a verifiable deck.</h1>
 +          <p>
-+            Play ordinary no-limit hold&apos;em. Every deck is fixed by server and player
-+            entropy before the deal. Every secret bounty can be proven complete without
-+            disclosing what it asked you to do.
++            The server commits before player randomness arrives. After each hand, anyone can
++            reconstruct all 52 card positions and verify the committed deck was dealt. Secret
++            bounty awards are proven in Noir without revealing the objective.
 +          </p>
 +          <div className="hero-links">
-+            <Link href="/protocol">Read the protocol</Link>
-+            <span>no wallet · no account · play chips only</span>
++            <Link href="/protocol">Protocol and verification</Link>
 +          </div>
 +        </div>
 +
@@ -3467,40 +3557,36 @@ index 9b5a496..a9db740 100644
 +          <div className="hero-card hero-card-2">?</div>
 +          <div className="hero-card hero-card-1">?</div>
 +          <div className="hero-proof-line">
-+            <span>commit</span>
-+            <span>contribute</span>
++            <span>server commits</span>
++            <span>players contribute</span>
 +            <span>deal</span>
-+            <span>reveal</span>
++            <span>public audit</span>
 +          </div>
 +        </div>
 +      </section>
 +
 +      <section className="lobby-wrap" aria-labelledby="lobby-title">
-+        <div className="section-index">
-+          <span>01</span>
-+          <p>Open a table</p>
-+        </div>
 +        <div>
-+          <h2 id="lobby-title">Choose the game, not a dashboard.</h2>
++          <h2 id="lobby-title">Create a game</h2>
 +          <Lobby />
 +        </div>
 +      </section>
 +
-+      <section className="trust-strip" aria-label="What the cryptography establishes">
++      <section className="trust-strip" aria-label="What can be verified">
 +        <article>
-+          <span>Deal integrity</span>
-+          <strong>Rebuild all 52 positions</strong>
-+          <p>After settlement, anyone can recompute the commitment, seed, shuffle and deal.</p>
++          <span>Deck audit</span>
++          <strong>Reconstruct the hand</strong>
++          <p>Verify the commitment, entropy, shuffle, hole cards, burns and board after settlement.</p>
 +        </article>
 +        <article>
 +          <span>Private bounty</span>
-+          <strong>Verify the win, not the objective</strong>
-+          <p>The public sees two valid proofs and one award while the objective stays sealed.</p>
++          <strong>Verify the award</strong>
++          <p>Two Noir proofs establish that a hidden catalog objective was fairly drawn and completed.</p>
 +        </article>
 +        <article>
-+          <span>Honest limit</span>
-+          <strong>Auditable, not mental poker</strong>
-+          <p>The authoritative server sees cards. The protocol proves the deck was not changed.</p>
++          <span>Security model</span>
++          <strong>The server sees the cards</strong>
++          <p>Completed deck selection is auditable. Server aborts and full collusion remain outside the guarantee.</p>
 +        </article>
 +      </section>
      </main>
@@ -3525,10 +3611,10 @@ index ee02eee..612cc5d 100644
  }
 diff --git a/apps/web/app/protocol/page.tsx b/apps/web/app/protocol/page.tsx
 new file mode 100644
-index 0000000..a4b7699
+index 0000000..a40e7cb
 --- /dev/null
 +++ b/apps/web/app/protocol/page.tsx
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,169 @@
 +import { ProtocolDemo } from "@/components/protocol-demo";
 +import { SiteHeader } from "@/components/site-header";
 +
@@ -3536,95 +3622,170 @@ index 0000000..a4b7699
 +  return (
 +    <main className="site-shell protocol-page">
 +      <SiteHeader compact />
++
 +      <header className="protocol-hero">
-+        <p className="eyebrow">Protocol, not marketing</p>
-+        <h1>What is hidden, what is public, and what anyone can recompute.</h1>
++        <h1>Protocol and verification.</h1>
 +        <p>
-+          Noir Poker uses two different cryptographic mechanisms. Commit–contribute–reveal
-+          fixes each deck. A Noir circuit proves private bounty statements. They solve different
-+          problems and make different trust assumptions.
++          Every settled hand has a public deal audit. Every bounty award has a zero-knowledge
++          receipt. Both can be checked independently in the browser or from the command line.
 +        </p>
 +      </header>
 +
-+      <section className="protocol-section" id="deals">
-+        <div className="section-index"><span>01</span><p>Fair dealing</p></div>
++      <section className="protocol-section">
 +        <div className="protocol-copy">
-+          <h2>The server cannot wait for every player input and then search for a favorable deck.</h2>
++          <h2>Why it matters</h2>
 +          <p>
-+            A room begins with a 32-byte server secret and the public value
-+            <code> SHA256(&quot;NPDEAL01&quot; || room_uuid || hand_no_be || server_secret)</code>.
-+            Each browser contributes a fresh 32-byte share. The final joining player&apos;s share is
-+            unknown when the server commitment is fixed.
++            Server-authoritative poker usually requires players to trust the backend shuffle. Noir
++            Poker commits the server&apos;s randomness before player entropy is known. After settlement,
++            the complete transcript is revealed and the deck can be reconstructed exactly.
 +          </p>
 +          <p>
-+            The seed is <code>SHA256(&quot;NPSEED01&quot; || room || hand || count || ordered(seat, share) || server_secret)</code>.
-+            Seat bytes prevent reordering. The 52 canonical card identifiers are shuffled with
-+            SHA-256 counter blocks, 32-bit rejection sampling and descending Fisher–Yates swaps.
++            Bounties use a separate Noir proof. A verifier can confirm that a hidden objective came
++            from the fixed catalog and was completed using the recorded hand facts while the
++            objective remains private.
 +          </p>
++        </div>
++      </section>
++
++      <section className="protocol-section" id="deals">
++        <div className="protocol-copy">
++          <h2>Deal protocol</h2>
++          <p>
++            For room <code>R</code> and hand <code>h</code>, the server samples a 32-byte secret
++            <code> S</code> and durably stores
++            <code> SHA256(&quot;NPDEAL01&quot; || R || u64_be(h) || S)</code> before player shares are
++            accepted.
++          </p>
++          <p>
++            Seat <code>i</code> samples a fresh 32-byte share <code>E_i</code> with the browser
++            cryptographic RNG. The final seed is
++            <code>
++              SHA256(&quot;NPSEED01&quot; || R || u64_be(h) || player_count || ordered(u8(i), E_i) || S)
++            </code>
++            . Seat indices are encoded explicitly, so changing share order changes the seed.
++          </p>
++          <p>
++            Card ids 0 through 51 use suit-major order: clubs, diamonds, hearts, spades; each suit
++            contains ranks 2 through ace. Fisher–Yates consumes 32-bit words from
++            <code> SHA256(&quot;NPSTRM01&quot; || seed || u64_be(counter))</code>. Rejection sampling removes
++            modulo bias. Hole cards are dealt in two clockwise rounds starting left of the dealer,
++            followed by burn, flop, burn, turn, burn, river.
++          </p>
++
 +          <ProtocolDemo />
++
 +          <div className="protocol-facts">
-+            <article><span>Before play</span><strong>Commitment and contribution count</strong></article>
-+            <article><span>During play</span><strong>Seed, secret and other shares remain hidden</strong></article>
-+            <article><span>After settlement</span><strong>Secret, shares, seed and all 52 positions</strong></article>
++            <article>
++              <span>Before the hand</span>
++              <strong>Server commitment and contribution count</strong>
++            </article>
++            <article>
++              <span>During the hand</span>
++              <strong>Secret, shares and final seed stay sealed</strong>
++            </article>
++            <article>
++              <span>After settlement</span>
++              <strong>Secret, ordered shares, seed and all 52 positions</strong>
++            </article>
 +          </div>
-+          <aside>
-+            <strong>Precise limit</strong>
-+            <p>
-+              This is auditable server-authoritative poker, not mental poker. The server still sees
-+              every card and can abort instead of completing a ceremony. If all entropy providers
-+              collude with it, the honest-party guarantee disappears. A full mental-poker protocol
-+              would encrypt and verifiably reshuffle the deck so no dealer ever learns every card.
-+            </p>
-+          </aside>
++
++          <p>
++            If at least one player share is unpredictable and comes from a non-colluding player, the
++            server cannot choose the completed seed after seeing all player entropy without breaking
++            its earlier commitment.
++          </p>
 +        </div>
 +      </section>
 +
 +      <section className="protocol-section" id="bounties">
-+        <div className="section-index"><span>02</span><p>Private bounties</p></div>
 +        <div className="protocol-copy">
-+          <h2>The verifier learns that a catalog objective was completed, but not which objective.</h2>
++          <h2>Private bounty protocol</h2>
 +          <p>
-+            The browser commits to a private 32-byte secret. After the server returns a nonce, Blake2s
-+            selects one of eight objective leaves. A three-level Merkle path proves that the hidden leaf
-+            belongs to the published catalog root.
++            The browser commits to a private 32-byte secret before the server returns its nonce. The
++            selector hashes the hand tag, seat, nonce and secret, then uses the low three bits to
++            choose one of eight objective leaves. A private three-level Merkle path proves that the
++            selected objective belongs to the published catalog root.
 +          </p>
++
 +          <div className="circuit-statement">
-+            <div><span>Public inputs</span><code>mode · hand_tag · seat · commitment · nonce · facts_hash · nullifier · catalog_root</code></div>
-+            <div><span>Private witness</span><code>secret · facts salt · six facts · objective literals · Merkle siblings</code></div>
++            <div>
++              <span>Public inputs</span>
++              <code>mode hand_tag seat commitment nonce facts_hash nullifier catalog_root</code>
++            </div>
++            <div>
++              <span>Private witness</span>
++              <code>secret facts_salt six hand facts objective literals Merkle siblings</code>
++            </div>
 +          </div>
++
 +          <p>
-+            The draw proof shows that the committed secret selected a valid hidden leaf. The completion
-+            proof reuses the same public context and shows that the leaf&apos;s true and false literals match
-+            the server-bound fact commitment. UltraHonk proofs are generated by NoirJS and Barretenberg
-+            in the player&apos;s browser, then checked by the Rust server and again by every public receipt viewer.
++            Draw mode proves fair objective selection before the next hand starts. Completion mode
++            proves that the same hidden objective is satisfied by the server-bound facts commitment.
++            The six facts are: saw flop, raised preflop, called preflop, checked flop, reached
++            showdown and net profit.
 +          </p>
-+          <aside>
-+            <strong>What “accepted once” means</strong>
-+            <p>
-+              The circuit binds a nullifier to the hand, seat and secret. PostgreSQL enforces a unique
-+              nullifier and the server awards exactly 20 points in the same transaction. A receipt viewer
-+              independently proves the cryptographic statement; it does not independently audit the entire database.
-+            </p>
-+          </aside>
++          <p>
++            NoirJS executes the circuit in the browser. Barretenberg generates an UltraHonk proof.
++            The Rust server verifies the proof and exact public inputs before awarding 20 proof
++            points. The public receipt viewer runs the same proof verification again in the visitor&apos;s
++            browser.
++          </p>
++
++          <dl className="protocol-stack">
++            <div><dt>Circuit</dt><dd>Noir 1.0.0-beta.26</dd></div>
++            <div><dt>Proof system</dt><dd>UltraHonk</dd></div>
++            <div><dt>Backend</dt><dd>Barretenberg 5.2.0</dd></div>
++            <div><dt>Deal hash</dt><dd>SHA-256</dd></div>
++            <div><dt>Bounty hash</dt><dd>BLAKE2s-256</dd></div>
++            <div><dt>Circuit artifact</dt><dd>1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d</dd></div>
++            <div><dt>Verification key</dt><dd>b435db9d240683e181d8bad47203bf85d57ca27982bc676cf2686b5cf3de1d67</dd></div>
++          </dl>
++        </div>
++      </section>
++
++      <section className="protocol-section" id="verify">
++        <div className="protocol-copy verifier-commands">
++          <h2>Verify it yourself</h2>
++
++          <h3>Settled hand</h3>
++          <p>
++            Open <code>/audit/&lt;room&gt;/&lt;hand&gt;</code>. The browser checks the server commitment
++            opening, ordered player shares, derived seed, complete 52-card permutation, both hole-card
++            rounds, all three burns and the five board positions.
++          </p>
++          <code>npm --prefix apps/web run deal:verify -- audit.json</code>
++
++          <h3>Bounty award</h3>
++          <p>
++            Open <code>/proof/&lt;nullifier&gt;</code>. The browser verifies both UltraHonk proofs and
++            checks that draw and completion use the same hand tag, seat, commitment, nonce and catalog
++            root. It also checks the completion facts hash, nullifier and 20-point award binding.
++          </p>
++          <code>npm --prefix apps/web run proof:verify -- receipt.json</code>
++
++          <p>
++            The proof establishes the hidden objective statement. PostgreSQL separately enforces one
++            accepted claim per nullifier and persists the awarded points.
++          </p>
 +        </div>
 +      </section>
 +
 +      <section className="protocol-section">
-+        <div className="section-index"><span>03</span><p>Run it yourself</p></div>
-+        <div className="protocol-copy verifier-commands">
-+          <h2>Verification is a behavior in the product, not a download button.</h2>
-+          <p>Every audit and bounty URL runs locally in the browser. The same checks are available as source-controlled scripts.</p>
-+          <code>npm --prefix apps/web run deal:verify -- audit.json</code>
-+          <code>npm --prefix apps/web run proof:verify -- receipt.json</code>
-+          <code>cargo test --workspace</code>
-+          <p className="protocol-meta">Noir 1.0.0-beta.26 · Barretenberg 5.2.0 · UltraHonk · Blake2s · SHA-256</p>
++        <div className="protocol-copy">
++          <h2>Security limits</h2>
++          <ul className="protocol-list">
++            <li>The authoritative server sees every card during play.</li>
++            <li>The server can abort a ceremony before a completed transcript is published.</li>
++            <li>The deal guarantee requires one unpredictable non-colluding player contribution.</li>
++            <li>Full server and player collusion defeats the honest-contribution assumption.</li>
++          </ul>
 +        </div>
 +      </section>
 +    </main>
 +  );
 +}
 diff --git a/apps/web/app/table/[room]/page.tsx b/apps/web/app/table/[room]/page.tsx
-index 7bcba1b..191014b 100644
+index 7bcba1b..f328a61 100644
 --- a/apps/web/app/table/[room]/page.tsx
 +++ b/apps/web/app/table/[room]/page.tsx
 @@ -1,20 +1,21 @@
@@ -3652,7 +3813,7 @@ index 7bcba1b..191014b 100644
 +          <p className="eyebrow">Live table / {room.slice(0, 8)}</p>
 +          <h1>Noir Poker</h1>
 +        </div>
-+        <p>server-authoritative hold&apos;em · auditable deals · local zero-knowledge proving</p>
++        <p>server-authoritative hold&apos;em with auditable deals and local zero-knowledge proving</p>
        </header>
 -
        <MultiplayerGame key={room} room={room} />
@@ -3693,7 +3854,7 @@ index f27c49b..93d2d90 100644
    );
  }
 diff --git a/apps/web/components/contract.tsx b/apps/web/components/contract.tsx
-index 7d17bc5..746e095 100644
+index 7d17bc5..2ed7900 100644
 --- a/apps/web/components/contract.tsx
 +++ b/apps/web/components/contract.tsx
 @@ -1,13 +1,6 @@
@@ -4035,7 +4196,7 @@ index 7d17bc5..746e095 100644
 +              <div className="private-copy">
 +                <span>Only this browser knows</span>
 +                <strong>{assignment.objective}</strong>
-+                <small>{assignment.reward} points · {assignment.active ? "in play" : "ready for next hand"}</small>
++                <small>{assignment.reward} points — {assignment.active ? "in play" : "ready for next hand"}</small>
                </div>
 -            </dl>
 -          </details>
@@ -4061,7 +4222,7 @@ index 7d17bc5..746e095 100644
  }
 diff --git a/apps/web/components/deal-audit.tsx b/apps/web/components/deal-audit.tsx
 new file mode 100644
-index 0000000..9bd37ce
+index 0000000..edf9066
 --- /dev/null
 +++ b/apps/web/components/deal-audit.tsx
 @@ -0,0 +1,116 @@
@@ -4163,11 +4324,11 @@ index 0000000..9bd37ce
 +              </div>
 +              {layout.hole.map((cards, seat) => (
 +                <div className={`audit-seat audit-seat-${seat}`} key={seat}>
-+                  <span>Seat {seat + 1}{audit.dealer === seat ? " · D" : ""}</span>
++                  <span>Seat {seat + 1}{audit.dealer === seat ? " (dealer)" : ""}</span>
 +                  <div><Card value={cardValue(cards[0])} delay={seat * 120} /><Card value={cardValue(cards[1])} delay={seat * 120 + 300} /></div>
 +                </div>
 +              ))}
-+              <div className="burn-cards"><span>burns</span>{layout.burns.map(cardValue).join(" · ")}</div>
++              <div className="burn-cards"><span>burns</span>{layout.burns.map(cardValue).join(", ")}</div>
 +            </div>
 +            <p className="audit-footnote">The first {dealt.length} consumed positions match the engine&apos;s clockwise deal and three burn rules.</p>
 +          </section>
@@ -4240,7 +4401,7 @@ index 0000000..7be9037
 +  );
 +}
 diff --git a/apps/web/components/lobby.tsx b/apps/web/components/lobby.tsx
-index 92487ae..765b49b 100644
+index 92487ae..2f28f8a 100644
 --- a/apps/web/components/lobby.tsx
 +++ b/apps/web/components/lobby.tsx
 @@ -1,28 +1,74 @@
@@ -4335,19 +4496,19 @@ index 92487ae..765b49b 100644
  
      try {
        const result = await joinRoom(room);
-@@ -53,52 +98,72 @@ export function Lobby() {
+@@ -53,52 +98,67 @@ export function Lobby() {
    }
  
    return (
 -    <section className="lobby" aria-label="Poker lobby">
 -      <form className="lobby-section" onSubmit={create}>
 -        <div className="lobby-copy">
+-          <span>Create</span>
+-          <h2>New table</h2>
 +    <div className="lobby">
 +      <form className="lobby-create" onSubmit={create}>
 +        <div className="form-heading">
-           <span>Create</span>
--          <h2>New table</h2>
-+          <h3>New table</h3>
++          <h3>New game</h3>
          </div>
  
 -        <label>
@@ -4405,17 +4566,17 @@ index 92487ae..765b49b 100644
 +
 +        {!valid && <p className="form-error">Big blind must cover the small blind and stack.</p>}
 +        <button className="primary-action" type="submit" disabled={busy || !valid}>
-+          Create fair table <span>→</span>
++          Create game <span>→</span>
          </button>
        </form>
  
 -      <form className="lobby-section" onSubmit={join}>
 -        <div className="lobby-copy">
+-          <span>Join</span>
+-          <h2>Existing table</h2>
 +      <form className="lobby-join" onSubmit={join}>
 +        <div className="form-heading">
-           <span>Join</span>
--          <h2>Existing table</h2>
-+          <h3>Existing table</h3>
++          <h3>Join game</h3>
          </div>
 -
 -        <label>
@@ -4427,12 +4588,9 @@ index 92487ae..765b49b 100644
 -        <button className="lobby-submit" type="submit" disabled={busy}>
 -          Join table
 +        <button className="text-action" type="submit" disabled={busy}>
-+          Take a seat →
++          Join game →
          </button>
-+        <p>
-+          Your browser contributes 256 fresh random bits when you enter. The contribution
-+          becomes public only after the hand is over.
-+        </p>
++        <p>Your browser adds fresh randomness before the hand starts.</p>
        </form>
  
        {error && <p className="lobby-error">{error}</p>}
@@ -5246,7 +5404,7 @@ index 33be04f..f5b2cae 100644
          onCommitContract={commitChallenge}
          onVerifyDraw={() => void drawChallenge()}
 diff --git a/apps/web/components/proof-receipt.tsx b/apps/web/components/proof-receipt.tsx
-index 124b5af..f110adc 100644
+index 124b5af..8a5969f 100644
 --- a/apps/web/components/proof-receipt.tsx
 +++ b/apps/web/components/proof-receipt.tsx
 @@ -1,194 +1,204 @@
@@ -5524,7 +5682,7 @@ index 124b5af..f110adc 100644
 +              <article>
 +                <span>Public</span>
 +                <strong>
-+                  Room {receipt.room.slice(0, 8)} · hand {receipt.hand_no} · seat {receipt.seat + 1}
++                  Room {receipt.room.slice(0, 8)}, hand {receipt.hand_no}, seat {receipt.seat + 1}
 +                </strong>
 +              </article>
 +              <article>
@@ -5533,7 +5691,7 @@ index 124b5af..f110adc 100644
 +              </article>
 +              <article>
 +                <span>Toolchain</span>
-+                <strong>Noir · UltraHonk · Barretenberg {receipt.bb_version}</strong>
++                <strong>Noir, UltraHonk, Barretenberg {receipt.bb_version}</strong>
 +              </article>
 +              <article>
 +                <span>Replay guard</span>
@@ -5600,7 +5758,7 @@ index 124b5af..f110adc 100644
    );
 diff --git a/apps/web/components/protocol-demo.tsx b/apps/web/components/protocol-demo.tsx
 new file mode 100644
-index 0000000..7aee28c
+index 0000000..7a6a84e
 --- /dev/null
 +++ b/apps/web/components/protocol-demo.tsx
 @@ -0,0 +1,50 @@
@@ -5639,7 +5797,7 @@ index 0000000..7aee28c
 +          <span>{labels[step]}</span>
 +          <code>
 +            {step === 0 && `${encodeHex(values.commitment).slice(0, 32)}…`}
-+            {step === 1 && "seat 0 · seat 1 · seat 2"}
++            {step === 1 && "seat 0, seat 1, seat 2"}
 +            {step === 2 && values.deck.slice(0, 12).map(cardValue).join("  ")}
 +            {step === 3 && values.layout.board.map(cardValue).join("  ")}
 +          </code>
@@ -5708,12 +5866,36 @@ index f38bf00..20cb06d 100644
            </>
          )}
        </div>
+diff --git a/apps/web/components/site-footer.tsx b/apps/web/components/site-footer.tsx
+new file mode 100644
+index 0000000..5f8cb34
+--- /dev/null
++++ b/apps/web/components/site-footer.tsx
+@@ -0,0 +1,18 @@
++export function SiteFooter() {
++  return (
++    <footer className="site-footer">
++      <div>
++        <span>Developer</span>
++        <a href="https://ishankumthekar.com" target="_blank" rel="noreferrer">
++          Ishan Kumthekar
++        </a>
++      </div>
++      <nav aria-label="Developer links">
++        <a href="mailto:ishankumthekar@ufl.edu">Email</a>
++        <a href="https://github.com/ishanrk" target="_blank" rel="noreferrer">
++          GitHub
++        </a>
++      </nav>
++    </footer>
++  );
++}
 diff --git a/apps/web/components/site-header.tsx b/apps/web/components/site-header.tsx
 new file mode 100644
-index 0000000..56725d4
+index 0000000..5659666
 --- /dev/null
 +++ b/apps/web/components/site-header.tsx
-@@ -0,0 +1,21 @@
+@@ -0,0 +1,15 @@
 +import Link from "next/link";
 +
 +export function SiteHeader({ compact = false }: { compact?: boolean }) {
@@ -5725,18 +5907,12 @@ index 0000000..56725d4
 +      <nav aria-label="Primary navigation">
 +        <Link href="/">Play</Link>
 +        <Link href="/protocol">Protocol</Link>
-+        <a href="https://github.com/ishanrk/noir-poker" target="_blank" rel="noreferrer">
-+          Source ↗
-+        </a>
 +      </nav>
-+      <span className="header-mark" aria-hidden="true">
-+        NP / 01
-+      </span>
 +    </header>
 +  );
 +}
 diff --git a/apps/web/components/table.tsx b/apps/web/components/table.tsx
-index d3f52e1..2eeda60 100644
+index d3f52e1..097f44e 100644
 --- a/apps/web/components/table.tsx
 +++ b/apps/web/components/table.tsx
 @@ -1,48 +1,28 @@
@@ -5857,8 +6033,7 @@ index d3f52e1..2eeda60 100644
 -      (award) =>
 -        `${playerName(award.player, viewer)} ${result.kind === "fold" ? "won " : ""}${award.amount.toLocaleString("en-US")}`,
 -    )
-+    .map((award) => `${playerName(award.player, viewer)} +${award.amount.toLocaleString("en-US")}`)
-     .join(" · ");
+-    .join(" · ");
 -  let status = "Table";
 -  let message = "Waiting for player";
 -
@@ -5866,6 +6041,8 @@ index d3f52e1..2eeda60 100644
 -    status = "Your action";
 -    message = "Choose an action";
 -  }
++    .map((award) => `${playerName(award.player, viewer)} +${award.amount.toLocaleString("en-US")}`)
++    .join(", ");
 +  let status = actions ? "Your action" : "Waiting for player";
 +  let message = actions ? "Choose the line" : "The table is moving";
  
@@ -6409,10 +6586,33 @@ index 10f7ecc..7cdbded 100644
    const draw = decodePublicInputs(receipt.draw_public_inputs);
    const completion = decodePublicInputs(receipt.completion_public_inputs);
 diff --git a/apps/web/lib/server.ts b/apps/web/lib/server.ts
-index 1a938ec..e2a716c 100644
+index 1a938ec..1414a9f 100644
 --- a/apps/web/lib/server.ts
 +++ b/apps/web/lib/server.ts
-@@ -15,12 +15,12 @@ export type RoomSeat = {
+@@ -1,7 +1,18 @@
+-const SERVER_URL = (process.env.NEXT_PUBLIC_SERVER_URL ?? "http://localhost:3001").replace(
+-  /\/+$/,
+-  "",
+-);
++const CONFIGURED_SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL?.trim().replace(/\/+$/, "");
++const LOCAL_SERVER_URL = "http://localhost:3001";
++
++function serverUrl() {
++  if (CONFIGURED_SERVER_URL) return CONFIGURED_SERVER_URL;
++
++  if (
++    typeof window !== "undefined" &&
++    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
++  ) {
++    return LOCAL_SERVER_URL;
++  }
++
++  throw new Error("server url missing for this deployment");
++}
+ 
+ export type RoomConfig = {
+   players: number;
+@@ -15,12 +26,12 @@ export type RoomSeat = {
    token: string;
  };
  
@@ -6428,7 +6628,7 @@ index 1a938ec..e2a716c 100644
    proof_system: string;
    circuit_id: string;
    bb_version: string;
-@@ -40,43 +40,65 @@ export type ProofReceipt = {
+@@ -40,43 +51,65 @@ export type ProofReceipt = {
    completion_public_inputs: string;
  };
  
@@ -6457,7 +6657,8 @@ index 1a938ec..e2a716c 100644
 +}
 +
  export async function createRoom(config: RoomConfig): Promise<SeatResponse> {
-   const response = await fetch(`${SERVER_URL}/rooms`, {
+-  const response = await fetch(`${SERVER_URL}/rooms`, {
++  const response = await fetch(`${serverUrl()}/rooms`, {
      method: "POST",
      headers: { "content-type": "application/json" },
 -    body: JSON.stringify(config),
@@ -6473,7 +6674,8 @@ index 1a938ec..e2a716c 100644
  }
  
  export async function joinRoom(room: string): Promise<SeatResponse> {
-   const response = await fetch(`${SERVER_URL}/rooms/${encodeURIComponent(room)}/join`, {
+-  const response = await fetch(`${SERVER_URL}/rooms/${encodeURIComponent(room)}/join`, {
++  const response = await fetch(`${serverUrl()}/rooms/${encodeURIComponent(room)}/join`, {
      method: "POST",
 +    headers: { "content-type": "application/json" },
 +    body: JSON.stringify({ entropy: entropy() }),
@@ -6488,7 +6690,8 @@ index 1a938ec..e2a716c 100644
  }
  
  export async function loadProofReceipt(nullifier: string): Promise<ProofReceipt> {
-   const response = await fetch(`${SERVER_URL}/proofs/${encodeURIComponent(nullifier)}`);
+-  const response = await fetch(`${SERVER_URL}/proofs/${encodeURIComponent(nullifier)}`);
++  const response = await fetch(`${serverUrl()}/proofs/${encodeURIComponent(nullifier)}`);
  
 -  if (!response.ok) {
 -    throw new Error(await responseError(response));
@@ -6496,17 +6699,17 @@ index 1a938ec..e2a716c 100644
 +  if (!response.ok) throw new Error(await responseError(response));
 +  return response.json();
 +}
- 
++
 +export async function loadDealAudit(room: string, hand: number): Promise<DealAudit> {
 +  const response = await fetch(
-+    `${SERVER_URL}/audits/${encodeURIComponent(room)}/${encodeURIComponent(hand)}`,
++    `${serverUrl()}/audits/${encodeURIComponent(room)}/${encodeURIComponent(hand)}`,
 +  );
-+
+ 
 +  if (!response.ok) throw new Error(await responseError(response));
    return response.json();
  }
  
-@@ -91,9 +113,7 @@ export function saveSeat(room: string, seat: RoomSeat) {
+@@ -91,9 +124,7 @@ export function saveSeat(room: string, seat: RoomSeat) {
  export function loadSeat(room: string): RoomSeat | undefined {
    const stored = sessionStorage.getItem(seatKey(room));
  
@@ -6517,7 +6720,14 @@ index 1a938ec..e2a716c 100644
  
    try {
      const seat = JSON.parse(stored) as Partial<RoomSeat>;
-@@ -120,6 +140,9 @@ export function roomSocket(room: string) {
+@@ -114,12 +145,15 @@ export function loadSeat(room: string): RoomSeat | undefined {
+ }
+ 
+ export function roomSocket(room: string) {
+-  const url = new URL(SERVER_URL);
++  const url = new URL(serverUrl());
+ 
+   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
    url.pathname = `/rooms/${encodeURIComponent(room)}/ws`;
    url.search = "";
    url.hash = "";

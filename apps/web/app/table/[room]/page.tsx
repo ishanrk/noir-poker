@@ -14,7 +14,7 @@ export default async function TablePage({ params }: TablePageProps) {
           <p className="eyebrow">Live table / {room.slice(0, 8)}</p>
           <h1>Noir Poker</h1>
         </div>
-        <p>server-authoritative hold&apos;em · auditable deals · local zero-knowledge proving</p>
+        <p>server-authoritative hold&apos;em with auditable deals and local zero-knowledge proving</p>
       </header>
       <MultiplayerGame key={room} room={room} />
     </main>

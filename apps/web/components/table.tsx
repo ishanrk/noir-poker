@@ -120,7 +120,7 @@ export function Table({
     : 0;
   const payouts = result?.awards
     .map((award) => `${playerName(award.player, viewer)} +${award.amount.toLocaleString("en-US")}`)
-    .join(" · ");
+    .join(", ");
   let status = actions ? "Your action" : "Waiting for player";
   let message = actions ? "Choose the line" : "The table is moving";
 
