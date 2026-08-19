@@ -6,7 +6,7 @@ export function SiteFooter() {
         <a href="https://ishankumthekar.com" target="_blank" rel="noreferrer">
           Ishan Kumthekar
         </a>
-        <p>Rust server, Next.js and TypeScript interface, Noir circuits.</p>
+        <p>Rust server, Next.js and TypeScript interface, Noir zero knowledge circuits.</p>
       </div>
       <nav aria-label="Developer links">
         <a href="mailto:ishankumthekar@ufl.edu">Email</a>
