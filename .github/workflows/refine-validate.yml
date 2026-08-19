@@ -1,4 +1,4 @@
-name: validate final noir poker refinement
+name: validate final noir poker patch replay
 
 on:
   push:
@@ -54,7 +54,7 @@ jobs:
           test "$(git rev-parse "$BASE_SHA")" = "$BASE_SHA"
           git merge-base --is-ancestor "$BASE_SHA" HEAD
 
-      - name: Remove obsolete CORS wrapper
+      - name: Apply final CORS cleanup
         shell: bash
         run: |
           set -euo pipefail
@@ -103,49 +103,23 @@ jobs:
           chmod 0755 bb
           echo "NARGO_PATH=$RUNNER_TEMP/noir-tools/nargo" >> "$GITHUB_ENV"
           echo "BB_PATH=$RUNNER_TEMP/noir-tools/bb" >> "$GITHUB_ENV"
-          echo "CHALLENGE_VK_PATH=$GITHUB_WORKSPACE/apps/server/zk/challenge_v2.vk" >> "$GITHUB_ENV"
 
-      - name: Validate refined source
+      - name: Generate current patch
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p artifacts/refine-logs
           cargo fmt --all
-          cargo fmt --all -- --check |& tee artifacts/refine-logs/cargo-fmt.log
           git diff --check
-          cargo test --workspace --locked |& tee artifacts/refine-logs/cargo-test.log
-          cargo clippy --workspace --all-targets --locked -- -D warnings |& tee artifacts/refine-logs/cargo-clippy.log
-          npm --prefix apps/web ci |& tee artifacts/refine-logs/npm-ci.log
-          npm --prefix apps/web run challenge:test |& tee artifacts/refine-logs/challenge-test.log
-          npm --prefix apps/web run deal:test |& tee artifacts/refine-logs/deal-test.log
-          npm --prefix apps/web run receipt:test |& tee artifacts/refine-logs/receipt-test.log
-          npm --prefix apps/web run lint |& tee artifacts/refine-logs/eslint.log
-          npm --prefix apps/web run build |& tee artifacts/refine-logs/next-build.log
-          NARGO_PATH="$NARGO_PATH" BB_PATH="$BB_PATH" ./scripts/build-zk.sh |& tee artifacts/refine-logs/zk-build.log
-          TEST_DATABASE_URL="$TEST_DATABASE_URL" cargo test -p server persistence -- --ignored --nocapture |& tee artifacts/refine-logs/postgres-persistence.log
-          BB_PATH="$BB_PATH" CHALLENGE_VK_PATH="$CHALLENGE_VK_PATH" cargo test -p server real_proof -- --ignored --nocapture |& tee artifacts/refine-logs/real-proof.log
-          BB_PATH="$BB_PATH" CHALLENGE_VK_PATH="$CHALLENGE_VK_PATH" TEST_DATABASE_URL="$TEST_DATABASE_URL" cargo test -p server real_claim -- --ignored --nocapture |& tee artifacts/refine-logs/real-claim.log
-          ! grep -R --include='*.tsx' --include='*.ts' '·' apps/web
-          ! grep -R --include='*.tsx' -E 'not marketing|not mental|not the objective|Choose .*not|, not ' apps/web
-          ! grep -R --include='*.tsx' 'type="number"' apps/web
-          ! grep -R --include='*.css' -E 'linear-gradient|radial-gradient|backdrop-filter' apps/web/app/globals.css
-          ! grep -F '?? "http://localhost:3001"' apps/web/lib/server.ts
-          grep -F 'WEB_ORIGINS' apps/server/src/main.rs >/dev/null
-          grep -F 'AllowOrigin::list' apps/server/src/main.rs >/dev/null
-
-      - name: Regenerate patch
-        shell: bash
-        run: |
-          set -euo pipefail
+          mkdir -p artifacts/refine-logs
           git diff --binary "$BASE_SHA" -- . ':(exclude).github' ':(exclude)artifacts' > artifacts/noir-poker-redesign-fairness.patch
           test -s artifacts/noir-poker-redesign-fairness.patch
           sha256sum artifacts/noir-poker-redesign-fairness.patch > artifacts/noir-poker-redesign-fairness.patch.sha256
-          git diff --check "$BASE_SHA" -- . ':(exclude).github' ':(exclude)artifacts'
 
-      - name: Validate patch from clean baseline
+      - name: Replay and fully validate patch
         shell: bash
         run: |
           set -euo pipefail
+          exec > >(tee artifacts/refine-logs/patch-replay.log) 2>&1
           verify="$RUNNER_TEMP/noir-poker-refinement-verify"
           git worktree add --detach "$verify" "$BASE_SHA"
           git -C "$verify" apply --check "$GITHUB_WORKSPACE/artifacts/noir-poker-redesign-fairness.patch"
@@ -166,11 +140,18 @@ jobs:
             TEST_DATABASE_URL="$TEST_DATABASE_URL" cargo test -p server persistence -- --ignored --nocapture
             BB_PATH="$BB_PATH" CHALLENGE_VK_PATH="$verify/apps/server/zk/challenge_v2.vk" cargo test -p server real_proof -- --ignored --nocapture
             BB_PATH="$BB_PATH" CHALLENGE_VK_PATH="$verify/apps/server/zk/challenge_v2.vk" TEST_DATABASE_URL="$TEST_DATABASE_URL" cargo test -p server real_claim -- --ignored --nocapture
+            ! grep -R --include='*.tsx' --include='*.ts' '·' apps/web
+            ! grep -R --include='*.tsx' -E 'not marketing|not mental|not the objective|Choose .*not|, not ' apps/web
+            ! grep -R --include='*.tsx' 'type="number"' apps/web
+            ! grep -R --include='*.css' -E 'linear-gradient|radial-gradient|backdrop-filter' apps/web/app/globals.css
+            ! grep -F '?? "http://localhost:3001"' apps/web/lib/server.ts
+            grep -F 'WEB_ORIGINS' apps/server/src/main.rs >/dev/null
+            grep -F 'AllowOrigin::list' apps/server/src/main.rs >/dev/null
           )
           git -C "$verify" diff --binary "$BASE_SHA" -- . > "$RUNNER_TEMP/reapplied.patch"
           cmp "$RUNNER_TEMP/reapplied.patch" "$GITHUB_WORKSPACE/artifacts/noir-poker-redesign-fairness.patch"
 
-      - name: Write validation report
+      - name: Write durable report
         shell: bash
         run: |
           set -euo pipefail
@@ -190,23 +171,23 @@ jobs:
           - pinned Noir 1.0.0-beta.26 artifact rebuild
           - pinned Barretenberg 5.2.0 real proof verification
           - PostgreSQL persistence/restart and real bounty claim tests
-          - patch applied to a second detached checkout at the exact baseline
-          - complete validation suite repeated after patch application
-          - reapplied source diff byte-for-byte identical to the patch
+          - full patch applied to a detached checkout at the exact baseline
+          - complete suite executed against the reapplied patch
+          - reapplied source diff byte-for-byte identical to the stored patch
           - no numeric spinners, gradients, glass blur, dot-separated product copy or hosted localhost fallback
 
           ## Deployment
 
-          Hosted web builds require \`NEXT_PUBLIC_SERVER_URL\`. The Rust server accepts a comma-separated \`WEB_ORIGINS\` list and keeps \`WEB_ORIGIN\` compatibility. Database migrations run on server startup through the existing SQLx migrator.
+          Hosted web builds require \`NEXT_PUBLIC_SERVER_URL\`. The Rust server accepts comma-separated \`WEB_ORIGINS\` and remains compatible with a single \`WEB_ORIGIN\`. SQLx migrations run automatically during server startup.
 
           ## Security scope
 
-          Settled deals are independently auditable. The authoritative server still sees cards and can abort. Completed-seed selection requires at least one unpredictable non-colluding player entropy share for the stated server-selection guarantee.
+          Settled deals are independently auditable. The authoritative server still sees cards and can abort. The completed-seed selection guarantee requires at least one unpredictable non-colluding player entropy share.
           EOF
           git diff --stat "$BASE_SHA" -- . ':(exclude).github' ':(exclude)artifacts' > artifacts/diff-stat.txt
           git diff --name-status "$BASE_SHA" -- . ':(exclude).github' ':(exclude)artifacts' > artifacts/changed-files.txt
 
-      - name: Save failure diagnostics
+      - name: Save replay failure
         if: failure()
         shell: bash
         run: |
@@ -218,10 +199,10 @@ jobs:
           git config user.name "noir-poker-validation"
           git config user.email "actions@users.noreply.github.com"
           git add artifacts/refine-logs artifacts/refine-failure
-          git commit -m "save final refinement failure [skip ci]"
+          git commit -m "save patch replay failure [skip ci]"
           git push origin "HEAD:refs/heads/$WORK_BRANCH"
 
-      - name: Publish validated artifacts
+      - name: Publish validated refinement
         shell: bash
         run: |
           set -euo pipefail
