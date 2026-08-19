@@ -110,4 +110,79 @@ text, count = re.subn(
 if count != 1:
     raise RuntimeError(f"expected one ready persistence fixture found {count}")
 
+short = '''        let short_stacks = vec![10, 10];
+        let short_first_share = [0x71; 32];
+        let short_second_share = [0x72; 32];
+        let short_ceremony = fairness::random_ceremony(short_id, 0, short_config.players).unwrap();
+        let mut short = Room::new_fair(
+            short_config,
+            short_first,
+            short_ceremony,
+            short_first_share,
+        )
+        .unwrap();
+        let short_ceremony = short.ceremony.as_ref().unwrap().clone();
+        let short_seed = short_ceremony
+            .seed_with(short_id, 1, short_second_share)
+            .unwrap();
+        let short_next_ceremony =
+            fairness::random_ceremony(short_id, 1, short_config.players).unwrap();
+
+        fairness::create_room(
+            &db,
+            short_id,
+            short_config,
+            &short_first,
+            &short_ceremony,
+            short_first_share,
+        )
+        .await
+        .unwrap();
+        fairness::join_room(
+            &db,
+            short_id,
+            1,
+            &short_second,
+            short_second_share,
+            0,
+            1,
+            &short_ceremony,
+            Some(NewHand {
+                id: short_hand,
+                no: 0,
+                seed: &short_seed,
+                dealer: 0,
+                stacks: &short_stacks,
+            }),
+            Some(&short_next_ceremony),
+        )
+        .await
+        .unwrap();
+        short.commit_fair_join(
+            short_second,
+            1,
+            short_second_share,
+            Some(live_hand(
+                short_hand,
+                0,
+                short_seed,
+                0,
+                short_stacks.clone(),
+                short_config,
+            )),
+            Some(short_next_ceremony),
+            1,
+        );
+
+'''
+text, count = re.subn(
+    r"        let short_stacks = vec!\[10, 10\];\n.*?\n(?=        let mut rooms = HashMap::new\(\);)",
+    short,
+    text,
+    count=1,
+    flags=re.S,
+)
+if count != 1:
+    raise RuntimeError(f"expected one short persistence fixture found {count}")
+
 path.write_text(text)
