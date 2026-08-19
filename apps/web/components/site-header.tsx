@@ -9,13 +9,7 @@ export function SiteHeader({ compact = false }: { compact?: boolean }) {
       <nav aria-label="Primary navigation">
         <Link href="/">Play</Link>
         <Link href="/protocol">Protocol</Link>
-        <a href="https://github.com/ishanrk/noir-poker" target="_blank" rel="noreferrer">
-          Source ↗
-        </a>
       </nav>
-      <span className="header-mark" aria-hidden="true">
-        NP / 01
-      </span>
     </header>
   );
 }
