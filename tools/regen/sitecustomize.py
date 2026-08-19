@@ -104,6 +104,17 @@ def fix_main() -> None:
         "fn secure_seed() -> Result<[u8; 32], getrandom::Error>",
         "legacy secure_seed",
     )
+
+    old_reset = "TRUNCATE challenge_assignments, hand_actions, hands, seats, rooms"
+    new_reset = (
+        "TRUNCATE hand_entropy, hand_ceremonies, challenge_assignments, "
+        "hand_actions, hands, seats, rooms"
+    )
+    reset_count = text.count(old_reset)
+    if reset_count == 0:
+        raise RuntimeError("database test reset missing")
+    text = text.replace(old_reset, new_reset)
+
     MAIN.write_text(text)
 
 
