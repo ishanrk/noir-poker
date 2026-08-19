@@ -117,7 +117,7 @@ def fix_main() -> None:
 
     latest = (
         "        let latest_id = Uuid::new_v4();\n"
-        "        let latest_seed = [0x24; 32];\n\n"
+        "        let latest_seed = [0x24u8; 32];\n\n"
         "        sqlx::query(\n"
         "            \"INSERT INTO hands (id, room_id, hand_no, seed, dealer, starting_stacks) \\\\\n"
         "             VALUES ($1, $2, 1, $3, 1, $4)\",\n"
