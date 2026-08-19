@@ -178,7 +178,8 @@ jobs:
             grep -F 'WEB_ORIGINS' apps/server/src/main.rs >/dev/null
             grep -F 'AllowOrigin::list' apps/server/src/main.rs >/dev/null
           )
-          git -C "$verify" diff --binary "$BASE_SHA" -- . > "$RUNNER_TEMP/reapplied.patch"
+          git -C "$verify" add -A
+          git -C "$verify" diff --cached --binary "$BASE_SHA" -- . > "$RUNNER_TEMP/reapplied.patch"
           if ! cmp "$RUNNER_TEMP/reapplied.patch" "$GITHUB_WORKSPACE/artifacts/noir-poker-redesign-fairness.patch"; then
             diff -u "$GITHUB_WORKSPACE/artifacts/noir-poker-redesign-fairness.patch" "$RUNNER_TEMP/reapplied.patch" > artifacts/refine-logs/patch-diff.log || true
             exit 1
