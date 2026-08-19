@@ -1,247 +1,320 @@
-.chips-page {
-  padding-top: 48px;
+.mode-switch {
+  margin: 42px 0 0;
+  padding: 0;
+  border: 0;
 }
 
-.chips-console {
-  width: min(100%, 920px);
-  margin: 0 auto;
+.mode-switch legend {
+  margin-bottom: 9px;
+  color: #535a63;
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.chips-intro {
-  max-width: 760px;
-  padding: 38px 0 44px;
-  border-bottom: 1px solid var(--line-dark);
-}
-
-.chips-intro h1 {
-  margin: 9px 0 18px;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(46px, 7vw, 76px);
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: -.045em;
-}
-
-.chips-intro > p:last-child {
-  max-width: 680px;
-  margin: 0;
-  color: var(--muted);
-  font-size: 17px;
-  line-height: 1.65;
-}
-
-.chips-status {
+.mode-switch > div {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 18px;
-  min-height: 48px;
-  align-items: center;
-  padding: 0 2px;
-  border-bottom: 1px solid var(--line);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--line-strong);
+}
+
+.mode-switch label {
+  position: relative;
+}
+
+.mode-switch label + label {
+  border-left: 1px solid var(--line-strong);
+}
+
+.mode-switch input {
+  position: absolute;
+  opacity: 0;
+}
+
+.mode-switch label > span {
+  display: grid;
+  min-height: 62px;
+  align-content: center;
+  gap: 3px;
+  padding: 0 18px;
+  cursor: pointer;
+}
+
+.mode-switch strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.mode-switch small {
+  color: var(--muted);
   font-family: "Courier New", monospace;
-  font-size: 10px;
+  font-size: 9px;
   letter-spacing: .06em;
   text-transform: uppercase;
 }
 
-.chips-status strong {
-  color: var(--red);
-  font-weight: 700;
-  text-align: right;
-  text-transform: none;
+.mode-switch input:checked + span {
+  color: white;
+  background: var(--blue);
 }
 
-.chips-warning {
-  margin: 28px 0 0;
-  padding: 18px 22px;
-  border-left: 5px solid var(--lime);
-  background: #f1f0ff;
+.mode-switch input:checked + span small {
+  color: var(--lime);
 }
 
-.chips-warning strong {
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 20px;
+.mode-switch input:focus-visible + span {
+  outline: 3px solid var(--lime);
+  outline-offset: -3px;
 }
 
-.chips-warning p {
-  margin: 6px 0 0;
-  color: var(--muted);
-  line-height: 1.55;
-}
-
-.chips-step {
+.aztec-connect {
   display: grid;
-  grid-template-columns: 82px minmax(0, 1fr);
-  gap: 28px;
-  padding: 50px 0;
-  border-bottom: 1px solid var(--line-dark);
-}
-
-.chips-step-number {
-  padding-top: 7px;
-  color: var(--blue);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 42px;
-  line-height: 1;
-}
-
-.chips-step h2,
-.chips-receipt h2 {
-  margin: 0 0 23px;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(29px, 4vw, 42px);
-  font-weight: 500;
-  letter-spacing: -.03em;
-}
-
-.wallet-list {
-  display: grid;
-  margin-top: 20px;
-  border-top: 1px solid var(--line-dark);
-}
-
-.wallet-list button {
-  display: flex;
-  min-height: 54px;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 26px;
   align-items: center;
-  gap: 14px;
-  padding: 0;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  background: transparent;
-  cursor: pointer;
-  font-weight: 700;
-  text-align: left;
+  padding: 26px 0;
+  border-top: 4px solid var(--blue);
+  border-bottom: 1px solid var(--line-strong);
 }
 
-.wallet-list button:hover {
+.aztec-connect-compact {
+  margin-top: 18px;
+}
+
+.aztec-connect-label {
+  display: grid;
+  gap: 4px;
+  align-self: start;
+}
+
+.aztec-connect-label span {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 24px;
+}
+
+.aztec-connect-label small,
+.aztec-connect-status {
   color: var(--blue);
+  font-family: "Courier New", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
 }
 
-.wallet-list img {
-  width: 28px;
-  height: 28px;
-  object-fit: contain;
-}
-
-.wallet-verification {
-  padding: 22px;
-  border: 1px solid var(--blue);
-  background: var(--paper);
-  box-shadow: 8px 8px 0 var(--lime);
-}
-
-.wallet-verification > p {
-  margin: 0 0 14px;
-  color: var(--muted);
-}
-
-.wallet-verification > strong {
-  display: block;
-  margin: 0 0 22px;
-  font-size: clamp(24px, 5vw, 40px);
-  letter-spacing: .16em;
-  overflow-wrap: anywhere;
-}
-
-.wallet-verification > div {
+.aztec-connect-action {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
   align-items: center;
 }
 
-.wallet-connected {
-  display: grid;
-  gap: 9px;
-  padding: 18px 0;
-  border-top: 1px solid var(--line-dark);
-  border-bottom: 1px solid var(--line-dark);
-}
-
-.wallet-connected span {
-  color: var(--blue);
-  font-family: "Courier New", monospace;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
-.wallet-connected code {
+.aztec-connect-action p,
+.aztec-connect-status {
+  margin: 0;
+  color: var(--muted);
   font-size: 11px;
 }
 
-.chip-balance {
+.aztec-verify {
   display: grid;
-  width: min(100%, 360px);
-  grid-template-columns: 1fr auto;
-  gap: 2px 18px;
-  align-items: baseline;
-  padding: 20px 0;
-  border-top: 4px solid var(--blue);
-  border-bottom: 1px solid var(--line-dark);
+  gap: 15px;
+  padding: 18px 20px;
+  border-left: 5px solid var(--lime);
+  background: var(--paper);
 }
 
-.chip-balance span,
-.chip-balance small {
+.aztec-verify p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.aztec-verify > strong {
+  font-size: clamp(21px, 4vw, 34px);
+  letter-spacing: .12em;
+  overflow-wrap: anywhere;
+}
+
+.aztec-verify > div,
+.aztec-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+}
+
+.aztec-account {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 22px;
+  align-items: center;
+}
+
+.aztec-account > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.aztec-account > div:first-child span {
   color: var(--muted);
   font-family: "Courier New", monospace;
-  font-size: 9px;
-  letter-spacing: .08em;
-  text-transform: uppercase;
+  font-size: 10px;
 }
 
-.chip-balance strong {
-  grid-row: 1 / span 2;
-  grid-column: 2;
+.aztec-account > div:first-child strong {
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 38px;
+  font-size: 27px;
   font-weight: 500;
 }
 
-.chips-note {
-  max-width: 600px;
-  margin: 18px 0 24px;
+.aztec-account-actions a {
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--blue);
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.aztec-ready {
+  padding: 7px 10px;
+  color: var(--blue);
+  background: var(--lime);
+  font-family: "Courier New", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.aztec-connect-status,
+.aztec-connect-error {
+  grid-column: 2;
+}
+
+.aztec-connect-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.aztec-stakes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.aztec-stakes > div {
+  display: grid;
+  gap: 8px;
+  padding: 17px 0;
+}
+
+.aztec-stakes > div + div {
+  padding-left: 22px;
+  border-left: 1px solid var(--line);
+}
+
+.aztec-stakes dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.aztec-stakes dd {
+  margin: 0;
+  color: var(--blue);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 21px;
+}
+
+.chips-page {
+  padding-top: 32px;
+}
+
+.chips-console {
+  width: min(100% - 40px, 900px);
+  margin: 0 auto;
+}
+
+.chips-intro {
+  padding: 38px 0 42px;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.chips-intro h1 {
+  margin: 8px 0 12px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(56px, 9vw, 94px);
+  font-weight: 500;
+  line-height: .9;
+  letter-spacing: -.055em;
+}
+
+.chips-intro > p:last-child {
+  margin: 0;
+  color: var(--muted);
+  font-size: 17px;
+}
+
+.chips-buy-in {
+  display: grid;
+  gap: 26px;
+  padding: 44px 0;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.chips-buy-in header h2,
+.chips-receipt h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(30px, 4vw, 42px);
+  font-weight: 500;
+  letter-spacing: -.03em;
+}
+
+.chips-buy-in header p {
+  margin: 7px 0 0;
   color: var(--muted);
   font-size: 13px;
-  line-height: 1.6;
+}
+
+.chips-buy-in .line-input,
+.chips-buy-in .scale-control {
+  max-width: 620px;
 }
 
 .chips-seats {
-  margin: 28px 0;
+  max-width: 620px;
 }
 
 .chips-seats > div {
   grid-template-columns: repeat(6, 1fr);
 }
 
-.chips-seats button {
-  min-height: 48px;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 18px;
-}
-
-.chips-step .scale-control {
-  max-width: 560px;
-  margin: 28px 0;
-}
-
 .chips-receipt {
-  margin: 54px 0 0 110px;
-  padding: 30px 0;
+  padding: 38px 0;
   border-top: 5px solid var(--blue);
-  border-bottom: 1px solid var(--line-dark);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.chips-receipt > .eyebrow {
+  margin-bottom: 8px;
 }
 
 .chips-receipt dl {
-  margin: 0;
+  margin: 26px 0 0;
   border-top: 1px solid var(--line);
 }
 
 .chips-receipt dl > div {
   display: grid;
-  grid-template-columns: 130px minmax(0, 1fr);
+  grid-template-columns: 110px minmax(0, 1fr);
   gap: 18px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
@@ -259,25 +332,15 @@
   overflow-wrap: anywhere;
 }
 
-.chips-receipt dd code {
+.chips-receipt code {
   font-size: 10px;
-}
-
-.chips-receipt > p:last-child {
-  max-width: 700px;
-  margin: 22px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.6;
 }
 
 .chips-network {
   display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
+  grid-template-columns: 130px minmax(0, 1fr);
   gap: 20px;
-  margin: 42px 0 0 110px;
   padding: 15px 0;
-  border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   color: var(--muted);
   font-size: 10px;
@@ -292,41 +355,43 @@
 
 .chips-network code {
   font-size: 10px;
+  overflow-wrap: anywhere;
 }
 
-@media (max-width: 680px) {
+@media (max-width: 700px) {
+  .mode-switch > div,
+  .aztec-stakes {
+    grid-template-columns: 1fr;
+  }
+
+  .mode-switch label + label,
+  .aztec-stakes > div + div {
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .aztec-connect {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .aztec-account {
+    grid-template-columns: 1fr;
+  }
+
+  .aztec-connect-status,
+  .aztec-connect-error {
+    grid-column: 1;
+  }
+
   .chips-page {
-    padding-top: 18px;
-  }
-
-  .chips-step {
-    grid-template-columns: 44px minmax(0, 1fr);
-    gap: 14px;
-    padding: 36px 0;
-  }
-
-  .chips-step-number {
-    font-size: 30px;
-  }
-
-  .chips-receipt,
-  .chips-network {
-    margin-left: 0;
+    padding-top: 12px;
   }
 
   .chips-receipt dl > div,
   .chips-network {
     grid-template-columns: 1fr;
     gap: 6px;
-  }
-
-  .chips-status {
-    grid-template-columns: 1fr;
-    gap: 5px;
-    padding: 12px 0;
-  }
-
-  .chips-status strong {
-    text-align: left;
   }
 }
