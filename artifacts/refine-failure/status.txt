@@ -1,5 +1,11 @@
  M apps/server/src/main.rs
+ M apps/web/app/table/[room]/page.tsx
+ M apps/web/components/deal-audit.tsx
+ M apps/web/components/proof-receipt.tsx
+ M apps/web/components/protocol-demo.tsx
+ M apps/web/components/table.tsx
  M artifacts/noir-poker-redesign-fairness.patch
  M artifacts/noir-poker-redesign-fairness.patch.sha256
  M artifacts/refine-failure/status.txt
-?? artifacts/refine-logs/patch-replay.log
+ M artifacts/refine-logs/patch-replay.log
+?? artifacts/refine-logs/patch-diff.log

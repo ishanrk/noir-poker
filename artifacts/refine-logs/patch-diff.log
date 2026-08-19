@@ -1,0 +1,1596 @@
+--- /home/runner/work/noir-poker/noir-poker/artifacts/noir-poker-redesign-fairness.patch	2026-08-19 02:37:38.411422336 +0000
++++ /home/runner/work/_temp/reapplied.patch	2026-08-19 02:40:02.112005007 +0000
+@@ -101,39 +101,6 @@
+  game-core = { path = "../../crates/game-core" }
+  getrandom = "0.4.3"
+  serde = { version = "1.0.229", features = ["derive"] }
+-diff --git a/apps/server/migrations/20260822000000_fair_deals.sql b/apps/server/migrations/20260822000000_fair_deals.sql
+-new file mode 100644
+-index 0000000..162f628
+---- /dev/null
+-+++ b/apps/server/migrations/20260822000000_fair_deals.sql
+-@@ -0,0 +1,27 @@
+-+CREATE TABLE hand_ceremonies (
+-+    room_id UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+-+    hand_no BIGINT NOT NULL CHECK (hand_no >= 0),
+-+    version INTEGER NOT NULL CHECK (version = 1),
+-+    server_secret BYTEA NOT NULL CHECK (octet_length(server_secret) = 32),
+-+    commitment BYTEA NOT NULL CHECK (octet_length(commitment) = 32),
+-+    final_seed BYTEA CHECK (final_seed IS NULL OR octet_length(final_seed) = 32),
+-+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+-+    revealed_at TIMESTAMPTZ,
+-+    PRIMARY KEY (room_id, hand_no),
+-+    CHECK ((final_seed IS NULL AND revealed_at IS NULL) OR (final_seed IS NOT NULL))
+-+);
+-+
+-+CREATE TABLE hand_entropy (
+-+    room_id UUID NOT NULL,
+-+    hand_no BIGINT NOT NULL,
+-+    seat INTEGER NOT NULL CHECK (seat BETWEEN 0 AND 5),
+-+    share BYTEA NOT NULL CHECK (octet_length(share) = 32),
+-+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+-+    PRIMARY KEY (room_id, hand_no, seat),
+-+    FOREIGN KEY (room_id, hand_no)
+-+        REFERENCES hand_ceremonies(room_id, hand_no)
+-+        ON DELETE CASCADE
+-+);
+-+
+-+CREATE UNIQUE INDEX hand_ceremony_commitment_unique
+-+ON hand_ceremonies(commitment);
+ diff --git a/apps/server/src/db.rs b/apps/server/src/db.rs
+ index ae9626d..0f33c84 100644
+ --- a/apps/server/src/db.rs
+@@ -267,522 +234,6 @@
+          &self.pool
+      }
+  }
+-diff --git a/apps/server/src/fairness.rs b/apps/server/src/fairness.rs
+-new file mode 100644
+-index 0000000..71a23ba
+---- /dev/null
+-+++ b/apps/server/src/fairness.rs
+-@@ -0,0 +1,510 @@
+-+use std::error::Error;
+-+use std::io;
+-+
+-+use deal_core::{PROTOCOL_VERSION, commitment, seed};
+-+use sqlx::{Postgres, Row, Transaction, query};
+-+use uuid::Uuid;
+-+
+-+use crate::db::{Db, NewHand, StoredAction, StoredHand};
+-+use crate::room::{Ceremony, RoomConfig};
+-+
+-+type FairResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
+-+
+-+pub struct StoredAudit {
+-+    pub config: RoomConfig,
+-+    pub hand: StoredHand,
+-+    pub server_secret: [u8; 32],
+-+    pub commitment: [u8; 32],
+-+    pub final_seed: [u8; 32],
+-+    pub shares: Vec<[u8; 32]>,
+-+}
+-+
+-+pub async fn ensure_pending(db: &Db) -> FairResult<()> {
+-+    let rows = query(
+-+        "SELECT rooms.id, rooms.players, COALESCE(MAX(hands.hand_no) + 1, 0) AS next_hand \
+-+         FROM rooms LEFT JOIN hands ON hands.room_id = rooms.id \
+-+         GROUP BY rooms.id, rooms.players ORDER BY rooms.id",
+-+    )
+-+    .fetch_all(db.pool())
+-+    .await?;
+-+
+-+    for row in rows {
+-+        let room: Uuid = row.try_get("id")?;
+-+        let players = usize::try_from(row.try_get::<i32, _>("players")?)?;
+-+        let hand_no = u64::try_from(row.try_get::<i64, _>("next_hand")?)?;
+-+        let exists = query("SELECT 1 FROM hand_ceremonies WHERE room_id = $1 AND hand_no = $2")
+-+            .bind(room)
+-+            .bind(i64::try_from(hand_no)?)
+-+            .fetch_optional(db.pool())
+-+            .await?
+-+            .is_some();
+-+
+-+        if exists {
+-+            continue;
+-+        }
+-+
+-+        let ceremony = random_ceremony(room, hand_no, players)?;
+-+        let mut tx = db.pool().begin().await?;
+-+        insert_ceremony(&mut tx, room, &ceremony).await?;
+-+
+-+        if hand_no == 0 {
+-+            let seats = query("SELECT seat FROM seats WHERE room_id = $1 ORDER BY seat")
+-+                .bind(room)
+-+                .fetch_all(&mut *tx)
+-+                .await?;
+-+
+-+            for seat in seats {
+-+                let seat = usize::try_from(seat.try_get::<i32, _>("seat")?)?;
+-+                let mut share = [0; 32];
+-+                getrandom::fill(&mut share)?;
+-+                insert_share(&mut tx, room, hand_no, seat, share).await?;
+-+            }
+-+        }
+-+
+-+        tx.commit().await?;
+-+    }
+-+
+-+    Ok(())
+-+}
+-+
+-+pub fn random_ceremony(room: Uuid, hand_no: u64, players: usize) -> FairResult<Ceremony> {
+-+    let mut server_secret = [0; 32];
+-+    getrandom::fill(&mut server_secret)?;
+-+    let commitment = commitment(*room.as_bytes(), hand_no, server_secret);
+-+
+-+    Ok(Ceremony {
+-+        hand_no,
+-+        server_secret,
+-+        commitment,
+-+        shares: vec![None; players],
+-+    })
+-+}
+-+
+-+pub async fn create_room(
+-+    db: &Db,
+-+    id: Uuid,
+-+    config: RoomConfig,
+-+    token_hash: &[u8; 32],
+-+    ceremony: &Ceremony,
+-+    share: [u8; 32],
+-+) -> FairResult<()> {
+-+    let mut tx = db.pool().begin().await?;
+-+
+-+    query(
+-+        "INSERT INTO rooms (id, players, stack, small_blind, big_blind, rev) \
+-+         VALUES ($1, $2, $3, $4, $5, 0)",
+-+    )
+-+    .bind(id)
+-+    .bind(i32::try_from(config.players)?)
+-+    .bind(i64::from(config.stack))
+-+    .bind(i64::from(config.small_blind))
+-+    .bind(i64::from(config.big_blind))
+-+    .execute(&mut *tx)
+-+    .await?;
+-+    query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, 0, $2)")
+-+        .bind(id)
+-+        .bind(token_hash.as_slice())
+-+        .execute(&mut *tx)
+-+        .await?;
+-+    insert_ceremony(&mut tx, id, ceremony).await?;
+-+    insert_share(&mut tx, id, ceremony.hand_no, 0, share).await?;
+-+    tx.commit().await?;
+-+    Ok(())
+-+}
+-+
+-+#[allow(clippy::too_many_arguments)]
+-+pub async fn join_room(
+-+    db: &Db,
+-+    room: Uuid,
+-+    seat: usize,
+-+    token_hash: &[u8; 32],
+-+    share: [u8; 32],
+-+    rev: u64,
+-+    next_rev: u64,
+-+    ceremony: &Ceremony,
+-+    hand: Option<NewHand<'_>>,
+-+    next: Option<&Ceremony>,
+-+) -> FairResult<()> {
+-+    let mut tx = db.pool().begin().await?;
+-+
+-+    query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, $2, $3)")
+-+        .bind(room)
+-+        .bind(i32::try_from(seat)?)
+-+        .bind(token_hash.as_slice())
+-+        .execute(&mut *tx)
+-+        .await?;
+-+    insert_share(&mut tx, room, ceremony.hand_no, seat, share).await?;
+-+
+-+    if let Some(hand) = hand {
+-+        let completed = ceremony_with_share(ceremony, seat, share)?;
+-+        finalize_ceremony(&mut tx, room, &completed, hand.seed).await?;
+-+        insert_hand(&mut tx, room, &hand).await?;
+-+        insert_ceremony(
+-+            &mut tx,
+-+            room,
+-+            next.ok_or_else(|| io::Error::other("next deal ceremony missing"))?,
+-+        )
+-+        .await?;
+-+    }
+-+
+-+    update_rev(&mut tx, room, rev, next_rev).await?;
+-+    tx.commit().await?;
+-+    Ok(())
+-+}
+-+
+-+#[allow(clippy::too_many_arguments)]
+-+pub async fn ready(
+-+    db: &Db,
+-+    room: Uuid,
+-+    hand_id: Uuid,
+-+    seat: usize,
+-+    share: [u8; 32],
+-+    rev: u64,
+-+    next_rev: u64,
+-+    ceremony: &Ceremony,
+-+    hand: Option<NewHand<'_>>,
+-+    next: Option<&Ceremony>,
+-+) -> FairResult<()> {
+-+    let mut tx = db.pool().begin().await?;
+-+    let changed = query(
+-+        "UPDATE seats SET ready_hand = $3 \
+-+         WHERE room_id = $1 AND seat = $2 AND ready_hand IS NULL",
+-+    )
+-+    .bind(room)
+-+    .bind(i32::try_from(seat)?)
+-+    .bind(hand_id)
+-+    .execute(&mut *tx)
+-+    .await?;
+-+
+-+    if changed.rows_affected() != 1 {
+-+        return Err(io::Error::other("seat readiness mismatch").into());
+-+    }
+-+
+-+    insert_share(&mut tx, room, ceremony.hand_no, seat, share).await?;
+-+
+-+    if let Some(hand) = hand {
+-+        let completed = ceremony_with_share(ceremony, seat, share)?;
+-+        finalize_ceremony(&mut tx, room, &completed, hand.seed).await?;
+-+        insert_hand(&mut tx, room, &hand).await?;
+-+        insert_ceremony(
+-+            &mut tx,
+-+            room,
+-+            next.ok_or_else(|| io::Error::other("next deal ceremony missing"))?,
+-+        )
+-+        .await?;
+-+        query("UPDATE seats SET ready_hand = NULL WHERE room_id = $1")
+-+            .bind(room)
+-+            .execute(&mut *tx)
+-+            .await?;
+-+    }
+-+
+-+    update_rev(&mut tx, room, rev, next_rev).await?;
+-+    tx.commit().await?;
+-+    Ok(())
+-+}
+-+
+-+pub async fn load_pending(db: &Db, room: Uuid, players: usize) -> FairResult<Option<Ceremony>> {
+-+    let Some(row) = query(
+-+        "SELECT hand_no, server_secret, commitment FROM hand_ceremonies \
+-+         WHERE room_id = $1 AND final_seed IS NULL ORDER BY hand_no DESC LIMIT 1",
+-+    )
+-+    .bind(room)
+-+    .fetch_optional(db.pool())
+-+    .await?
+-+    else {
+-+        return Ok(None);
+-+    };
+-+    let hand_no = u64::try_from(row.try_get::<i64, _>("hand_no")?)?;
+-+    let server_secret = bytes(row.try_get("server_secret")?)?;
+-+    let commitment = bytes(row.try_get("commitment")?)?;
+-+    let mut shares = vec![None; players];
+-+    let rows = query(
+-+        "SELECT seat, share FROM hand_entropy \
+-+         WHERE room_id = $1 AND hand_no = $2 ORDER BY seat",
+-+    )
+-+    .bind(room)
+-+    .bind(i64::try_from(hand_no)?)
+-+    .fetch_all(db.pool())
+-+    .await?;
+-+
+-+    for row in rows {
+-+        let seat = usize::try_from(row.try_get::<i32, _>("seat")?)?;
+-+        let slot = shares
+-+            .get_mut(seat)
+-+            .ok_or_else(|| io::Error::other("invalid deal contribution seat"))?;
+-+        *slot = Some(bytes(row.try_get("share")?)?);
+-+    }
+-+
+-+    Ok(Some(Ceremony {
+-+        hand_no,
+-+        server_secret,
+-+        commitment,
+-+        shares,
+-+    }))
+-+}
+-+
+-+pub async fn current_commitment(db: &Db, room: Uuid) -> FairResult<Option<[u8; 32]>> {
+-+    let row = query(
+-+        "SELECT ceremony.commitment FROM hands \
+-+         JOIN hand_ceremonies ceremony \
+-+           ON ceremony.room_id = hands.room_id AND ceremony.hand_no = hands.hand_no \
+-+         WHERE hands.room_id = $1 ORDER BY hands.hand_no DESC LIMIT 1",
+-+    )
+-+    .bind(room)
+-+    .fetch_optional(db.pool())
+-+    .await?;
+-+
+-+    row.map(|row| bytes(row.try_get("commitment")?)).transpose()
+-+}
+-+
+-+pub async fn audit(db: &Db, room: Uuid, hand_no: u64) -> FairResult<Option<StoredAudit>> {
+-+    let Some(row) = query(
+-+        "SELECT rooms.players, rooms.stack, rooms.small_blind, rooms.big_blind, \
+-+         hands.id, hands.seed, hands.dealer, hands.starting_stacks, \
+-+         ceremony.server_secret, ceremony.commitment, ceremony.final_seed \
+-+         FROM rooms JOIN hands ON hands.room_id = rooms.id \
+-+         JOIN hand_ceremonies ceremony \
+-+           ON ceremony.room_id = hands.room_id AND ceremony.hand_no = hands.hand_no \
+-+         WHERE rooms.id = $1 AND hands.hand_no = $2",
+-+    )
+-+    .bind(room)
+-+    .bind(i64::try_from(hand_no)?)
+-+    .fetch_optional(db.pool())
+-+    .await?
+-+    else {
+-+        return Ok(None);
+-+    };
+-+    let id: Uuid = row.try_get("id")?;
+-+    let actions = query(
+-+        "SELECT seq, player, action, raise_to FROM hand_actions \
+-+         WHERE hand_id = $1 ORDER BY seq",
+-+    )
+-+    .bind(id)
+-+    .fetch_all(db.pool())
+-+    .await?
+-+    .into_iter()
+-+    .map(|row| {
+-+        Ok(StoredAction {
+-+            seq: row.try_get("seq")?,
+-+            player: row.try_get("player")?,
+-+            action: row.try_get("action")?,
+-+            raise_to: row.try_get("raise_to")?,
+-+        })
+-+    })
+-+    .collect::<FairResult<Vec<_>>>()?;
+-+    let shares = query(
+-+        "SELECT seat, share FROM hand_entropy \
+-+         WHERE room_id = $1 AND hand_no = $2 ORDER BY seat",
+-+    )
+-+    .bind(room)
+-+    .bind(i64::try_from(hand_no)?)
+-+    .fetch_all(db.pool())
+-+    .await?
+-+    .into_iter()
+-+    .enumerate()
+-+    .map(|(expected, row)| {
+-+        let seat = usize::try_from(row.try_get::<i32, _>("seat")?)?;
+-+
+-+        if seat != expected {
+-+            return Err(io::Error::other("deal contribution sequence gap").into());
+-+        }
+-+
+-+        bytes(row.try_get("share")?)
+-+    })
+-+    .collect::<FairResult<Vec<_>>>()?;
+-+    let players = usize::try_from(row.try_get::<i32, _>("players")?)?;
+-+
+-+    if shares.len() != players {
+-+        return Err(io::Error::other("deal contributions missing").into());
+-+    }
+-+
+-+    Ok(Some(StoredAudit {
+-+        config: RoomConfig {
+-+            players,
+-+            stack: u32::try_from(row.try_get::<i64, _>("stack")?)?,
+-+            small_blind: u32::try_from(row.try_get::<i64, _>("small_blind")?)?,
+-+            big_blind: u32::try_from(row.try_get::<i64, _>("big_blind")?)?,
+-+        },
+-+        hand: StoredHand {
+-+            id,
+-+            hand_no: i64::try_from(hand_no)?,
+-+            seed: row.try_get("seed")?,
+-+            dealer: row.try_get("dealer")?,
+-+            stacks: row.try_get("starting_stacks")?,
+-+            actions,
+-+        },
+-+        server_secret: bytes(row.try_get("server_secret")?)?,
+-+        commitment: bytes(row.try_get("commitment")?)?,
+-+        final_seed: bytes(
+-+            row.try_get::<Option<Vec<u8>>, _>("final_seed")?
+-+                .ok_or_else(|| io::Error::other("deal is not final"))?,
+-+        )?,
+-+        shares,
+-+    }))
+-+}
+-+
+-+async fn insert_ceremony(
+-+    tx: &mut Transaction<'_, Postgres>,
+-+    room: Uuid,
+-+    ceremony: &Ceremony,
+-+) -> FairResult<()> {
+-+    query(
+-+        "INSERT INTO hand_ceremonies \
+-+         (room_id, hand_no, version, server_secret, commitment) \
+-+         VALUES ($1, $2, $3, $4, $5)",
+-+    )
+-+    .bind(room)
+-+    .bind(i64::try_from(ceremony.hand_no)?)
+-+    .bind(i32::from(PROTOCOL_VERSION))
+-+    .bind(ceremony.server_secret.as_slice())
+-+    .bind(ceremony.commitment.as_slice())
+-+    .execute(&mut **tx)
+-+    .await?;
+-+    Ok(())
+-+}
+-+
+-+async fn insert_share(
+-+    tx: &mut Transaction<'_, Postgres>,
+-+    room: Uuid,
+-+    hand_no: u64,
+-+    seat: usize,
+-+    share: [u8; 32],
+-+) -> FairResult<()> {
+-+    query("INSERT INTO hand_entropy (room_id, hand_no, seat, share) VALUES ($1, $2, $3, $4)")
+-+        .bind(room)
+-+        .bind(i64::try_from(hand_no)?)
+-+        .bind(i32::try_from(seat)?)
+-+        .bind(share.as_slice())
+-+        .execute(&mut **tx)
+-+        .await?;
+-+    Ok(())
+-+}
+-+
+-+fn ceremony_with_share(ceremony: &Ceremony, seat: usize, share: [u8; 32]) -> FairResult<Ceremony> {
+-+    let mut completed = ceremony.clone();
+-+    let slot = completed
+-+        .shares
+-+        .get_mut(seat)
+-+        .ok_or_else(|| io::Error::other("invalid deal contribution seat"))?;
+-+
+-+    if slot.is_some() {
+-+        return Err(io::Error::other("deal contribution already submitted").into());
+-+    }
+-+
+-+    *slot = Some(share);
+-+    Ok(completed)
+-+}
+-+
+-+async fn finalize_ceremony(
+-+    tx: &mut Transaction<'_, Postgres>,
+-+    room: Uuid,
+-+    ceremony: &Ceremony,
+-+    final_seed: &[u8; 32],
+-+) -> FairResult<()> {
+-+    let shares = ceremony
+-+        .shares
+-+        .iter()
+-+        .copied()
+-+        .collect::<Option<Vec<_>>>()
+-+        .ok_or_else(|| io::Error::other("deal contributions missing"))?;
+-+    let expected = seed(
+-+        *room.as_bytes(),
+-+        ceremony.hand_no,
+-+        ceremony.server_secret,
+-+        &shares,
+-+    )
+-+    .ok_or_else(|| io::Error::other("cannot derive deal seed"))?;
+-+
+-+    if expected != *final_seed
+-+        || commitment(*room.as_bytes(), ceremony.hand_no, ceremony.server_secret)
+-+            != ceremony.commitment
+-+    {
+-+        return Err(io::Error::other("deal transcript mismatch").into());
+-+    }
+-+
+-+    let changed = query(
+-+        "UPDATE hand_ceremonies SET final_seed = $3 \
+-+         WHERE room_id = $1 AND hand_no = $2 AND final_seed IS NULL",
+-+    )
+-+    .bind(room)
+-+    .bind(i64::try_from(ceremony.hand_no)?)
+-+    .bind(final_seed.as_slice())
+-+    .execute(&mut **tx)
+-+    .await?;
+-+
+-+    one_row(changed.rows_affected(), "deal finalization mismatch")
+-+}
+-+
+-+async fn insert_hand(
+-+    tx: &mut Transaction<'_, Postgres>,
+-+    room: Uuid,
+-+    hand: &NewHand<'_>,
+-+) -> FairResult<()> {
+-+    let stacks: Vec<_> = hand.stacks.iter().copied().map(i64::from).collect();
+-+
+-+    query(
+-+        "INSERT INTO hands (id, room_id, hand_no, seed, dealer, starting_stacks) \
+-+         VALUES ($1, $2, $3, $4, $5, $6)",
+-+    )
+-+    .bind(hand.id)
+-+    .bind(room)
+-+    .bind(i64::try_from(hand.no)?)
+-+    .bind(hand.seed.as_slice())
+-+    .bind(i32::try_from(hand.dealer)?)
+-+    .bind(stacks)
+-+    .execute(&mut **tx)
+-+    .await?;
+-+    Ok(())
+-+}
+-+
+-+async fn update_rev(
+-+    tx: &mut Transaction<'_, Postgres>,
+-+    room: Uuid,
+-+    rev: u64,
+-+    next_rev: u64,
+-+) -> FairResult<()> {
+-+    let changed = query("UPDATE rooms SET rev = $2 WHERE id = $1 AND rev = $3")
+-+        .bind(room)
+-+        .bind(i64::try_from(next_rev)?)
+-+        .bind(i64::try_from(rev)?)
+-+        .execute(&mut **tx)
+-+        .await?;
+-+
+-+    one_row(changed.rows_affected(), "room revision mismatch")
+-+}
+-+
+-+fn one_row(rows: u64, message: &'static str) -> FairResult<()> {
+-+    if rows != 1 {
+-+        return Err(io::Error::other(message).into());
+-+    }
+-+
+-+    Ok(())
+-+}
+-+
+-+fn bytes(value: Vec<u8>) -> FairResult<[u8; 32]> {
+-+    value
+-+        .try_into()
+-+        .map_err(|_| io::Error::other("invalid deal transcript bytes").into())
+-+}
+-+
+-+#[cfg(test)]
+-+mod tests {
+-+    use super::*;
+-+
+-+    #[test]
+-+    fn ceremony_binds_context() {
+-+        let room = Uuid::from_u128(1);
+-+        let first = Ceremony {
+-+            hand_no: 4,
+-+            server_secret: [7; 32],
+-+            commitment: commitment(*room.as_bytes(), 4, [7; 32]),
+-+            shares: vec![Some([1; 32]), Some([2; 32])],
+-+        };
+-+
+-+        assert_ne!(
+-+            first.commitment,
+-+            commitment(*Uuid::from_u128(2).as_bytes(), 4, [7; 32])
+-+        );
+-+        assert_ne!(first.commitment, commitment(*room.as_bytes(), 5, [7; 32]));
+-+    }
+-+}
+ diff --git a/apps/server/src/main.rs b/apps/server/src/main.rs
+ index 058be4d..32a57ca 100644
+ --- a/apps/server/src/main.rs
+@@ -1897,19 +1348,6 @@
+  pub(super) struct PendingReady {
+      pub(super) hand: Uuid,
+      pub(super) rev: u64,
+-diff --git a/apps/web/app/audit/[room]/[hand]/page.tsx b/apps/web/app/audit/[room]/[hand]/page.tsx
+-new file mode 100644
+-index 0000000..ae255af
+---- /dev/null
+-+++ b/apps/web/app/audit/[room]/[hand]/page.tsx
+-@@ -0,0 +1,7 @@
+-+import { DealAuditView } from "@/components/deal-audit";
+-+
+-+export default async function AuditPage({ params }: { params: Promise<{ room: string; hand: string }> }) {
+-+  const { room, hand } = await params;
+-+  const handNo = Number(hand);
+-+  return <DealAuditView room={room} hand={handNo} />;
+-+}
+ diff --git a/apps/web/app/globals.css b/apps/web/app/globals.css
+ index 0060232..5873664 100644
+ --- a/apps/web/app/globals.css
+@@ -3609,181 +3047,6 @@
+ -
+    return <ProofReceiptView nullifier={nullifier} />;
+  }
+-diff --git a/apps/web/app/protocol/page.tsx b/apps/web/app/protocol/page.tsx
+-new file mode 100644
+-index 0000000..a40e7cb
+---- /dev/null
+-+++ b/apps/web/app/protocol/page.tsx
+-@@ -0,0 +1,169 @@
+-+import { ProtocolDemo } from "@/components/protocol-demo";
+-+import { SiteHeader } from "@/components/site-header";
+-+
+-+export default function ProtocolPage() {
+-+  return (
+-+    <main className="site-shell protocol-page">
+-+      <SiteHeader compact />
+-+
+-+      <header className="protocol-hero">
+-+        <h1>Protocol and verification.</h1>
+-+        <p>
+-+          Every settled hand has a public deal audit. Every bounty award has a zero-knowledge
+-+          receipt. Both can be checked independently in the browser or from the command line.
+-+        </p>
+-+      </header>
+-+
+-+      <section className="protocol-section">
+-+        <div className="protocol-copy">
+-+          <h2>Why it matters</h2>
+-+          <p>
+-+            Server-authoritative poker usually requires players to trust the backend shuffle. Noir
+-+            Poker commits the server&apos;s randomness before player entropy is known. After settlement,
+-+            the complete transcript is revealed and the deck can be reconstructed exactly.
+-+          </p>
+-+          <p>
+-+            Bounties use a separate Noir proof. A verifier can confirm that a hidden objective came
+-+            from the fixed catalog and was completed using the recorded hand facts while the
+-+            objective remains private.
+-+          </p>
+-+        </div>
+-+      </section>
+-+
+-+      <section className="protocol-section" id="deals">
+-+        <div className="protocol-copy">
+-+          <h2>Deal protocol</h2>
+-+          <p>
+-+            For room <code>R</code> and hand <code>h</code>, the server samples a 32-byte secret
+-+            <code> S</code> and durably stores
+-+            <code> SHA256(&quot;NPDEAL01&quot; || R || u64_be(h) || S)</code> before player shares are
+-+            accepted.
+-+          </p>
+-+          <p>
+-+            Seat <code>i</code> samples a fresh 32-byte share <code>E_i</code> with the browser
+-+            cryptographic RNG. The final seed is
+-+            <code>
+-+              SHA256(&quot;NPSEED01&quot; || R || u64_be(h) || player_count || ordered(u8(i), E_i) || S)
+-+            </code>
+-+            . Seat indices are encoded explicitly, so changing share order changes the seed.
+-+          </p>
+-+          <p>
+-+            Card ids 0 through 51 use suit-major order: clubs, diamonds, hearts, spades; each suit
+-+            contains ranks 2 through ace. Fisher–Yates consumes 32-bit words from
+-+            <code> SHA256(&quot;NPSTRM01&quot; || seed || u64_be(counter))</code>. Rejection sampling removes
+-+            modulo bias. Hole cards are dealt in two clockwise rounds starting left of the dealer,
+-+            followed by burn, flop, burn, turn, burn, river.
+-+          </p>
+-+
+-+          <ProtocolDemo />
+-+
+-+          <div className="protocol-facts">
+-+            <article>
+-+              <span>Before the hand</span>
+-+              <strong>Server commitment and contribution count</strong>
+-+            </article>
+-+            <article>
+-+              <span>During the hand</span>
+-+              <strong>Secret, shares and final seed stay sealed</strong>
+-+            </article>
+-+            <article>
+-+              <span>After settlement</span>
+-+              <strong>Secret, ordered shares, seed and all 52 positions</strong>
+-+            </article>
+-+          </div>
+-+
+-+          <p>
+-+            If at least one player share is unpredictable and comes from a non-colluding player, the
+-+            server cannot choose the completed seed after seeing all player entropy without breaking
+-+            its earlier commitment.
+-+          </p>
+-+        </div>
+-+      </section>
+-+
+-+      <section className="protocol-section" id="bounties">
+-+        <div className="protocol-copy">
+-+          <h2>Private bounty protocol</h2>
+-+          <p>
+-+            The browser commits to a private 32-byte secret before the server returns its nonce. The
+-+            selector hashes the hand tag, seat, nonce and secret, then uses the low three bits to
+-+            choose one of eight objective leaves. A private three-level Merkle path proves that the
+-+            selected objective belongs to the published catalog root.
+-+          </p>
+-+
+-+          <div className="circuit-statement">
+-+            <div>
+-+              <span>Public inputs</span>
+-+              <code>mode hand_tag seat commitment nonce facts_hash nullifier catalog_root</code>
+-+            </div>
+-+            <div>
+-+              <span>Private witness</span>
+-+              <code>secret facts_salt six hand facts objective literals Merkle siblings</code>
+-+            </div>
+-+          </div>
+-+
+-+          <p>
+-+            Draw mode proves fair objective selection before the next hand starts. Completion mode
+-+            proves that the same hidden objective is satisfied by the server-bound facts commitment.
+-+            The six facts are: saw flop, raised preflop, called preflop, checked flop, reached
+-+            showdown and net profit.
+-+          </p>
+-+          <p>
+-+            NoirJS executes the circuit in the browser. Barretenberg generates an UltraHonk proof.
+-+            The Rust server verifies the proof and exact public inputs before awarding 20 proof
+-+            points. The public receipt viewer runs the same proof verification again in the visitor&apos;s
+-+            browser.
+-+          </p>
+-+
+-+          <dl className="protocol-stack">
+-+            <div><dt>Circuit</dt><dd>Noir 1.0.0-beta.26</dd></div>
+-+            <div><dt>Proof system</dt><dd>UltraHonk</dd></div>
+-+            <div><dt>Backend</dt><dd>Barretenberg 5.2.0</dd></div>
+-+            <div><dt>Deal hash</dt><dd>SHA-256</dd></div>
+-+            <div><dt>Bounty hash</dt><dd>BLAKE2s-256</dd></div>
+-+            <div><dt>Circuit artifact</dt><dd>1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d</dd></div>
+-+            <div><dt>Verification key</dt><dd>b435db9d240683e181d8bad47203bf85d57ca27982bc676cf2686b5cf3de1d67</dd></div>
+-+          </dl>
+-+        </div>
+-+      </section>
+-+
+-+      <section className="protocol-section" id="verify">
+-+        <div className="protocol-copy verifier-commands">
+-+          <h2>Verify it yourself</h2>
+-+
+-+          <h3>Settled hand</h3>
+-+          <p>
+-+            Open <code>/audit/&lt;room&gt;/&lt;hand&gt;</code>. The browser checks the server commitment
+-+            opening, ordered player shares, derived seed, complete 52-card permutation, both hole-card
+-+            rounds, all three burns and the five board positions.
+-+          </p>
+-+          <code>npm --prefix apps/web run deal:verify -- audit.json</code>
+-+
+-+          <h3>Bounty award</h3>
+-+          <p>
+-+            Open <code>/proof/&lt;nullifier&gt;</code>. The browser verifies both UltraHonk proofs and
+-+            checks that draw and completion use the same hand tag, seat, commitment, nonce and catalog
+-+            root. It also checks the completion facts hash, nullifier and 20-point award binding.
+-+          </p>
+-+          <code>npm --prefix apps/web run proof:verify -- receipt.json</code>
+-+
+-+          <p>
+-+            The proof establishes the hidden objective statement. PostgreSQL separately enforces one
+-+            accepted claim per nullifier and persists the awarded points.
+-+          </p>
+-+        </div>
+-+      </section>
+-+
+-+      <section className="protocol-section">
+-+        <div className="protocol-copy">
+-+          <h2>Security limits</h2>
+-+          <ul className="protocol-list">
+-+            <li>The authoritative server sees every card during play.</li>
+-+            <li>The server can abort a ceremony before a completed transcript is published.</li>
+-+            <li>The deal guarantee requires one unpredictable non-colluding player contribution.</li>
+-+            <li>Full server and player collusion defeats the honest-contribution assumption.</li>
+-+          </ul>
+-+        </div>
+-+      </section>
+-+    </main>
+-+  );
+-+}
+ diff --git a/apps/web/app/table/[room]/page.tsx b/apps/web/app/table/[room]/page.tsx
+ index 7bcba1b..f328a61 100644
+ --- a/apps/web/app/table/[room]/page.tsx
+@@ -4220,186 +3483,6 @@
+      </section>
+    );
+  }
+-diff --git a/apps/web/components/deal-audit.tsx b/apps/web/components/deal-audit.tsx
+-new file mode 100644
+-index 0000000..edf9066
+---- /dev/null
+-+++ b/apps/web/components/deal-audit.tsx
+-@@ -0,0 +1,116 @@
+-+"use client";
+-+
+-+import Link from "next/link";
+-+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+-+
+-+import { Card } from "@/components/card";
+-+import { SiteHeader } from "@/components/site-header";
+-+import { cardValue, verifyDealAudit, type DealVerification } from "@/lib/deal";
+-+import { loadDealAudit, type DealAudit } from "@/lib/server";
+-+
+-+type AuditState = "loading" | "verified" | "failed";
+-+
+-+export function DealAuditView({ room, hand }: { room: string; hand: number }) {
+-+  const [audit, setAudit] = useState<DealAudit>();
+-+  const [verification, setVerification] = useState<DealVerification>();
+-+  const [state, setState] = useState<AuditState>("loading");
+-+  const [error, setError] = useState<string>();
+-+  const [replay, setReplay] = useState(0);
+-+
+-+  useEffect(() => {
+-+    let live = true;
+-+    void loadDealAudit(room, hand)
+-+      .then((value) => {
+-+        const result = verifyDealAudit(value);
+-+        if (!live) return;
+-+        setAudit(value);
+-+        setVerification(result);
+-+        setState("verified");
+-+      })
+-+      .catch((cause) => {
+-+        if (!live) return;
+-+        setState("failed");
+-+        setError(cause instanceof Error ? cause.message : "deal verification failed");
+-+      });
+-+    return () => { live = false; };
+-+  }, [hand, room]);
+-+
+-+  const layout = verification?.layout;
+-+  const dealt = useMemo(() => {
+-+    if (!layout) return [];
+-+    return layout.hole.flat().concat(layout.burns, layout.board).map(cardValue);
+-+  }, [layout]);
+-+
+-+  return (
+-+    <main className="site-shell audit-page">
+-+      <SiteHeader compact />
+-+      <header className="audit-hero">
+-+        <div>
+-+          <p className="eyebrow">Independent deal audit</p>
+-+          <h1>{state === "verified" ? "All 52 positions reproduce." : "Rebuilding the deck."}</h1>
+-+          <p>Nothing below trusts the server&apos;s “verified” label. The browser recomputes every hash and swap locally.</p>
+-+        </div>
+-+        <div className="audit-deck" data-state={state} data-replay={replay}>
+-+          {Array.from({ length: 9 }, (_, index) => <i key={index} style={{ "--card-index": index } as CSSProperties} />)}
+-+          <strong>{state === "verified" ? "52 / 52" : "…"}</strong>
+-+        </div>
+-+      </header>
+-+
+-+      <section className="audit-steps" aria-live="polite">
+-+        {[
+-+          ["01", "Open commitment", verification?.commitment],
+-+          ["02", "Combine player entropy", verification?.seed],
+-+          ["03", "Replay unbiased shuffle", verification?.shuffle],
+-+          ["04", "Map seats and board", verification?.seats],
+-+        ].map(([number, label, passed]) => (
+-+          <div key={String(number)} data-state={passed ? "verified" : state}>
+-+            <span>{number}</span><strong>{label}</strong><i>{passed ? "pass" : state}</i>
+-+          </div>
+-+        ))}
+-+      </section>
+-+
+-+      {error && <p className="proof-error">{error}</p>}
+-+
+-+      {audit && layout && (
+-+        <>
+-+          <section className="audit-transcript">
+-+            <div className="section-index"><span>Transcript</span><p>Public after settlement</p></div>
+-+            <dl>
+-+              <div><dt>room / hand</dt><dd>{audit.room} / {audit.hand_no}</dd></div>
+-+              <div><dt>server commitment</dt><dd>{audit.commitment}</dd></div>
+-+              <div><dt>revealed server secret</dt><dd>{audit.server_secret}</dd></div>
+-+              <div><dt>combined seed</dt><dd>{audit.seed}</dd></div>
+-+              <div><dt>player shares</dt><dd>{audit.contributions.length} ordered contributions</dd></div>
+-+              <div><dt>algorithm</dt><dd>{audit.algorithm}</dd></div>
+-+            </dl>
+-+          </section>
+-+
+-+          <section className="deal-replay" key={replay}>
+-+            <header>
+-+              <div><p className="protocol-label">Deterministic deal map</p><h2>Watch the verified deck leave the stack.</h2></div>
+-+              <button type="button" onClick={() => setReplay((value) => value + 1)}>Replay motion ↻</button>
+-+            </header>
+-+            <div className="audit-table">
+-+              <div className="audit-board">
+-+                {layout.board.map((card, index) => <Card key={card} value={cardValue(card)} delay={900 + index * 150} />)}
+-+              </div>
+-+              {layout.hole.map((cards, seat) => (
+-+                <div className={`audit-seat audit-seat-${seat}`} key={seat}>
+-+                  <span>Seat {seat + 1}{audit.dealer === seat ? " (dealer)" : ""}</span>
+-+                  <div><Card value={cardValue(cards[0])} delay={seat * 120} /><Card value={cardValue(cards[1])} delay={seat * 120 + 300} /></div>
+-+                </div>
+-+              ))}
+-+              <div className="burn-cards"><span>burns</span>{layout.burns.map(cardValue).join(", ")}</div>
+-+            </div>
+-+            <p className="audit-footnote">The first {dealt.length} consumed positions match the engine&apos;s clockwise deal and three burn rules.</p>
+-+          </section>
+-+        </>
+-+      )}
+-+
+-+      <section className="receipt-actions">
+-+        <Link href="/protocol#deals">Read the byte-level protocol →</Link>
+-+        <details><summary>CLI verifier</summary><code>npm --prefix apps/web run deal:verify -- audit.json</code></details>
+-+      </section>
+-+    </main>
+-+  );
+-+}
+-diff --git a/apps/web/components/deal-integrity.tsx b/apps/web/components/deal-integrity.tsx
+-new file mode 100644
+-index 0000000..7be9037
+---- /dev/null
+-+++ b/apps/web/components/deal-integrity.tsx
+-@@ -0,0 +1,52 @@
+-+import Link from "next/link";
+-+
+-+export type DealView = {
+-+  hand_no: number;
+-+  commitment: string;
+-+  contributors: number;
+-+  required: number;
+-+  mine: boolean;
+-+  state: "collecting" | "sealed" | "revealed";
+-+  audit: boolean;
+-+};
+-+
+-+export function DealIntegrity({
+-+  deal,
+-+  room,
+-+  compact = false,
+-+}: {
+-+  deal: DealView;
+-+  room: string;
+-+  compact?: boolean;
+-+}) {
+-+  const label =
+-+    deal.state === "collecting"
+-+      ? `${deal.contributors}/${deal.required} entropy shares`
+-+      : deal.state === "sealed"
+-+        ? "deck fixed before play"
+-+        : "transcript open for replay";
+-+
+-+  return (
+-+    <section className={`deal-integrity${compact ? " deal-integrity-compact" : ""}`}>
+-+      <div className="deal-stack" data-state={deal.state} aria-hidden="true">
+-+        <i />
+-+        <i />
+-+        <i />
+-+        <span>{deal.state === "revealed" ? "✓" : "◆"}</span>
+-+      </div>
+-+      <div className="deal-copy">
+-+        <p className="protocol-label">Deal / Hand {deal.hand_no}</p>
+-+        <strong>{label}</strong>
+-+        <code title={deal.commitment}>{deal.commitment.slice(0, 16)}…</code>
+-+      </div>
+-+      <div className="deal-actions">
+-+        <span className="deal-state">{deal.state}</span>
+-+        {deal.audit ? (
+-+          <Link href={`/audit/${room}/${deal.hand_no}`}>Replay deal →</Link>
+-+        ) : (
+-+          <Link href="/protocol">How this works →</Link>
+-+        )}
+-+      </div>
+-+    </section>
+-+  );
+-+}
+ diff --git a/apps/web/components/lobby.tsx b/apps/web/components/lobby.tsx
+ index 92487ae..2f28f8a 100644
+ --- a/apps/web/components/lobby.tsx
+@@ -5756,62 +4839,6 @@
+        </section>
+      </main>
+    );
+-diff --git a/apps/web/components/protocol-demo.tsx b/apps/web/components/protocol-demo.tsx
+-new file mode 100644
+-index 0000000..7a6a84e
+---- /dev/null
+-+++ b/apps/web/components/protocol-demo.tsx
+-@@ -0,0 +1,50 @@
+-+"use client";
+-+
+-+import { useMemo, useState } from "react";
+-+
+-+import { cardValue, dealCommitment, dealLayout, dealSeed, encodeHex, shuffleDeck } from "@/lib/deal";
+-+
+-+const ROOM = "00112233-4455-6677-8899-aabbccddeeff";
+-+const SECRET = new Uint8Array(32).fill(0x11);
+-+const SHARES = [0x22, 0x33, 0x44].map((byte) => new Uint8Array(32).fill(byte));
+-+
+-+export function ProtocolDemo() {
+-+  const [step, setStep] = useState(0);
+-+  const values = useMemo(() => {
+-+    const commitment = dealCommitment(ROOM, BigInt(7), SECRET);
+-+    const seed = dealSeed(ROOM, BigInt(7), SECRET, SHARES);
+-+    const deck = shuffleDeck(seed);
+-+    return { commitment, seed, deck, layout: dealLayout(deck, 3, 1) };
+-+  }, []);
+-+  const labels = ["Commit server secret", "Add three ordered shares", "Shuffle all 52 positions", "Deal seats, burns and board"];
+-+
+-+  return (
+-+    <div className="protocol-demo">
+-+      <div className="demo-controls">
+-+        {labels.map((label, index) => (
+-+          <button key={label} type="button" data-active={step === index} onClick={() => setStep(index)}>
+-+            <span>0{index + 1}</span>{label}
+-+          </button>
+-+        ))}
+-+      </div>
+-+      <div className="demo-stage" data-step={step}>
+-+        <div className="demo-stack">{Array.from({ length: 6 }, (_, index) => <i key={index} />)}</div>
+-+        <div className="demo-output">
+-+          <span>{labels[step]}</span>
+-+          <code>
+-+            {step === 0 && `${encodeHex(values.commitment).slice(0, 32)}…`}
+-+            {step === 1 && "seat 0, seat 1, seat 2"}
+-+            {step === 2 && values.deck.slice(0, 12).map(cardValue).join("  ")}
+-+            {step === 3 && values.layout.board.map(cardValue).join("  ")}
+-+          </code>
+-+          <p>
+-+            {step === 0 && "The commitment is published before the final joining player reveals entropy."}
+-+            {step === 1 && "Seat indices are encoded, so reordering the same shares changes the seed."}
+-+            {step === 2 && "SHA-256 counter blocks feed rejection sampling, then Fisher–Yates."}
+-+            {step === 3 && "The engine and public verifier consume the same canonical positions."}
+-+          </p>
+-+        </div>
+-+      </div>
+-+    </div>
+-+  );
+-+}
+ diff --git a/apps/web/components/seat.tsx b/apps/web/components/seat.tsx
+ index f38bf00..20cb06d 100644
+ --- a/apps/web/components/seat.tsx
+@@ -5866,51 +4893,6 @@
+            </>
+          )}
+        </div>
+-diff --git a/apps/web/components/site-footer.tsx b/apps/web/components/site-footer.tsx
+-new file mode 100644
+-index 0000000..5f8cb34
+---- /dev/null
+-+++ b/apps/web/components/site-footer.tsx
+-@@ -0,0 +1,18 @@
+-+export function SiteFooter() {
+-+  return (
+-+    <footer className="site-footer">
+-+      <div>
+-+        <span>Developer</span>
+-+        <a href="https://ishankumthekar.com" target="_blank" rel="noreferrer">
+-+          Ishan Kumthekar
+-+        </a>
+-+      </div>
+-+      <nav aria-label="Developer links">
+-+        <a href="mailto:ishankumthekar@ufl.edu">Email</a>
+-+        <a href="https://github.com/ishanrk" target="_blank" rel="noreferrer">
+-+          GitHub
+-+        </a>
+-+      </nav>
+-+    </footer>
+-+  );
+-+}
+-diff --git a/apps/web/components/site-header.tsx b/apps/web/components/site-header.tsx
+-new file mode 100644
+-index 0000000..5659666
+---- /dev/null
+-+++ b/apps/web/components/site-header.tsx
+-@@ -0,0 +1,15 @@
+-+import Link from "next/link";
+-+
+-+export function SiteHeader({ compact = false }: { compact?: boolean }) {
+-+  return (
+-+    <header className={`site-header${compact ? " site-header-compact" : ""}`}>
+-+      <Link className="wordmark" href="/" aria-label="Noir Poker home">
+-+        Noir Poker
+-+      </Link>
+-+      <nav aria-label="Primary navigation">
+-+        <Link href="/">Play</Link>
+-+        <Link href="/protocol">Protocol</Link>
+-+      </nav>
+-+    </header>
+-+  );
+-+}
+ diff --git a/apps/web/components/table.tsx b/apps/web/components/table.tsx
+ index d3f52e1..097f44e 100644
+ --- a/apps/web/components/table.tsx
+@@ -6218,303 +5200,6 @@
+  
+  export type ProofStatus = "preparing" | "proving";
+  
+-diff --git a/apps/web/lib/deal.test.ts b/apps/web/lib/deal.test.ts
+-new file mode 100644
+-index 0000000..af61d2c
+---- /dev/null
+-+++ b/apps/web/lib/deal.test.ts
+-@@ -0,0 +1,60 @@
+-+import assert from "node:assert/strict";
+-+
+-+import {
+-+  cardValue,
+-+  dealCommitment,
+-+  dealLayout,
+-+  dealSeed,
+-+  decodeHex,
+-+  encodeHex,
+-+  shuffleDeck,
+-+  verifyDealAudit,
+-+} from "./deal.ts";
+-+
+-+const room = "00112233-4455-6677-8899-aabbccddeeff";
+-+const secret = Uint8Array.from({ length: 32 }, () => 0x11);
+-+const shares = [0x22, 0x33, 0x44].map((byte) => Uint8Array.from({ length: 32 }, () => byte));
+-+const commitment = dealCommitment(room, BigInt(7), secret);
+-+const seed = dealSeed(room, BigInt(7), secret, shares);
+-+const deck = shuffleDeck(seed);
+-+
+-+assert.equal(encodeHex(commitment), "e11f12bea858c9319b49f596f39f61976f5085010dd16069661ee759f7cda74a");
+-+assert.equal(encodeHex(seed), "2804b581997cff7e45e6801f10130d4638188c6c19115f7741273282cbef08bd");
+-+assert.deepEqual(deck, [
+-+  38, 18, 43, 22, 5, 11, 33, 35, 47, 24, 32, 25,
+-+  23, 2, 6, 46, 48, 27, 4, 3, 44, 42, 15, 13,
+-+  39, 30, 49, 41, 7, 1, 12, 37, 9, 10, 20, 40,
+-+  17, 21, 0, 29, 36, 8, 26, 16, 14, 28, 19, 51,
+-+  50, 31, 45, 34,
+-+]);
+-+assert.deepEqual(dealLayout(deck, 3, 1), {
+-+  hole: [[18, 5], [43, 11], [38, 22]],
+-+  burns: [33, 32, 23],
+-+  board: [35, 47, 24, 25, 2],
+-+});
+-+assert.deepEqual(deck.slice(0, 5).map(cardValue), ["A♥", "7♦", "6♠", "J♦", "7♣"]);
+-+assert.equal(decodeHex(encodeHex(seed)).length, 32);
+-+
+-+const audit = {
+-+  protocol_version: 1,
+-+  algorithm: "sha256-counter-rejection-fisher-yates-v1",
+-+  room,
+-+  hand_no: 7,
+-+  players: 3,
+-+  dealer: 1,
+-+  commitment: encodeHex(commitment),
+-+  server_secret: encodeHex(secret),
+-+  contributions: shares.map((share, seat) => ({ seat, share: encodeHex(share) })),
+-+  seed: encodeHex(seed),
+-+  deck: deck.map((card) => ({ value: cardValue(card) })),
+-+};
+-+
+-+assert.equal(verifyDealAudit(audit).shuffle, true);
+-+for (const field of ["commitment", "seed"] as const) {
+-+  assert.throws(() => verifyDealAudit({ ...audit, [field]: `ff${audit[field].slice(2)}` }));
+-+}
+-+assert.throws(() =>
+-+  verifyDealAudit({ ...audit, deck: [{ value: "A♠" }, ...audit.deck.slice(1)] }),
+-+);
+-+
+-+process.stdout.write("deal protocol vectors ok\n");
+-diff --git a/apps/web/lib/deal.ts b/apps/web/lib/deal.ts
+-new file mode 100644
+-index 0000000..aab9d0f
+---- /dev/null
+-+++ b/apps/web/lib/deal.ts
+-@@ -0,0 +1,168 @@
+-+import { sha256 } from "@noble/hashes/sha2.js";
+-+
+-+import type { DealAudit } from "@/lib/server";
+-+
+-+const COMMIT_DOMAIN = new TextEncoder().encode("NPDEAL01");
+-+const SEED_DOMAIN = new TextEncoder().encode("NPSEED01");
+-+const STREAM_DOMAIN = new TextEncoder().encode("NPSTRM01");
+-+const RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
+-+const SUITS = ["♣", "♦", "♥", "♠"];
+-+
+-+export type DealLayout = {
+-+  hole: Array<[number, number]>;
+-+  burns: [number, number, number];
+-+  board: [number, number, number, number, number];
+-+};
+-+
+-+export type DealVerification = {
+-+  commitment: boolean;
+-+  seed: boolean;
+-+  shuffle: boolean;
+-+  seats: boolean;
+-+  layout: DealLayout;
+-+  deck: number[];
+-+};
+-+
+-+export function dealCommitment(room: string, handNo: bigint, secret: Uint8Array) {
+-+  return sha256(join(COMMIT_DOMAIN, uuidBytes(room), u64(handNo), secret));
+-+}
+-+
+-+export function dealSeed(
+-+  room: string,
+-+  handNo: bigint,
+-+  secret: Uint8Array,
+-+  shares: readonly Uint8Array[],
+-+) {
+-+  const bound = shares.flatMap((share, seat) => [Uint8Array.of(seat), share]);
+-+
+-+  return sha256(
+-+    join(SEED_DOMAIN, uuidBytes(room), u64(handNo), Uint8Array.of(shares.length), ...bound, secret),
+-+  );
+-+}
+-+
+-+export function shuffleDeck(seed: Uint8Array) {
+-+  const cards = Array.from({ length: 52 }, (_, index) => index);
+-+  const stream = words(seed);
+-+
+-+  for (let index = cards.length - 1; index > 0; index -= 1) {
+-+    const upper = index + 1;
+-+    const limit = Math.floor(2 ** 32 / upper) * upper;
+-+    let value = stream.next().value as number;
+-+
+-+    while (value >= limit) value = stream.next().value as number;
+-+    const swap = value % upper;
+-+    [cards[index], cards[swap]] = [cards[swap], cards[index]];
+-+  }
+-+
+-+  return cards;
+-+}
+-+
+-+export function dealLayout(deck: readonly number[], players: number, dealer: number): DealLayout {
+-+  if (deck.length !== 52 || players < 2 || players > 6 || dealer < 0 || dealer >= players) {
+-+    throw new Error("invalid deal layout");
+-+  }
+-+
+-+  const hole = Array.from({ length: players }, () => [0, 0] as [number, number]);
+-+  const first = (dealer + 1) % players;
+-+
+-+  for (let round = 0; round < 2; round += 1) {
+-+    for (let offset = 0; offset < players; offset += 1) {
+-+      hole[(first + offset) % players][round] = deck[round * players + offset];
+-+    }
+-+  }
+-+
+-+  const next = players * 2;
+-+  return {
+-+    hole,
+-+    burns: [deck[next], deck[next + 4], deck[next + 6]],
+-+    board: [deck[next + 1], deck[next + 2], deck[next + 3], deck[next + 5], deck[next + 7]],
+-+  };
+-+}
+-+
+-+export function cardValue(card: number) {
+-+  if (!Number.isInteger(card) || card < 0 || card >= 52) throw new Error("invalid card");
+-+  return `${RANKS[card % 13]}${SUITS[Math.floor(card / 13)]}`;
+-+}
+-+
+-+export function verifyDealAudit(audit: DealAudit): DealVerification {
+-+  if (
+-+    audit.protocol_version !== 1 ||
+-+    audit.algorithm !== "sha256-counter-rejection-fisher-yates-v1" ||
+-+    !Number.isInteger(audit.hand_no) ||
+-+    !Number.isInteger(audit.players) ||
+-+    !Number.isInteger(audit.dealer) ||
+-+    audit.contributions.length !== audit.players ||
+-+    audit.contributions.some((entry, seat) => entry.seat !== seat)
+-+  ) {
+-+    throw new Error("invalid deal audit");
+-+  }
+-+
+-+  const secret = decodeHex(audit.server_secret);
+-+  const shares = audit.contributions.map((entry) => decodeHex(entry.share));
+-+  const commitment = dealCommitment(audit.room, BigInt(audit.hand_no), secret);
+-+  const seed = dealSeed(audit.room, BigInt(audit.hand_no), secret, shares);
+-+  const deck = shuffleDeck(seed);
+-+  const serverDeck = audit.deck.map(({ value }) => value);
+-+  const expectedDeck = deck.map(cardValue);
+-+  const layout = dealLayout(deck, audit.players, audit.dealer);
+-+  const checks = {
+-+    commitment: encodeHex(commitment) === audit.commitment,
+-+    seed: encodeHex(seed) === audit.seed,
+-+    shuffle: expectedDeck.every((card, index) => card === serverDeck[index]),
+-+    seats: layout.hole.length === audit.players,
+-+  };
+-+
+-+  if (!Object.values(checks).every(Boolean)) throw new Error("deal audit mismatch");
+-+  return { ...checks, layout, deck };
+-+}
+-+
+-+export function encodeHex(bytes: Uint8Array) {
+-+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+-+}
+-+
+-+export function decodeHex(value: string) {
+-+  if (!/^[0-9a-f]{64}$/.test(value)) throw new Error("invalid deal bytes");
+-+  return Uint8Array.from({ length: 32 }, (_, index) =>
+-+    Number.parseInt(value.slice(index * 2, index * 2 + 2), 16),
+-+  );
+-+}
+-+
+-+export function uuidBytes(value: string) {
+-+  const hex = value.replaceAll("-", "");
+-+
+-+  if (!/^[0-9a-f]{32}$/.test(hex)) throw new Error("invalid room id");
+-+  return Uint8Array.from({ length: 16 }, (_, index) =>
+-+    Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16),
+-+  );
+-+}
+-+
+-+function* words(seed: Uint8Array) {
+-+  let counter = BigInt(0);
+-+
+-+  while (true) {
+-+    const block = sha256(join(STREAM_DOMAIN, seed, u64(counter)));
+-+    counter += BigInt(1);
+-+
+-+    for (let offset = 0; offset < block.length; offset += 4) {
+-+      yield new DataView(block.buffer, block.byteOffset + offset, 4).getUint32(0);
+-+    }
+-+  }
+-+}
+-+
+-+function u64(value: bigint) {
+-+  const bytes = new Uint8Array(8);
+-+  new DataView(bytes.buffer).setBigUint64(0, value);
+-+  return bytes;
+-+}
+-+
+-+function join(...parts: Uint8Array[]) {
+-+  const bytes = new Uint8Array(parts.reduce((size, part) => size + part.length, 0));
+-+  let offset = 0;
+-+
+-+  for (const part of parts) {
+-+    bytes.set(part, offset);
+-+    offset += part.length;
+-+  }
+-+
+-+  return bytes;
+-+}
+-diff --git a/apps/web/lib/receipt.test.ts b/apps/web/lib/receipt.test.ts
+-new file mode 100644
+-index 0000000..d08279d
+---- /dev/null
+-+++ b/apps/web/lib/receipt.test.ts
+-@@ -0,0 +1,51 @@
+-+import assert from "node:assert/strict";
+-+
+-+import { catalogRoot, encodeHex, handTag } from "./challenge.ts";
+-+import { uuidBytes } from "./deal.ts";
+-+import { validateReceipt } from "./receipt.ts";
+-+
+-+const room = "00112233-4455-6677-8899-aabbccddeeff";
+-+const handNo = 9;
+-+const hand = handTag(uuidBytes(room), BigInt(handNo));
+-+const commitment = new Uint8Array(32).fill(0x22);
+-+const nonce = new Uint8Array(32).fill(0x33);
+-+const facts = new Uint8Array(32).fill(0x44);
+-+const nullifier = new Uint8Array(32).fill(0x55);
+-+const root = catalogRoot();
+-+
+-+function publicInputs(mode: 0 | 1, factsHash: Uint8Array, value: Uint8Array) {
+-+  const bytes = [mode, ...hand, 2, ...commitment, ...nonce, ...factsHash, ...value, ...root];
+-+  const fields = Buffer.alloc(bytes.length * 32);
+-+  bytes.forEach((byte, index) => { fields[index * 32 + 31] = byte; });
+-+  return fields.toString("base64");
+-+}
+-+
+-+const receipt = {
+-+  protocol_version: 2,
+-+  room,
+-+  hand_no: handNo,
+-+  proof_system: "ultra_honk",
+-+  circuit_id: "challenge_v2",
+-+  bb_version: "5.2.0",
+-+  artifact_sha256: "1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d",
+-+  vk_sha256: "b435db9d240683e181d8bad47203bf85d57ca27982bc676cf2686b5cf3de1d67",
+-+  hand_tag: encodeHex(hand),
+-+  seat: 2,
+-+  commitment: encodeHex(commitment),
+-+  nonce: encodeHex(nonce),
+-+  facts_hash: encodeHex(facts),
+-+  nullifier: encodeHex(nullifier),
+-+  catalog_root: encodeHex(root),
+-+  points: 20,
+-+  draw_proof: "AA==",
+-+  draw_public_inputs: publicInputs(0, new Uint8Array(32), new Uint8Array(32)),
+-+  completion_proof: "AA==",
+-+  completion_public_inputs: publicInputs(1, facts, nullifier),
+-+};
+-+
+-+assert.doesNotThrow(() => validateReceipt(receipt));
+-+assert.throws(() => validateReceipt({ ...receipt, room: "10112233-4455-6677-8899-aabbccddeeff" }));
+-+assert.throws(() => validateReceipt({ ...receipt, hand_no: handNo + 1 }));
+-+assert.throws(() => validateReceipt({ ...receipt, points: 40 }));
+-+assert.throws(() => validateReceipt({ ...receipt, completion_public_inputs: receipt.draw_public_inputs }));
+-+process.stdout.write("proof receipt bindings ok\n");
+ diff --git a/apps/web/lib/receipt.ts b/apps/web/lib/receipt.ts
+ index 10f7ecc..7cdbded 100644
+ --- a/apps/web/lib/receipt.ts
+@@ -6752,30 +5437,6 @@
+      "proof:verify": "node scripts/verify-receipt.mjs"
+    },
+    "dependencies": {
+-diff --git a/apps/web/scripts/verify-deal.mjs b/apps/web/scripts/verify-deal.mjs
+-new file mode 100644
+-index 0000000..0426ba3
+---- /dev/null
+-+++ b/apps/web/scripts/verify-deal.mjs
+-@@ -0,0 +1,18 @@
+-+import { readFile } from "node:fs/promises";
+-+
+-+import { verifyDealAudit } from "../lib/deal.ts";
+-+
+-+const input = process.argv[2];
+-+if (!input) throw new Error("usage npm run deal:verify -- audit.json-or-url");
+-+
+-+const audit = /^https?:\/\//.test(input)
+-+  ? await fetch(input).then(async (response) => {
+-+      if (!response.ok) throw new Error(`audit request failed ${response.status}`);
+-+      return response.json();
+-+    })
+-+  : JSON.parse(await readFile(input, "utf8"));
+-+
+-+const result = verifyDealAudit(audit);
+-+process.stdout.write(
+-+  `verified room=${audit.room} hand=${audit.hand_no} cards=${result.deck.length}\n`,
+-+);
+ diff --git a/apps/web/scripts/verify-receipt.mjs b/apps/web/scripts/verify-receipt.mjs
+ index d2ac5e0..a1c20c1 100644
+ --- a/apps/web/scripts/verify-receipt.mjs
+@@ -6916,191 +5577,6 @@
+              ]
+          );
+          assert_eq!(
+-diff --git a/crates/deal-core/Cargo.toml b/crates/deal-core/Cargo.toml
+-new file mode 100644
+-index 0000000..76579ac
+---- /dev/null
+-+++ b/crates/deal-core/Cargo.toml
+-@@ -0,0 +1,7 @@
+-+[package]
+-+name = "deal-core"
+-+version = "0.1.0"
+-+edition = "2024"
+-+
+-+[dependencies]
+-+sha2 = "0.10.9"
+-diff --git a/crates/deal-core/src/lib.rs b/crates/deal-core/src/lib.rs
+-new file mode 100644
+-index 0000000..a9dbe78
+---- /dev/null
+-+++ b/crates/deal-core/src/lib.rs
+-@@ -0,0 +1,166 @@
+-+use sha2::{Digest, Sha256};
+-+
+-+pub const PROTOCOL_VERSION: u8 = 1;
+-+pub const CARD_COUNT: usize = 52;
+-+
+-+const COMMIT_DOMAIN: [u8; 8] = *b"NPDEAL01";
+-+const SEED_DOMAIN: [u8; 8] = *b"NPSEED01";
+-+const STREAM_DOMAIN: [u8; 8] = *b"NPSTRM01";
+-+
+-+pub fn commitment(room: [u8; 16], hand_no: u64, server_secret: [u8; 32]) -> [u8; 32] {
+-+    let mut input = [0u8; 64];
+-+
+-+    input[..8].copy_from_slice(&COMMIT_DOMAIN);
+-+    input[8..24].copy_from_slice(&room);
+-+    input[24..32].copy_from_slice(&hand_no.to_be_bytes());
+-+    input[32..].copy_from_slice(&server_secret);
+-+    Sha256::digest(input).into()
+-+}
+-+
+-+pub fn seed(
+-+    room: [u8; 16],
+-+    hand_no: u64,
+-+    server_secret: [u8; 32],
+-+    shares: &[[u8; 32]],
+-+) -> Option<[u8; 32]> {
+-+    let count = u8::try_from(shares.len()).ok()?;
+-+    let mut input = Vec::with_capacity(8 + 16 + 8 + 1 + shares.len() * 33 + 32);
+-+
+-+    input.extend_from_slice(&SEED_DOMAIN);
+-+    input.extend_from_slice(&room);
+-+    input.extend_from_slice(&hand_no.to_be_bytes());
+-+    input.push(count);
+-+
+-+    for (seat, share) in shares.iter().enumerate() {
+-+        input.push(u8::try_from(seat).ok()?);
+-+        input.extend_from_slice(share);
+-+    }
+-+
+-+    input.extend_from_slice(&server_secret);
+-+    Some(Sha256::digest(input).into())
+-+}
+-+
+-+pub fn shuffle(seed: [u8; 32]) -> [u8; CARD_COUNT] {
+-+    let mut cards = core::array::from_fn(|index| index as u8);
+-+    let mut stream = HashStream::new(seed);
+-+
+-+    for index in (1..CARD_COUNT).rev() {
+-+        let swap = stream.sample(index as u32 + 1) as usize;
+-+        cards.swap(index, swap);
+-+    }
+-+
+-+    cards
+-+}
+-+
+-+struct HashStream {
+-+    seed: [u8; 32],
+-+    counter: u64,
+-+    block: [u8; 32],
+-+    offset: usize,
+-+}
+-+
+-+impl HashStream {
+-+    const fn new(seed: [u8; 32]) -> Self {
+-+        Self {
+-+            seed,
+-+            counter: 0,
+-+            block: [0; 32],
+-+            offset: 32,
+-+        }
+-+    }
+-+
+-+    fn sample(&mut self, upper: u32) -> u32 {
+-+        let limit = (1u64 << 32) / u64::from(upper) * u64::from(upper);
+-+
+-+        loop {
+-+            let value = u64::from(self.word());
+-+
+-+            if value < limit {
+-+                return (value % u64::from(upper)) as u32;
+-+            }
+-+        }
+-+    }
+-+
+-+    fn word(&mut self) -> u32 {
+-+        if self.offset == self.block.len() {
+-+            let mut input = [0u8; 48];
+-+
+-+            input[..8].copy_from_slice(&STREAM_DOMAIN);
+-+            input[8..40].copy_from_slice(&self.seed);
+-+            input[40..].copy_from_slice(&self.counter.to_be_bytes());
+-+            self.block = Sha256::digest(input).into();
+-+            self.counter = self.counter.checked_add(1).expect("deal stream limit");
+-+            self.offset = 0;
+-+        }
+-+
+-+        let bytes: [u8; 4] = self.block[self.offset..self.offset + 4]
+-+            .try_into()
+-+            .expect("deal stream word");
+-+        self.offset += 4;
+-+        u32::from_be_bytes(bytes)
+-+    }
+-+}
+-+
+-+#[cfg(test)]
+-+mod tests {
+-+    use std::collections::HashSet;
+-+
+-+    use super::*;
+-+
+-+    const ROOM: [u8; 16] = [
+-+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+-+        0xff,
+-+    ];
+-+    const SECRET: [u8; 32] = [0x11; 32];
+-+    const SHARES: [[u8; 32]; 3] = [[0x22; 32], [0x33; 32], [0x44; 32]];
+-+    const EXPECTED_DECK: [u8; 52] = [
+-+        38, 18, 43, 22, 5, 11, 33, 35, 47, 24, 32, 25, 23, 2, 6, 46, 48, 27, 4, 3, 44, 42, 15, 13,
+-+        39, 30, 49, 41, 7, 1, 12, 37, 9, 10, 20, 40, 17, 21, 0, 29, 36, 8, 26, 16, 14, 28, 19, 51,
+-+        50, 31, 45, 34,
+-+    ];
+-+
+-+    #[test]
+-+    fn vector() {
+-+        let commitment = commitment(ROOM, 7, SECRET);
+-+        let seed = seed(ROOM, 7, SECRET, &SHARES).unwrap();
+-+
+-+        assert_eq!(
+-+            commitment,
+-+            hex("e11f12bea858c9319b49f596f39f61976f5085010dd16069661ee759f7cda74a")
+-+        );
+-+        assert_eq!(
+-+            seed,
+-+            hex("2804b581997cff7e45e6801f10130d4638188c6c19115f7741273282cbef08bd")
+-+        );
+-+        assert_eq!(shuffle(seed), EXPECTED_DECK);
+-+    }
+-+
+-+    #[test]
+-+    fn complete_permutation() {
+-+        let deck = shuffle([0x5a; 32]);
+-+        let unique: HashSet<_> = deck.into_iter().collect();
+-+
+-+        assert_eq!(unique.len(), CARD_COUNT);
+-+        assert!(unique.into_iter().all(|card| card < CARD_COUNT as u8));
+-+    }
+-+
+-+    #[test]
+-+    fn every_input_is_bound() {
+-+        let base = seed(ROOM, 7, SECRET, &SHARES).unwrap();
+-+
+-+        assert_ne!(base, seed([1; 16], 7, SECRET, &SHARES).unwrap());
+-+        assert_ne!(base, seed(ROOM, 8, SECRET, &SHARES).unwrap());
+-+        assert_ne!(base, seed(ROOM, 7, [2; 32], &SHARES).unwrap());
+-+        assert_ne!(base, seed(ROOM, 7, SECRET, &SHARES[..2]).unwrap());
+-+    }
+-+
+-+    fn hex(value: &str) -> [u8; 32] {
+-+        let mut bytes = [0; 32];
+-+
+-+        for (index, byte) in bytes.iter_mut().enumerate() {
+-+            *byte = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16).unwrap();
+-+        }
+-+
+-+        bytes
+-+    }
+-+}
+ diff --git a/crates/game-core/Cargo.toml b/crates/game-core/Cargo.toml
+ index d73a7b5..ba789c8 100644
+ --- a/crates/game-core/Cargo.toml
