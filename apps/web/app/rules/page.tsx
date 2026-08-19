@@ -5,34 +5,98 @@ import { SiteHeader } from "@/components/site-header";
 const WSOP_RULES = "https://assets.wsopcdn.com/wsop/853ee602-e1e9-4019-a0cf-381419d805c6.pdf";
 
 const CHALLENGES = [
-  { title: "See the flop", cards: ["?", "2♣", "8♥"] },
-  { title: "Raise before the flop", cards: ["?", "A♦", "5♣"] },
-  { title: "Reach showdown", cards: ["?", "K♠", "K♥"] },
-  { title: "Finish the hand ahead", cards: ["?", "7♠", "Q♦"] },
+  { title: "See the flop", kind: "flop" },
+  { title: "Raise before the flop", kind: "raise" },
+  { title: "Reach showdown", kind: "showdown" },
+  { title: "Finish the hand ahead", kind: "profit" },
 ] as const;
 
 const CHALLENGE_RULES = [
   {
     title: "A challenge is dealt between hands",
     body: "Every active player receives one random challenge for the next hand. The selection comes from the fixed eight challenge catalog using randomness from the player and server.",
-    cards: ["?", "?", "A♥"],
+    kind: "draw",
   },
   {
     title: "The challenge stays private",
     body: "Only that player’s browser learns the challenge. The server and other players do not need the objective or the player’s hole cards while the hand is being played.",
-    cards: ["7♣", "?", "K♠"],
+    kind: "private",
   },
   {
     title: "The browser proves completion",
     body: "After the hand, the browser checks whether the private condition was met. If it was, the browser generates a Noir proof for the same hidden challenge.",
-    cards: ["?", "✓", "?"],
+    kind: "proof",
   },
   {
     title: "The proof is accepted once",
     body: "The server verifies the UltraHonk proof before awarding 20 proof points. A nullifier prevents the same challenge from being claimed twice.",
-    cards: ["?", "20", "✓"],
+    kind: "once",
   },
 ] as const;
+
+function ChallengeVisual({ kind }: { kind: (typeof CHALLENGES)[number]["kind"] }) {
+  if (kind === "flop") {
+    return (
+      <div className="example-flop" aria-hidden="true">
+        <span>2♣</span><span>8♥</span><span>K♠</span>
+      </div>
+    );
+  }
+
+  if (kind === "raise") {
+    return (
+      <div className="example-raise" aria-hidden="true">
+        <i /><i /><i /><strong>↑</strong>
+      </div>
+    );
+  }
+
+  if (kind === "showdown") {
+    return (
+      <div className="example-showdown" aria-hidden="true">
+        <span>A♠</span><span>Q♦</span><b>show</b>
+      </div>
+    );
+  }
+
+  return (
+    <div className="example-profit" aria-hidden="true">
+      <i /><i /><i /><strong>+</strong>
+    </div>
+  );
+}
+
+function RuleVisual({ kind }: { kind: (typeof CHALLENGE_RULES)[number]["kind"] }) {
+  if (kind === "draw") {
+    return (
+      <div className="rule-symbol rule-symbol-draw" aria-hidden="true">
+        <span>?</span><i /><i />
+      </div>
+    );
+  }
+
+  if (kind === "private") {
+    return (
+      <div className="rule-symbol rule-symbol-private" aria-hidden="true">
+        <span>?</span><i />
+      </div>
+    );
+  }
+
+  if (kind === "proof") {
+    return (
+      <div className="rule-symbol rule-symbol-proof" aria-hidden="true">
+        <span>✓</span><i /><b>Noir</b>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rule-symbol rule-symbol-once" aria-hidden="true">
+      <span>✓</span><span>×</span><i />
+    </div>
+  );
+}
 
 export default function RulesPage() {
   return (
@@ -50,42 +114,40 @@ export default function RulesPage() {
       <section className="challenge-examples" aria-labelledby="challenge-examples-title">
         <div>
           <h2 id="challenge-examples-title">Challenge examples</h2>
-          <p>These are real entries from the fixed challenge catalog used by the circuit.</p>
+          <p>These four are already in the challenge catalog used by the circuit.</p>
         </div>
-        <div className="challenge-example-grid">
+        <div className="challenge-example-grid challenge-example-grid-semantic">
           {CHALLENGES.map((challenge) => (
             <article key={challenge.title}>
-              <div className="challenge-example-cards" aria-hidden="true">
-                {challenge.cards.map((card, index) => (
-                  <span className={card === "?" ? "challenge-example-sealed" : ""} key={`${card}-${index}`}>
-                    {card}
-                  </span>
-                ))}
-              </div>
+              <ChallengeVisual kind={challenge.kind} />
               <strong>{challenge.title}</strong>
             </article>
           ))}
         </div>
       </section>
 
+      <section className="seven-two-example" aria-labelledby="seven-two-title">
+        <div>
+          <p>Card-specific challenge</p>
+          <h2 id="seven-two-title">Bluff and win with seven-deuce</h2>
+          <span>
+            Hold 7–2, win the hand, and do it without reaching showdown. This is the card-specific
+            challenge design; the current circuit still needs a hole-card fact before it can be claimed.
+          </span>
+        </div>
+        <div className="seven-two-cards" aria-hidden="true">
+          <span>7♠</span><span>2♥</span><i>?</i>
+        </div>
+      </section>
+
       <section className="rules-list" aria-label="Private challenge rules">
-        {CHALLENGE_RULES.map((rule, index) => (
-          <article className={`rule-row rule-row-${index + 1}`} key={rule.title}>
+        {CHALLENGE_RULES.map((rule) => (
+          <article className="rule-row rule-row-semantic" key={rule.title}>
             <div className="rule-copy">
               <h2>{rule.title}</h2>
               <p>{rule.body}</p>
             </div>
-            <div className="rule-visual" aria-hidden="true">
-              <span className={`rule-card rule-card-one${rule.cards[0] === "?" ? " rule-card-sealed" : ""}`}>
-                {rule.cards[0]}
-              </span>
-              <span className={`rule-card rule-card-two${rule.cards[1] === "?" ? " rule-card-sealed" : ""}`}>
-                {rule.cards[1]}
-              </span>
-              <span className={`rule-card rule-card-three${rule.cards[2] === "?" ? " rule-card-sealed" : ""}`}>
-                {rule.cards[2]}
-              </span>
-            </div>
+            <RuleVisual kind={rule.kind} />
           </article>
         ))}
       </section>
