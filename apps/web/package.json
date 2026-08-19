@@ -12,11 +12,18 @@
     "challenge:test": "node --experimental-strip-types lib/challenge.test.ts",
     "deal:test": "node --experimental-strip-types lib/deal.test.ts",
     "receipt:test": "node --experimental-strip-types lib/receipt.test.ts",
+    "aztec:test": "node --experimental-strip-types lib/aztec/ids.test.ts",
     "deal:verify": "node --experimental-strip-types scripts/verify-deal.mjs",
     "proof:verify": "node scripts/verify-receipt.mjs"
   },
   "dependencies": {
+    "@aztec/aztec.js": "5.2.0",
     "@aztec/bb.js": "5.2.0",
+    "@aztec/constants": "5.2.0",
+    "@aztec/foundation": "5.2.0",
+    "@aztec/noir-contracts.js": "5.2.0",
+    "@aztec/stdlib": "5.2.0",
+    "@aztec/wallet-sdk": "5.2.0",
     "@noble/hashes": "2.2.0",
     "@noir-lang/noir_js": "1.0.0-beta.26",
     "next": "16.3.1",
