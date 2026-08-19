@@ -2,86 +2,101 @@ import Link from "next/link";
 
 import { SiteHeader } from "@/components/site-header";
 
+const ULTIMATE_BET = "https://www.pokernews.com/news/2022/11/ultimate-bet-scandal-42623.htm";
+const FULL_TILT = "https://www.justice.gov/usao-sdny/pr/former-full-tilt-poker-ceo-pleads-guilty-and-sentenced-manhattan-federal-court";
+
 export default function MotivationPage() {
   return (
     <main className="site-shell motivation-page">
       <SiteHeader compact />
 
-      <header className="motivation-hero">
-        <h1>Motivation</h1>
+      <header className="motivation-hero motivation-hero-new">
+        <p className="motivation-kicker">Motivation</p>
+        <h1>Online poker makes you trust a server you cannot see.</h1>
         <p>
-          Online poker asks players to trust the server with two decisions: the deck and private
-          challenge claims. Noir Poker makes both decisions independently checkable.
+          The server chooses the deck and decides whether private challenge claims are real. A normal
+          client can only believe those decisions were honest. Noir Poker makes both decisions checkable.
         </p>
       </header>
 
-      <section className="motivation-section">
-        <h2>Deal integrity</h2>
-        <p>
-          In a normal hosted game, the server chooses the shuffle. A player cannot distinguish a
-          fair shuffle from a server that keeps trying seeds until a favored seat receives stronger
-          cards.
-        </p>
-        <p>
-          Noir Poker fixes the server contribution first. The server commits to a secret before
-          player randomness arrives. Each player then adds fresh randomness. After settlement, the
-          secret and player shares become public. Anyone can recompute the final seed, every shuffle
-          swap and all 52 card positions.
-        </p>
-        <div className="motivation-example">
-          <span>Example</span>
+      <section className="motivation-cases" aria-label="Online poker trust failures">
+        <article className="case-card case-card-blue">
+          <span>UltimateBet</span>
+          <strong>Insiders could see opponents&apos; hole cards.</strong>
           <p>
-            A server that wants seat 3 to receive aces cannot wait for every player share, search
-            for a favorable seed, then present that seed as its original choice. The earlier
-            commitment binds the server contribution before those shares exist.
+            A hidden superuser system exposed private cards during live online play. PokerNews reports
+            that players were cheated out of more than $50 million across the UltimateBet and Absolute
+            Poker scandals.
           </p>
+          <a href={ULTIMATE_BET} target="_blank" rel="noreferrer">Read the case ↗</a>
+        </article>
+        <article className="case-card">
+          <span>Full Tilt Poker</span>
+          <strong>The operator told players their money was safe when it was not.</strong>
+          <p>
+            This was a different failure, but the trust model was the same. The U.S. Department of
+            Justice said Full Tilt owed players hundreds of millions while holding only a fraction of
+            that amount in its bank accounts.
+          </p>
+          <a href={FULL_TILT} target="_blank" rel="noreferrer">Read the DOJ case ↗</a>
+        </article>
+      </section>
+
+      <section className="motivation-story">
+        <div className="motivation-story-copy">
+          <p className="motivation-kicker">Deal fairness</p>
+          <h2>The server cannot wait for a good deck and pretend it was random.</h2>
+          <p>
+            Before player randomness arrives, the server commits to its own secret value. Every player
+            then contributes fresh randomness. Those values determine the final deck together.
+          </p>
+          <p>
+            After the hand, the transcript opens. Any player can rebuild the seed, shuffle and card
+            positions independently. If the server changed its earlier contribution, the commitment no
+            longer matches.
+          </p>
+        </div>
+        <div className="motivation-flow" aria-label="Deal verification sequence">
+          <span>server commits</span>
+          <i />
+          <span>players add randomness</span>
+          <i />
+          <span>hand is dealt</span>
+          <i />
+          <span>everyone can replay it</span>
         </div>
       </section>
 
-      <section className="motivation-section">
-        <h2>Private challenges</h2>
-        <p>
-          After a hand, each player receives a private challenge for the next hand. The challenge
-          should remain hidden from the other players.
-        </p>
-        <p>
-          In a conventional online game, public verification creates a bad choice. The player can
-          reveal the challenge and any private evidence needed to support the claim, or everyone can
-          accept the server&apos;s verdict.
-        </p>
-        <p>
-          The zero knowledge circuit proves that the player committed before server entropy arrived,
-          that the resulting secret selected one challenge from the fixed catalog, and that the same
-          hidden challenge is satisfied by the committed hand facts. The challenge stays secret.
-        </p>
-        <div className="motivation-example">
-          <span>Example</span>
+      <section className="motivation-story motivation-story-challenge">
+        <div className="motivation-story-copy">
+          <p className="motivation-kicker">Private challenge</p>
+          <h2>A player should not have to reveal the challenge or hole cards to prove completion.</h2>
           <p>
-            A challenge such as reach showdown can be proven as a hidden catalog statement. The
-            public receipt reveals the hand, seat, commitment, server nonce, facts commitment and
-            proof while the objective remains private.
+            In a normal online game, the server can simply announce that a private challenge was
+            completed. Everyone else either trusts that verdict or asks the player to reveal private
+            information.
           </p>
+          <p>
+            Here the browser proves that the challenge came from the fixed challenge catalog and that
+            the same hidden challenge was completed. Other players can verify the proof without seeing
+            the objective or the player&apos;s hole cards.
+          </p>
+        </div>
+        <div className="challenge-proof-scene" aria-hidden="true">
+          <span className="challenge-scene-card challenge-scene-secret">?</span>
+          <span className="challenge-scene-card challenge-scene-hole">A♠</span>
+          <span className="challenge-scene-proof">proof ✓</span>
         </div>
       </section>
 
-      <section className="motivation-section">
+      <section className="motivation-boundary">
         <h2>Current boundary</h2>
         <p>
-          The current receipt relies on the server committed hand facts. It proves the hidden
-          challenge against that commitment, but it does not independently reconstruct the six facts
-          from a public action transcript. Full server independent challenge verification needs that
-          extra audit layer.
+          Challenge completion is currently proven against hand facts committed by the server. The
+          challenge and hole cards stay private, but a fully server independent challenge verifier still
+          needs a public action transcript that can rebuild those facts.
         </p>
-      </section>
-
-      <section className="motivation-section motivation-last">
-        <h2>Two cryptographic layers</h2>
-        <p>
-          Deal integrity uses SHA 256 commitments and deterministic replay. Challenge privacy uses
-          Noir, BLAKE2s, Merkle membership and UltraHonk. The protocol page gives exact encodings and
-          verifier steps.
-        </p>
-        <Link href="/protocol">Open protocol →</Link>
+        <Link href="/protocol">Open the protocol →</Link>
       </section>
     </main>
   );
