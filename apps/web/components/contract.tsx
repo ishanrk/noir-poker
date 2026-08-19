@@ -157,7 +157,7 @@ export function Contract({ view, disabled = false, onCommit, onVerifyDraw, onPro
               <div className="private-copy">
                 <span>Only this browser knows</span>
                 <strong>{assignment.objective}</strong>
-                <small>{assignment.reward} points · {assignment.active ? "in play" : "ready for next hand"}</small>
+                <small>{assignment.reward} points — {assignment.active ? "in play" : "ready for next hand"}</small>
               </div>
               <details className="protocol-details">
                 <summary>Inspect public bindings</summary>
