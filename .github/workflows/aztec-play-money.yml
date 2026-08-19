@@ -1,0 +1,72 @@
+name: validate aztec play money
+
+on:
+  push:
+    branches:
+      - agent/noir-poker-aztec-play-money
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aztec-play-money
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: aztec/package-lock.json
+
+      - name: Install Aztec 5.2.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=5.2.0 bash -i <(curl -fsSL https://install.aztec.network/5.2.0)
+          echo "$HOME/.aztec/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        working-directory: aztec
+        run: npm install
+
+      - name: Check protocol guards
+        working-directory: aztec
+        run: npm run test:protocol
+
+      - name: Compile and generate bindings
+        working-directory: aztec
+        run: npm run build
+
+      - name: Start local Aztec network
+        shell: bash
+        run: |
+          set -euo pipefail
+          aztec start --local-network > "$RUNNER_TEMP/aztec-local.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/aztec-local.pid"
+
+      - name: Run local integration
+        working-directory: aztec
+        env:
+          AZTEC_NODE_URL: http://127.0.0.1:8080
+        run: timeout 20m npm run test:local
+
+      - name: Upload generated bindings and local logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aztec-play-money-build
+          path: |
+            aztec/artifacts
+            aztec/target
+            aztec/package-lock.json
+            ${{ runner.temp }}/aztec-local.log
+          if-no-files-found: warn
+          retention-days: 14
