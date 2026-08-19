@@ -27,10 +27,13 @@ export default function Home() {
                   </span>
                 </span>
               ))}
-            </span>{" "}
-            Poker
+            </span>
+            <span className="hero-title-poker">Poker</span>
           </h1>
           <p className="hero-tagline">The game server cannot cheat even if it wanted to.</p>
+          <p className="hero-tech">
+            Rust backend, Next.js and TypeScript frontend, Noir zero knowledge circuits.
+          </p>
         </div>
 
         <div className="hero-deck" aria-label="Animated sealed cards">
