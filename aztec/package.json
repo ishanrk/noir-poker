@@ -7,8 +7,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "compile": "aztec compile",
-    "codegen": "aztec codegen target --outdir artifacts",
+    "compile": "aztec compile --force",
+    "codegen": "rm -rf artifacts && mkdir -p artifacts && aztec codegen ./target -o ./artifacts",
     "build": "npm run compile && npm run codegen",
     "test:protocol": "node --import tsx --test test/protocol.test.ts",
     "test:local": "tsx test/play-chips.local.ts",
