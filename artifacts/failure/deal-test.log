@@ -1,0 +1,27 @@
+
+> noir-poker-web@0.1.0 deal:test
+> node --experimental-strip-types lib/deal.test.ts
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
++ actual - expected
+
++ '2804b581997cff7e45e6801f10130d4638188c6c19115f7741273282cbef08bd'
+- '7ee43ff91db755fb8deb2734d1c484ef9dcdfd0249cdab154ba10c467783db1f'
+
+    at file:///home/runner/work/noir-poker/noir-poker/apps/web/lib/deal.test.ts:22:8
+    at ModuleJob.run (node:internal/modules/esm/module_job:345:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: '2804b581997cff7e45e6801f10130d4638188c6c19115f7741273282cbef08bd',
+  expected: '7ee43ff91db755fb8deb2734d1c484ef9dcdfd0249cdab154ba10c467783db1f',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v22.20.0

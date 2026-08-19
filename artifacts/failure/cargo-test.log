@@ -1,0 +1,797 @@
+[1m[92m   Compiling[0m cfg-if v1.0.4
+[1m[92m   Compiling[0m libc v0.2.189
+[1m[92m   Compiling[0m typenum v1.20.1
+[1m[92m   Compiling[0m subtle v2.6.1
+[1m[92m   Compiling[0m serde_core v1.0.229
+[1m[92m   Compiling[0m zerofrom v0.1.8
+[1m[92m   Compiling[0m stable_deref_trait v1.2.1
+[1m[92m   Compiling[0m yoke v0.8.3
+[1m[92m   Compiling[0m pin-project-lite v0.2.17
+[1m[92m   Compiling[0m bytes v1.12.1
+[1m[92m   Compiling[0m generic-array v0.14.7
+[1m[92m   Compiling[0m zerovec v0.11.7
+[1m[92m   Compiling[0m crypto-common v0.1.7
+[1m[92m   Compiling[0m block-buffer v0.10.4
+[1m[92m   Compiling[0m digest v0.10.7
+[1m[92m   Compiling[0m futures-core v0.3.34
+[1m[92m   Compiling[0m itoa v1.0.18
+[1m[92m   Compiling[0m scopeguard v1.2.0
+[1m[92m   Compiling[0m tinystr v0.8.4
+[1m[92m   Compiling[0m lock_api v0.4.14
+[1m[92m   Compiling[0m litemap v0.8.3
+[1m[92m   Compiling[0m writeable v0.6.4
+[1m[92m   Compiling[0m cpufeatures v0.2.17
+[1m[92m   Compiling[0m potential_utf v0.1.6
+[1m[92m   Compiling[0m zerotrie v0.2.5
+[1m[92m   Compiling[0m icu_locale_core v2.3.0
+[1m[92m   Compiling[0m utf8_iter v1.0.4
+[1m[92m   Compiling[0m icu_collections v2.3.0
+[1m[92m   Compiling[0m zerocopy v0.8.56
+[1m[92m   Compiling[0m serde v1.0.229
+[1m[92m   Compiling[0m icu_normalizer_data v2.3.0
+[1m[92m   Compiling[0m futures-sink v0.3.34
+[1m[92m   Compiling[0m icu_properties_data v2.3.0
+[1m[92m   Compiling[0m smallvec v1.15.2
+[1m[92m   Compiling[0m icu_provider v2.3.0
+[1m[92m   Compiling[0m zeroize v1.9.0
+[1m[92m   Compiling[0m parking_lot_core v0.9.12
+[1m[92m   Compiling[0m icu_properties v2.3.0
+[1m[92m   Compiling[0m rustls-pki-types v1.15.1
+[1m[92m   Compiling[0m sha2 v0.10.9
+[1m[92m   Compiling[0m untrusted v0.9.0
+[1m[92m   Compiling[0m memchr v2.8.3
+[1m[92m   Compiling[0m parking_lot v0.12.5
+[1m[92m   Compiling[0m errno v0.3.14
+[1m[92m   Compiling[0m once_cell v1.21.4
+[1m[92m   Compiling[0m log v0.4.33
+[1m[92m   Compiling[0m signal-hook-registry v1.4.8
+[1m[92m   Compiling[0m getrandom v0.2.17
+[1m[92m   Compiling[0m mio v1.2.2
+[1m[92m   Compiling[0m socket2 v0.6.5
+[1m[92m   Compiling[0m percent-encoding v2.3.2
+[1m[92m   Compiling[0m futures-task v0.3.34
+[1m[92m   Compiling[0m futures-io v0.3.34
+[1m[92m   Compiling[0m slab v0.4.12
+[1m[92m   Compiling[0m futures-util v0.3.34
+[1m[92m   Compiling[0m tokio v1.53.1
+[1m[92m   Compiling[0m thiserror v2.0.20
+[1m[92m   Compiling[0m num-traits v0.2.19
+[1m[92m   Compiling[0m ppv-lite86 v0.2.21
+[1m[92m   Compiling[0m zmij v1.0.23
+[1m[92m   Compiling[0m equivalent v1.0.2
+[1m[92m   Compiling[0m form_urlencoded v1.2.2
+[1m[92m   Compiling[0m tracing-core v0.1.36
+[1m[92m   Compiling[0m http v1.5.0
+[1m[92m   Compiling[0m foldhash v0.1.5
+[1m[92m   Compiling[0m allocator-api2 v0.2.21
+[1m[92m   Compiling[0m hashbrown v0.15.5
+[1m[92m   Compiling[0m tracing v0.1.44
+[1m[92m   Compiling[0m crossbeam-utils v0.8.22
+[1m[92m   Compiling[0m icu_normalizer v2.3.0
+[1m[92m   Compiling[0m webpki-roots v1.0.9
+[1m[92m   Compiling[0m tinyvec_macros v0.1.1
+[1m[92m   Compiling[0m crc-catalog v2.5.0
+[1m[92m   Compiling[0m bitflags v2.13.1
+[1m[92m   Compiling[0m hashbrown v0.17.1
+[1m[92m   Compiling[0m parking v2.2.1
+[1m[92m   Compiling[0m event-listener v5.4.2
+[1m[92m   Compiling[0m idna_adapter v1.2.2
+[1m[92m   Compiling[0m crc v3.4.0
+[1m[92m   Compiling[0m tinyvec v1.12.0
+[1m[92m   Compiling[0m indexmap v2.14.0
+[1m[92m   Compiling[0m webpki-roots v0.26.11
+[1m[92m   Compiling[0m crossbeam-queue v0.3.13
+[1m[92m   Compiling[0m hashlink v0.10.0
+[1m[92m   Compiling[0m ring v0.17.14
+[1m[92m   Compiling[0m rustls-webpki v0.103.14
+[1m[92m   Compiling[0m unicode-normalization v0.1.25
+[1m[92m   Compiling[0m idna v1.1.0
+[1m[92m   Compiling[0m getrandom v0.3.4
+[1m[92m   Compiling[0m rand_core v0.6.4
+[1m[92m   Compiling[0m hmac v0.12.1
+[1m[92m   Compiling[0m hex v0.4.3
+[1m[92m   Compiling[0m unicode-properties v0.1.4
+[1m[92m   Compiling[0m unicode-bidi v0.3.18
+[1m[92m   Compiling[0m hkdf v0.12.4
+[1m[92m   Compiling[0m rand_chacha v0.3.1
+[1m[92m   Compiling[0m rand_core v0.9.5
+[1m[92m   Compiling[0m stringprep v0.1.5
+[1m[92m   Compiling[0m url v2.5.8
+[1m[92m   Compiling[0m rustls v0.23.43
+[1m[92m   Compiling[0m tokio-stream v0.1.19
+[1m[92m   Compiling[0m futures-intrusive v0.5.0
+[1m[92m   Compiling[0m httparse v1.10.1
+[1m[92m   Compiling[0m http-body v1.1.0
+[1m[92m   Compiling[0m serde_json v1.0.151
+[1m[92m   Compiling[0m atoi v2.0.0
+[1m[92m   Compiling[0m either v1.17.0
+[1m[92m   Compiling[0m futures-channel v0.3.34
+[1m[92m   Compiling[0m md-5 v0.10.6
+[1m[92m   Compiling[0m tower-service v0.3.3
+[1m[92m   Compiling[0m whoami v1.6.1
+[1m[92m   Compiling[0m dotenvy v0.15.7
+[1m[92m   Compiling[0m byteorder v1.5.0
+[1m[92m   Compiling[0m home v0.5.12
+[1m[92m   Compiling[0m rand v0.8.7
+[1m[92m   Compiling[0m sqlx-core v0.8.6
+[1m[92m   Compiling[0m rand_chacha v0.9.0
+[1m[92m   Compiling[0m getrandom v0.4.3
+[1m[92m   Compiling[0m deal-core v0.1.0 (/home/runner/work/noir-poker/noir-poker/crates/deal-core)
+[1m[92m   Compiling[0m tower-layer v0.3.3
+[1m[92m   Compiling[0m base64 v0.22.1
+[1m[92m   Compiling[0m sqlx-postgres v0.8.6
+[1m[92m   Compiling[0m uuid v1.24.1
+[1m[92m   Compiling[0m rand v0.9.5
+[1m[92m   Compiling[0m rmp v0.8.15
+[1m[92m   Compiling[0m sha1 v0.10.7
+[1m[92m   Compiling[0m blake2 v0.10.6
+[1m[92m   Compiling[0m sync_wrapper v1.0.2
+[1m[92m   Compiling[0m utf-8 v0.7.6
+[1m[92m   Compiling[0m data-encoding v2.11.1
+[1m[92m   Compiling[0m httpdate v1.0.3
+[1m[92m   Compiling[0m atomic-waker v1.1.2
+[1m[92m   Compiling[0m hyper v1.11.0
+[1m[92m   Compiling[0m tungstenite v0.28.0
+[1m[92m   Compiling[0m sqlx-macros-core v0.8.6
+[1m[92m   Compiling[0m memoffset v0.9.1
+[1m[92m   Compiling[0m http-body-util v0.1.5
+[1m[92m   Compiling[0m mime v0.3.17
+[1m[92m   Compiling[0m axum-core v0.5.6
+[1m[92m   Compiling[0m thiserror v1.0.69
+[1m[92m   Compiling[0m nix v0.27.1
+[1m[92m   Compiling[0m sqlx-macros v0.8.6
+[1m[92m   Compiling[0m tokio-tungstenite v0.28.0
+[1m[92m   Compiling[0m hyper-util v0.1.20
+[1m[92m   Compiling[0m challenge-core v0.1.0 (/home/runner/work/noir-poker/noir-poker/crates/challenge-core)
+[1m[92m   Compiling[0m tower v0.5.3
+[1m[92m   Compiling[0m rmp-serde v1.3.1
+[1m[92m   Compiling[0m rmpv v1.3.1
+[1m[92m   Compiling[0m game-core v0.1.0 (/home/runner/work/noir-poker/noir-poker/crates/game-core)
+[1m[92m   Compiling[0m serde_path_to_error v0.1.20
+[1m[92m   Compiling[0m matchit v0.8.4
+[1m[92m   Compiling[0m barretenberg-rs v5.2.0
+[1m[92m   Compiling[0m tower-http v0.6.11
+[1m[92m   Compiling[0m axum v0.8.8
+[1m[92m   Compiling[0m sqlx v0.8.6
+[1m[92m   Compiling[0m server v0.1.0 (/home/runner/work/noir-poker/noir-poker/apps/server)
+[1m[91merror[E0599][0m[1m: no method named `commit_fair_join` found for struct `tokio::sync::MutexGuard<'_, room::Room>` in the current scope[0m
+   [1m[94m--> [0mapps/server/src/main.rs:614:10
+    [1m[94m|[0m
+[1m[94m614[0m [1m[94m|[0m     room.commit_fair_join(token_hash, seat, share, game, next, next_rev);
+    [1m[94m|[0m          [1m[91m^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+[1m[96mhelp[0m: there is a method `commit_fair_ready` with a similar name, but with different arguments
+   [1m[94m--> [0mapps/server/src/room.rs:211:5
+    [1m[94m|[0m
+[1m[94m211[0m [1m[94m|[0m [1m[96m/[0m     pub(super) fn commit_fair_ready(
+[1m[94m212[0m [1m[94m|[0m [1m[96m|[0m         &mut self,
+[1m[94m213[0m [1m[94m|[0m [1m[96m|[0m         seat: usize,
+[1m[94m214[0m [1m[94m|[0m [1m[96m|[0m         pending: PendingFairReady,
+[1m[94m215[0m [1m[94m|[0m [1m[96m|[0m         hand: Option<LiveHand>,
+[1m[94m216[0m [1m[94m|[0m [1m[96m|[0m         next: Option<Ceremony>,
+[1m[94m217[0m [1m[94m|[0m [1m[96m|[0m     ) {
+    [1m[94m|[0m [1m[96m|_____^[0m
+
+[1m[91merror[E0599][0m[1m: no method named `commit_join` found for mutable reference `&mut room::Room` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:1984:14
+     [1m[94m|[0m
+[1m[94m1984[0m [1m[94m|[0m         room.commit_join(hash_token(token), hand, rev);
+     [1m[94m|[0m              [1m[91m^^^^^^^^^^^[0m
+     [1m[94m|[0m
+[1m[96mhelp[0m: there is a method `commit_action` with a similar name, but with different arguments
+    [1m[94m--> [0mapps/server/src/room.rs:438:5
+     [1m[94m|[0m
+ [1m[94m438[0m [1m[94m|[0m     pub(super) fn commit_action(&mut self, action: PendingAction) {
+     [1m[94m|[0m     [1m[96m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[91merror[E0599][0m[1m: no method named `create_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3154:12
+     [1m[94m|[0m
+[1m[94m3154[0m [1m[94m|[0m         db.create_room(
+     [1m[94m|[0m         [1m[94m---[0m[1m[91m^^^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `create_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3154:9
+     [1m[94m|[0m
+[1m[94m3154[0m [1m[94m|[0m [1m[91m/[0m         db.create_room(
+[1m[94m3155[0m [1m[94m|[0m [1m[91m|[0m             waiting_id,
+[1m[94m3156[0m [1m[94m|[0m [1m[91m|[0m             waiting_config.players,
+[1m[94m3157[0m [1m[94m|[0m [1m[91m|[0m             waiting_config.stack,
+[1m[94m...[0m    [1m[91m|[0m
+[1m[94m3162[0m [1m[94m|[0m [1m[91m|[0m         .await
+     [1m[94m|[0m [1m[91m|______________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `join_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3164:12
+     [1m[94m|[0m
+[1m[94m3164[0m [1m[94m|[0m         db.join_room(waiting_id, 1, &hash_token(waiting_second), 0, 1, None)
+     [1m[94m|[0m            [1m[91m^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `join_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3164:9
+     [1m[94m|[0m
+[1m[94m3164[0m [1m[94m|[0m [1m[91m/[0m         db.join_room(waiting_id, 1, &hash_token(waiting_second), 0, 1, None)
+[1m[94m3165[0m [1m[94m|[0m [1m[91m|[0m             .await
+     [1m[94m|[0m [1m[91m|__________________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `create_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3189:12
+     [1m[94m|[0m
+[1m[94m3189[0m [1m[94m|[0m         db.create_room(
+     [1m[94m|[0m         [1m[94m---[0m[1m[91m^^^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `create_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3189:9
+     [1m[94m|[0m
+[1m[94m3189[0m [1m[94m|[0m [1m[91m/[0m         db.create_room(
+[1m[94m3190[0m [1m[94m|[0m [1m[91m|[0m             id,
+[1m[94m3191[0m [1m[94m|[0m [1m[91m|[0m             config.players,
+[1m[94m3192[0m [1m[94m|[0m [1m[91m|[0m             config.stack,
+[1m[94m...[0m    [1m[91m|[0m
+[1m[94m3197[0m [1m[94m|[0m [1m[91m|[0m         .await
+     [1m[94m|[0m [1m[91m|______________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `join_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3220:12
+     [1m[94m|[0m
+[1m[94m3220[0m [1m[94m|[0m         db.join_room(
+     [1m[94m|[0m         [1m[94m---[0m[1m[91m^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `join_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3220:9
+     [1m[94m|[0m
+[1m[94m3220[0m [1m[94m|[0m [1m[91m/[0m         db.join_room(
+[1m[94m3221[0m [1m[94m|[0m [1m[91m|[0m             id,
+[1m[94m3222[0m [1m[94m|[0m [1m[91m|[0m             1,
+[1m[94m3223[0m [1m[94m|[0m [1m[91m|[0m             &second_hash,
+[1m[94m...[0m    [1m[91m|[0m
+[1m[94m3234[0m [1m[94m|[0m [1m[91m|[0m         .await
+     [1m[94m|[0m [1m[91m|______________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `commit_join` found for struct `room::Room` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3236:14
+     [1m[94m|[0m
+[1m[94m3236[0m [1m[94m|[0m         room.commit_join(
+     [1m[94m|[0m         [1m[94m-----[0m[1m[91m^^^^^^^^^^^[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/room.rs:46:1
+     [1m[94m|[0m
+  [1m[94m46[0m [1m[94m|[0m pub(super) struct Room {
+     [1m[94m|[0m [1m[94m----------------------[0m [1m[94mmethod `commit_join` not found for this struct[0m
+     [1m[94m|[0m
+[1m[96mhelp[0m: there is a method `commit_action` with a similar name, but with different arguments
+    [1m[94m--> [0mapps/server/src/room.rs:438:5
+     [1m[94m|[0m
+ [1m[94m438[0m [1m[94m|[0m     pub(super) fn commit_action(&mut self, action: PendingAction) {
+     [1m[94m|[0m     [1m[96m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[91merror[E0599][0m[1m: no method named `create_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3425:12
+     [1m[94m|[0m
+[1m[94m3425[0m [1m[94m|[0m         db.create_room(
+     [1m[94m|[0m         [1m[94m---[0m[1m[91m^^^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `create_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3425:9
+     [1m[94m|[0m
+[1m[94m3425[0m [1m[94m|[0m [1m[91m/[0m         db.create_room(
+[1m[94m3426[0m [1m[94m|[0m [1m[91m|[0m             other_id,
+[1m[94m3427[0m [1m[94m|[0m [1m[91m|[0m             config.players,
+[1m[94m3428[0m [1m[94m|[0m [1m[91m|[0m             config.stack,
+[1m[94m...[0m    [1m[91m|[0m
+[1m[94m3433[0m [1m[94m|[0m [1m[91m|[0m         .await
+     [1m[94m|[0m [1m[91m|______________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `join_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3435:12
+     [1m[94m|[0m
+[1m[94m3435[0m [1m[94m|[0m         db.join_room(
+     [1m[94m|[0m         [1m[94m---[0m[1m[91m^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `join_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3435:9
+     [1m[94m|[0m
+[1m[94m3435[0m [1m[94m|[0m [1m[91m/[0m         db.join_room(
+[1m[94m3436[0m [1m[94m|[0m [1m[91m|[0m             other_id,
+[1m[94m3437[0m [1m[94m|[0m [1m[91m|[0m             1,
+[1m[94m3438[0m [1m[94m|[0m [1m[91m|[0m             &other_second,
+[1m[94m...[0m    [1m[91m|[0m
+[1m[94m3449[0m [1m[94m|[0m [1m[91m|[0m         .await
+     [1m[94m|[0m [1m[91m|______________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `commit_join` found for struct `room::Room` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3451:15
+     [1m[94m|[0m
+[1m[94m3451[0m [1m[94m|[0m         other.commit_join(
+     [1m[94m|[0m         [1m[94m------[0m[1m[91m^^^^^^^^^^^[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/room.rs:46:1
+     [1m[94m|[0m
+  [1m[94m46[0m [1m[94m|[0m pub(super) struct Room {
+     [1m[94m|[0m [1m[94m----------------------[0m [1m[94mmethod `commit_join` not found for this struct[0m
+     [1m[94m|[0m
+[1m[96mhelp[0m: there is a method `commit_action` with a similar name, but with different arguments
+    [1m[94m--> [0mapps/server/src/room.rs:438:5
+     [1m[94m|[0m
+ [1m[94m438[0m [1m[94m|[0m     pub(super) fn commit_action(&mut self, action: PendingAction) {
+     [1m[94m|[0m     [1m[96m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[91merror[E0599][0m[1m: no method named `create_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3500:12
+     [1m[94m|[0m
+[1m[94m3500[0m [1m[94m|[0m         db.create_room(
+     [1m[94m|[0m         [1m[94m---[0m[1m[91m^^^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `create_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3500:9
+     [1m[94m|[0m
+[1m[94m3500[0m [1m[94m|[0m [1m[91m/[0m         db.create_room(
+[1m[94m3501[0m [1m[94m|[0m [1m[91m|[0m             all_in_id,
+[1m[94m3502[0m [1m[94m|[0m [1m[91m|[0m             all_in_config.players,
+[1m[94m3503[0m [1m[94m|[0m [1m[91m|[0m             all_in_config.stack,
+[1m[94m...[0m    [1m[91m|[0m
+[1m[94m3508[0m [1m[94m|[0m [1m[91m|[0m         .await
+     [1m[94m|[0m [1m[91m|______________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `join_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3510:12
+     [1m[94m|[0m
+[1m[94m3510[0m [1m[94m|[0m         db.join_room(
+     [1m[94m|[0m         [1m[94m---[0m[1m[91m^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `join_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3510:9
+     [1m[94m|[0m
+[1m[94m3510[0m [1m[94m|[0m [1m[91m/[0m         db.join_room(
+[1m[94m3511[0m [1m[94m|[0m [1m[91m|[0m             all_in_id,
+[1m[94m3512[0m [1m[94m|[0m [1m[91m|[0m             1,
+[1m[94m3513[0m [1m[94m|[0m [1m[91m|[0m             &all_in_second,
+[1m[94m...[0m    [1m[91m|[0m
+[1m[94m3524[0m [1m[94m|[0m [1m[91m|[0m         .await
+     [1m[94m|[0m [1m[91m|______________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `commit_join` found for struct `room::Room` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3526:16
+     [1m[94m|[0m
+[1m[94m3526[0m [1m[94m|[0m         all_in.commit_join(
+     [1m[94m|[0m         [1m[94m-------[0m[1m[91m^^^^^^^^^^^[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/room.rs:46:1
+     [1m[94m|[0m
+  [1m[94m46[0m [1m[94m|[0m pub(super) struct Room {
+     [1m[94m|[0m [1m[94m----------------------[0m [1m[94mmethod `commit_join` not found for this struct[0m
+     [1m[94m|[0m
+[1m[96mhelp[0m: there is a method `commit_action` with a similar name, but with different arguments
+    [1m[94m--> [0mapps/server/src/room.rs:438:5
+     [1m[94m|[0m
+ [1m[94m438[0m [1m[94m|[0m     pub(super) fn commit_action(&mut self, action: PendingAction) {
+     [1m[94m|[0m     [1m[96m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[91merror[E0599][0m[1m: no method named `create_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3587:12
+     [1m[94m|[0m
+[1m[94m3587[0m [1m[94m|[0m         db.create_room(
+     [1m[94m|[0m         [1m[94m---[0m[1m[91m^^^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `create_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3587:9
+     [1m[94m|[0m
+[1m[94m3587[0m [1m[94m|[0m [1m[91m/[0m         db.create_room(
+[1m[94m3588[0m [1m[94m|[0m [1m[91m|[0m             ready_id,
+[1m[94m3589[0m [1m[94m|[0m [1m[91m|[0m             ready_config.players,
+[1m[94m3590[0m [1m[94m|[0m [1m[91m|[0m             100,
+[1m[94m...[0m    [1m[91m|[0m
+[1m[94m3595[0m [1m[94m|[0m [1m[91m|[0m         .await
+     [1m[94m|[0m [1m[91m|______________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `join_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3597:12
+     [1m[94m|[0m
+[1m[94m3597[0m [1m[94m|[0m         db.join_room(
+     [1m[94m|[0m         [1m[94m---[0m[1m[91m^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `join_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3597:9
+     [1m[94m|[0m
+[1m[94m3597[0m [1m[94m|[0m [1m[91m/[0m         db.join_room(
+[1m[94m3598[0m [1m[94m|[0m [1m[91m|[0m             ready_id,
+[1m[94m3599[0m [1m[94m|[0m [1m[91m|[0m             1,
+[1m[94m3600[0m [1m[94m|[0m [1m[91m|[0m             &hash_token(ready_second),
+[1m[94m...[0m    [1m[91m|[0m
+[1m[94m3611[0m [1m[94m|[0m [1m[91m|[0m         .await
+     [1m[94m|[0m [1m[91m|______________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `commit_join` found for struct `room::Room` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3613:14
+     [1m[94m|[0m
+[1m[94m3613[0m [1m[94m|[0m         live.commit_join(
+     [1m[94m|[0m         [1m[94m-----[0m[1m[91m^^^^^^^^^^^[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/room.rs:46:1
+     [1m[94m|[0m
+  [1m[94m46[0m [1m[94m|[0m pub(super) struct Room {
+     [1m[94m|[0m [1m[94m----------------------[0m [1m[94mmethod `commit_join` not found for this struct[0m
+     [1m[94m|[0m
+[1m[96mhelp[0m: there is a method `commit_action` with a similar name, but with different arguments
+    [1m[94m--> [0mapps/server/src/room.rs:438:5
+     [1m[94m|[0m
+ [1m[94m438[0m [1m[94m|[0m     pub(super) fn commit_action(&mut self, action: PendingAction) {
+     [1m[94m|[0m     [1m[96m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[91merror[E0425][0m[1m: cannot find function `ready_room` in this scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3631:13
+     [1m[94m|[0m
+ [1m[94m492[0m [1m[94m|[0m [1m[94m/[0m async fn create_room(
+ [1m[94m493[0m [1m[94m|[0m [1m[94m|[0m     AxumState(state): AxumState<AppState>,
+ [1m[94m494[0m [1m[94m|[0m [1m[94m|[0m     Json(request): Json<CreateRoomRequest>,
+ [1m[94m495[0m [1m[94m|[0m [1m[94m|[0m ) -> Result<(StatusCode, Json<SeatResponse>), HttpError> {
+[1m[94m...[0m    [1m[94m|[0m
+ [1m[94m530[0m [1m[94m|[0m [1m[94m|[0m     ))
+ [1m[94m531[0m [1m[94m|[0m [1m[94m|[0m }
+     [1m[94m|[0m [1m[94m|_-[0m [1m[94msimilarly named function `create_room` defined here[0m
+[1m[94m...[0m
+[1m[94m3631[0m [1m[94m|[0m               ready_room(&ready_state, ready_id, 0).await,
+     [1m[94m|[0m               [1m[91m^^^^^^^^^^[0m [1m[91mhelp: a function with a similar name exists: `create_room`[0m
+
+[1m[91merror[E0425][0m[1m: cannot find function `ready_room` in this scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3638:13
+     [1m[94m|[0m
+ [1m[94m492[0m [1m[94m|[0m [1m[94m/[0m async fn create_room(
+ [1m[94m493[0m [1m[94m|[0m [1m[94m|[0m     AxumState(state): AxumState<AppState>,
+ [1m[94m494[0m [1m[94m|[0m [1m[94m|[0m     Json(request): Json<CreateRoomRequest>,
+ [1m[94m495[0m [1m[94m|[0m [1m[94m|[0m ) -> Result<(StatusCode, Json<SeatResponse>), HttpError> {
+[1m[94m...[0m    [1m[94m|[0m
+ [1m[94m530[0m [1m[94m|[0m [1m[94m|[0m     ))
+ [1m[94m531[0m [1m[94m|[0m [1m[94m|[0m }
+     [1m[94m|[0m [1m[94m|_-[0m [1m[94msimilarly named function `create_room` defined here[0m
+[1m[94m...[0m
+[1m[94m3638[0m [1m[94m|[0m               ready_room(&ready_state, ready_id, 0).await,
+     [1m[94m|[0m               [1m[91m^^^^^^^^^^[0m [1m[91mhelp: a function with a similar name exists: `create_room`[0m
+
+[1m[91merror[E0425][0m[1m: cannot find function `ready_room` in this scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3661:9
+     [1m[94m|[0m
+ [1m[94m492[0m [1m[94m|[0m [1m[94m/[0m async fn create_room(
+ [1m[94m493[0m [1m[94m|[0m [1m[94m|[0m     AxumState(state): AxumState<AppState>,
+ [1m[94m494[0m [1m[94m|[0m [1m[94m|[0m     Json(request): Json<CreateRoomRequest>,
+ [1m[94m495[0m [1m[94m|[0m [1m[94m|[0m ) -> Result<(StatusCode, Json<SeatResponse>), HttpError> {
+[1m[94m...[0m    [1m[94m|[0m
+ [1m[94m530[0m [1m[94m|[0m [1m[94m|[0m     ))
+ [1m[94m531[0m [1m[94m|[0m [1m[94m|[0m }
+     [1m[94m|[0m [1m[94m|_-[0m [1m[94msimilarly named function `create_room` defined here[0m
+[1m[94m...[0m
+[1m[94m3661[0m [1m[94m|[0m           ready_room(&ready_state, ready_id, 0).await.unwrap();
+     [1m[94m|[0m           [1m[91m^^^^^^^^^^[0m [1m[91mhelp: a function with a similar name exists: `create_room`[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3661:9
+     [1m[94m|[0m
+[1m[94m3661[0m [1m[94m|[0m         ready_room(&ready_state, ready_id, 0).await.unwrap();
+     [1m[94m|[0m         [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0425][0m[1m: cannot find function `ready_room` in this scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3710:13
+     [1m[94m|[0m
+ [1m[94m492[0m [1m[94m|[0m [1m[94m/[0m async fn create_room(
+ [1m[94m493[0m [1m[94m|[0m [1m[94m|[0m     AxumState(state): AxumState<AppState>,
+ [1m[94m494[0m [1m[94m|[0m [1m[94m|[0m     Json(request): Json<CreateRoomRequest>,
+ [1m[94m495[0m [1m[94m|[0m [1m[94m|[0m ) -> Result<(StatusCode, Json<SeatResponse>), HttpError> {
+[1m[94m...[0m    [1m[94m|[0m
+ [1m[94m530[0m [1m[94m|[0m [1m[94m|[0m     ))
+ [1m[94m531[0m [1m[94m|[0m [1m[94m|[0m }
+     [1m[94m|[0m [1m[94m|_-[0m [1m[94msimilarly named function `create_room` defined here[0m
+[1m[94m...[0m
+[1m[94m3710[0m [1m[94m|[0m               ready_room(&ready_state, ready_id, 0).await,
+     [1m[94m|[0m               [1m[91m^^^^^^^^^^[0m [1m[91mhelp: a function with a similar name exists: `create_room`[0m
+
+[1m[91merror[E0425][0m[1m: cannot find function `ready_room` in this scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3746:9
+     [1m[94m|[0m
+ [1m[94m492[0m [1m[94m|[0m [1m[94m/[0m async fn create_room(
+ [1m[94m493[0m [1m[94m|[0m [1m[94m|[0m     AxumState(state): AxumState<AppState>,
+ [1m[94m494[0m [1m[94m|[0m [1m[94m|[0m     Json(request): Json<CreateRoomRequest>,
+ [1m[94m495[0m [1m[94m|[0m [1m[94m|[0m ) -> Result<(StatusCode, Json<SeatResponse>), HttpError> {
+[1m[94m...[0m    [1m[94m|[0m
+ [1m[94m530[0m [1m[94m|[0m [1m[94m|[0m     ))
+ [1m[94m531[0m [1m[94m|[0m [1m[94m|[0m }
+     [1m[94m|[0m [1m[94m|_-[0m [1m[94msimilarly named function `create_room` defined here[0m
+[1m[94m...[0m
+[1m[94m3746[0m [1m[94m|[0m           ready_room(&ready_state, ready_id, 1).await.unwrap();
+     [1m[94m|[0m           [1m[91m^^^^^^^^^^[0m [1m[91mhelp: a function with a similar name exists: `create_room`[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:3746:9
+     [1m[94m|[0m
+[1m[94m3746[0m [1m[94m|[0m         ready_room(&ready_state, ready_id, 1).await.unwrap();
+     [1m[94m|[0m         [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0425][0m[1m: cannot find function `ready_room` in this scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4054:13
+     [1m[94m|[0m
+ [1m[94m492[0m [1m[94m|[0m [1m[94m/[0m async fn create_room(
+ [1m[94m493[0m [1m[94m|[0m [1m[94m|[0m     AxumState(state): AxumState<AppState>,
+ [1m[94m494[0m [1m[94m|[0m [1m[94m|[0m     Json(request): Json<CreateRoomRequest>,
+ [1m[94m495[0m [1m[94m|[0m [1m[94m|[0m ) -> Result<(StatusCode, Json<SeatResponse>), HttpError> {
+[1m[94m...[0m    [1m[94m|[0m
+ [1m[94m530[0m [1m[94m|[0m [1m[94m|[0m     ))
+ [1m[94m531[0m [1m[94m|[0m [1m[94m|[0m }
+     [1m[94m|[0m [1m[94m|_-[0m [1m[94msimilarly named function `create_room` defined here[0m
+[1m[94m...[0m
+[1m[94m4054[0m [1m[94m|[0m               ready_room(&ready_state, ready_id, 0),
+     [1m[94m|[0m               [1m[91m^^^^^^^^^^[0m [1m[91mhelp: a function with a similar name exists: `create_room`[0m
+
+[1m[91merror[E0425][0m[1m: cannot find function `ready_room` in this scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4055:13
+     [1m[94m|[0m
+ [1m[94m492[0m [1m[94m|[0m [1m[94m/[0m async fn create_room(
+ [1m[94m493[0m [1m[94m|[0m [1m[94m|[0m     AxumState(state): AxumState<AppState>,
+ [1m[94m494[0m [1m[94m|[0m [1m[94m|[0m     Json(request): Json<CreateRoomRequest>,
+ [1m[94m495[0m [1m[94m|[0m [1m[94m|[0m ) -> Result<(StatusCode, Json<SeatResponse>), HttpError> {
+[1m[94m...[0m    [1m[94m|[0m
+ [1m[94m530[0m [1m[94m|[0m [1m[94m|[0m     ))
+ [1m[94m531[0m [1m[94m|[0m [1m[94m|[0m }
+     [1m[94m|[0m [1m[94m|_-[0m [1m[94msimilarly named function `create_room` defined here[0m
+[1m[94m...[0m
+[1m[94m4055[0m [1m[94m|[0m               ready_room(&ready_state, ready_id, 1)
+     [1m[94m|[0m               [1m[91m^^^^^^^^^^[0m [1m[91mhelp: a function with a similar name exists: `create_room`[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4053:31
+     [1m[94m|[0m
+[1m[94m4053[0m [1m[94m|[0m           let (first, second) = tokio::join!(
+     [1m[94m|[0m [1m[91m _______________________________^[0m
+[1m[94m4054[0m [1m[94m|[0m [1m[91m|[0m             ready_room(&ready_state, ready_id, 0),
+[1m[94m4055[0m [1m[94m|[0m [1m[91m|[0m             ready_room(&ready_state, ready_id, 1)
+[1m[94m4056[0m [1m[94m|[0m [1m[91m|[0m         );
+     [1m[94m|[0m [1m[91m|_________^[0m [1m[91mcannot infer type[0m
+     [1m[94m|[0m
+     [1m[94m= [0m[1mnote[0m: this error originates in the macro `$crate::join` which comes from the expansion of the macro `tokio::join` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+[1m[91merror[E0599][0m[1m: no method named `create_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4081:12
+     [1m[94m|[0m
+[1m[94m4081[0m [1m[94m|[0m         db.create_room(short_id, 2, 10, 5, 10, &short_first)
+     [1m[94m|[0m            [1m[91m^^^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `create_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4081:9
+     [1m[94m|[0m
+[1m[94m4081[0m [1m[94m|[0m [1m[91m/[0m         db.create_room(short_id, 2, 10, 5, 10, &short_first)
+[1m[94m4082[0m [1m[94m|[0m [1m[91m|[0m             .await
+     [1m[94m|[0m [1m[91m|__________________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `join_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4084:12
+     [1m[94m|[0m
+[1m[94m4084[0m [1m[94m|[0m         db.join_room(
+     [1m[94m|[0m         [1m[94m---[0m[1m[91m^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `join_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4084:9
+     [1m[94m|[0m
+[1m[94m4084[0m [1m[94m|[0m [1m[91m/[0m         db.join_room(
+[1m[94m4085[0m [1m[94m|[0m [1m[91m|[0m             short_id,
+[1m[94m4086[0m [1m[94m|[0m [1m[91m|[0m             1,
+[1m[94m4087[0m [1m[94m|[0m [1m[91m|[0m             &short_second,
+[1m[94m...[0m    [1m[91m|[0m
+[1m[94m4098[0m [1m[94m|[0m [1m[91m|[0m         .await
+     [1m[94m|[0m [1m[91m|______________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `commit_join` found for struct `room::Room` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4100:15
+     [1m[94m|[0m
+[1m[94m4100[0m [1m[94m|[0m         short.commit_join(
+     [1m[94m|[0m         [1m[94m------[0m[1m[91m^^^^^^^^^^^[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/room.rs:46:1
+     [1m[94m|[0m
+  [1m[94m46[0m [1m[94m|[0m pub(super) struct Room {
+     [1m[94m|[0m [1m[94m----------------------[0m [1m[94mmethod `commit_join` not found for this struct[0m
+     [1m[94m|[0m
+[1m[96mhelp[0m: there is a method `commit_action` with a similar name, but with different arguments
+    [1m[94m--> [0mapps/server/src/room.rs:438:5
+     [1m[94m|[0m
+ [1m[94m438[0m [1m[94m|[0m     pub(super) fn commit_action(&mut self, action: PendingAction) {
+     [1m[94m|[0m     [1m[96m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[91merror[E0425][0m[1m: cannot find function `ready_room` in this scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4133:9
+     [1m[94m|[0m
+ [1m[94m492[0m [1m[94m|[0m [1m[94m/[0m async fn create_room(
+ [1m[94m493[0m [1m[94m|[0m [1m[94m|[0m     AxumState(state): AxumState<AppState>,
+ [1m[94m494[0m [1m[94m|[0m [1m[94m|[0m     Json(request): Json<CreateRoomRequest>,
+ [1m[94m495[0m [1m[94m|[0m [1m[94m|[0m ) -> Result<(StatusCode, Json<SeatResponse>), HttpError> {
+[1m[94m...[0m    [1m[94m|[0m
+ [1m[94m530[0m [1m[94m|[0m [1m[94m|[0m     ))
+ [1m[94m531[0m [1m[94m|[0m [1m[94m|[0m }
+     [1m[94m|[0m [1m[94m|_-[0m [1m[94msimilarly named function `create_room` defined here[0m
+[1m[94m...[0m
+[1m[94m4133[0m [1m[94m|[0m           ready_room(&short_state, short_id, 0).await.unwrap();
+     [1m[94m|[0m           [1m[91m^^^^^^^^^^[0m [1m[91mhelp: a function with a similar name exists: `create_room`[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4133:9
+     [1m[94m|[0m
+[1m[94m4133[0m [1m[94m|[0m         ready_room(&short_state, short_id, 0).await.unwrap();
+     [1m[94m|[0m         [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0425][0m[1m: cannot find function `ready_room` in this scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4134:9
+     [1m[94m|[0m
+ [1m[94m492[0m [1m[94m|[0m [1m[94m/[0m async fn create_room(
+ [1m[94m493[0m [1m[94m|[0m [1m[94m|[0m     AxumState(state): AxumState<AppState>,
+ [1m[94m494[0m [1m[94m|[0m [1m[94m|[0m     Json(request): Json<CreateRoomRequest>,
+ [1m[94m495[0m [1m[94m|[0m [1m[94m|[0m ) -> Result<(StatusCode, Json<SeatResponse>), HttpError> {
+[1m[94m...[0m    [1m[94m|[0m
+ [1m[94m530[0m [1m[94m|[0m [1m[94m|[0m     ))
+ [1m[94m531[0m [1m[94m|[0m [1m[94m|[0m }
+     [1m[94m|[0m [1m[94m|_-[0m [1m[94msimilarly named function `create_room` defined here[0m
+[1m[94m...[0m
+[1m[94m4134[0m [1m[94m|[0m           ready_room(&short_state, short_id, 1).await.unwrap();
+     [1m[94m|[0m           [1m[91m^^^^^^^^^^[0m [1m[91mhelp: a function with a similar name exists: `create_room`[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4134:9
+     [1m[94m|[0m
+[1m[94m4134[0m [1m[94m|[0m         ready_room(&short_state, short_id, 1).await.unwrap();
+     [1m[94m|[0m         [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `create_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4202:12
+     [1m[94m|[0m
+[1m[94m4202[0m [1m[94m|[0m         db.create_room(
+     [1m[94m|[0m         [1m[94m---[0m[1m[91m^^^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `create_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4202:9
+     [1m[94m|[0m
+[1m[94m4202[0m [1m[94m|[0m [1m[91m/[0m         db.create_room(
+[1m[94m4203[0m [1m[94m|[0m [1m[91m|[0m             id,
+[1m[94m4204[0m [1m[94m|[0m [1m[91m|[0m             config.players,
+[1m[94m4205[0m [1m[94m|[0m [1m[91m|[0m             config.stack,
+[1m[94m...[0m    [1m[91m|[0m
+[1m[94m4210[0m [1m[94m|[0m [1m[91m|[0m         .await
+     [1m[94m|[0m [1m[91m|______________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `join_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4212:12
+     [1m[94m|[0m
+[1m[94m4212[0m [1m[94m|[0m         db.join_room(id, 1, &hash_token(tokens[1]), 0, 1, None)
+     [1m[94m|[0m            [1m[91m^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `join_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4212:9
+     [1m[94m|[0m
+[1m[94m4212[0m [1m[94m|[0m [1m[91m/[0m         db.join_room(id, 1, &hash_token(tokens[1]), 0, 1, None)
+[1m[94m4213[0m [1m[94m|[0m [1m[91m|[0m             .await
+     [1m[94m|[0m [1m[91m|__________________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `join_room` found for struct `db::Db` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4215:12
+     [1m[94m|[0m
+[1m[94m4215[0m [1m[94m|[0m         db.join_room(
+     [1m[94m|[0m         [1m[94m---[0m[1m[91m^^^^^^^^^[0m [1m[91mmethod not found in `db::Db`[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/db.rs:177:1
+     [1m[94m|[0m
+ [1m[94m177[0m [1m[94m|[0m pub struct Db {
+     [1m[94m|[0m [1m[94m-------------[0m [1m[94mmethod `join_room` not found for this struct[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4215:9
+     [1m[94m|[0m
+[1m[94m4215[0m [1m[94m|[0m [1m[91m/[0m         db.join_room(
+[1m[94m4216[0m [1m[94m|[0m [1m[91m|[0m             id,
+[1m[94m4217[0m [1m[94m|[0m [1m[91m|[0m             2,
+[1m[94m4218[0m [1m[94m|[0m [1m[91m|[0m             &hash_token(tokens[2]),
+[1m[94m...[0m    [1m[91m|[0m
+[1m[94m4229[0m [1m[94m|[0m [1m[91m|[0m         .await
+     [1m[94m|[0m [1m[91m|______________^[0m [1m[91mcannot infer type[0m
+
+[1m[91merror[E0599][0m[1m: no method named `commit_join` found for struct `room::Room` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4305:14
+     [1m[94m|[0m
+[1m[94m4305[0m [1m[94m|[0m         room.commit_join(hash_token(tokens[1]), None, 1);
+     [1m[94m|[0m              [1m[91m^^^^^^^^^^^[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/room.rs:46:1
+     [1m[94m|[0m
+  [1m[94m46[0m [1m[94m|[0m pub(super) struct Room {
+     [1m[94m|[0m [1m[94m----------------------[0m [1m[94mmethod `commit_join` not found for this struct[0m
+     [1m[94m|[0m
+[1m[96mhelp[0m: there is a method `commit_action` with a similar name, but with different arguments
+    [1m[94m--> [0mapps/server/src/room.rs:438:5
+     [1m[94m|[0m
+ [1m[94m438[0m [1m[94m|[0m     pub(super) fn commit_action(&mut self, action: PendingAction) {
+     [1m[94m|[0m     [1m[96m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[91merror[E0599][0m[1m: no method named `commit_join` found for struct `room::Room` in the current scope[0m
+    [1m[94m--> [0mapps/server/src/main.rs:4308:14
+     [1m[94m|[0m
+[1m[94m4308[0m [1m[94m|[0m         room.commit_join(hash_token(tokens[2]), Some(hand), 2);
+     [1m[94m|[0m              [1m[91m^^^^^^^^^^^[0m
+     [1m[94m|[0m
+    [1m[94m::: [0mapps/server/src/room.rs:46:1
+     [1m[94m|[0m
+  [1m[94m46[0m [1m[94m|[0m pub(super) struct Room {
+     [1m[94m|[0m [1m[94m----------------------[0m [1m[94mmethod `commit_join` not found for this struct[0m
+     [1m[94m|[0m
+[1m[96mhelp[0m: there is a method `commit_action` with a similar name, but with different arguments
+    [1m[94m--> [0mapps/server/src/room.rs:438:5
+     [1m[94m|[0m
+ [1m[94m438[0m [1m[94m|[0m     pub(super) fn commit_action(&mut self, action: PendingAction) {
+     [1m[94m|[0m     [1m[96m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1mSome errors have detailed explanations: E0282, E0425, E0599.[0m
+[1mFor more information about an error, try `rustc --explain E0282`.[0m
+[1m[91merror[0m: could not compile `server` (bin "server" test) due to 54 previous errors

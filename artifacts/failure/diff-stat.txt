@@ -1,0 +1,27 @@
+ Cargo.lock                               |   36 +-
+ Cargo.toml                               |    2 +-
+ apps/server/Cargo.toml                   |    1 +
+ apps/server/src/db.rs                    |  150 +--
+ apps/server/src/main.rs                  |  410 +++++++--
+ apps/server/src/room.rs                  |  129 ++-
+ apps/web/app/globals.css                 | 1480 +++++++++++-------------------
+ apps/web/app/layout.tsx                  |    7 +-
+ apps/web/app/page.tsx                    |   70 +-
+ apps/web/app/proof/[nullifier]/page.tsx  |    7 +-
+ apps/web/app/table/[room]/page.tsx       |   19 +-
+ apps/web/components/card.tsx             |   15 +-
+ apps/web/components/contract.tsx         |  307 +++----
+ apps/web/components/lobby.tsx            |  147 ++-
+ apps/web/components/multiplayer-game.tsx |  528 +++--------
+ apps/web/components/proof-receipt.tsx    |  298 +++---
+ apps/web/components/seat.tsx             |   27 +-
+ apps/web/components/table.tsx            |  191 ++--
+ apps/web/lib/receipt.ts                  |   24 +-
+ apps/web/lib/server.ts                   |   61 +-
+ apps/web/package.json                    |    5 +-
+ apps/web/scripts/verify-receipt.mjs      |   48 +-
+ crates/challenge-core/src/lib.rs         |    4 +-
+ crates/game-core/Cargo.toml              |    3 +-
+ crates/game-core/src/card.rs             |   19 +-
+ crates/game-core/src/deck.rs             |   86 +-
+ 26 files changed, 1773 insertions(+), 2301 deletions(-)

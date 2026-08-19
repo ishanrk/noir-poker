@@ -1,0 +1,20 @@
+== cargo-check ==
+101
+== cargo-fmt ==
+0
+== cargo-test ==
+101
+== cargo-clippy ==
+101
+== npm-ci ==
+0
+== challenge-test ==
+0
+== deal-test ==
+1
+== receipt-test ==
+1
+== eslint ==
+1
+== next-build ==
+1
