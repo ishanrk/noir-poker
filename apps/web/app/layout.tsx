@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { SiteFooter } from "@/components/site-footer";
 
 import "./globals.css";
+import "./pages.css";
 
 export const metadata: Metadata = {
   title: "Noir Poker",
