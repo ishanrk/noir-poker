@@ -16,14 +16,14 @@ export function ProtocolDemo() {
     const deck = shuffleDeck(seed);
     return { commitment, seed, deck, layout: dealLayout(deck, 3, 1) };
   }, []);
-  const labels = ["Commit server secret", "Add three ordered shares", "Shuffle all 52 positions", "Deal seats, burns and board"];
+  const labels = ["Server commits", "Players add randomness", "Shuffle", "Deal"];
 
   return (
     <div className="protocol-demo">
       <div className="demo-controls">
         {labels.map((label, index) => (
           <button key={label} type="button" data-active={step === index} onClick={() => setStep(index)}>
-            <span>0{index + 1}</span>{label}
+            {label}
           </button>
         ))}
       </div>
@@ -38,10 +38,10 @@ export function ProtocolDemo() {
             {step === 3 && values.layout.board.map(cardValue).join("  ")}
           </code>
           <p>
-            {step === 0 && "The commitment is published before the final joining player reveals entropy."}
-            {step === 1 && "Seat indices are encoded, so reordering the same shares changes the seed."}
-            {step === 2 && "SHA-256 counter blocks feed rejection sampling, then Fisher–Yates."}
-            {step === 3 && "The engine and public verifier consume the same canonical positions."}
+            {step === 0 && "The commitment exists before player randomness is accepted."}
+            {step === 1 && "Seat indices are encoded, so reordering the same values changes the seed."}
+            {step === 2 && "SHA 256 counter blocks feed rejection sampling and Fisher Yates."}
+            {step === 3 && "The Rust engine and public verifier consume the same canonical positions."}
           </p>
         </div>
       </div>
