@@ -10,16 +10,14 @@ export default function Home() {
 
       <section className="hero" aria-labelledby="home-title">
         <div className="hero-copy">
-          <p className="eyebrow">Noir · UltraHonk · six-max hold&apos;em</p>
-          <h1 id="home-title">Poker whose hidden parts leave public evidence.</h1>
+          <h1 id="home-title">Poker with a verifiable deck.</h1>
           <p>
-            Play ordinary no-limit hold&apos;em. Every deck is fixed by server and player
-            entropy before the deal. Every secret bounty can be proven complete without
-            disclosing what it asked you to do.
+            The server commits before player randomness arrives. After each hand, anyone can
+            reconstruct all 52 card positions and verify the committed deck was dealt. Secret
+            bounty awards are proven in Noir without revealing the objective.
           </p>
           <div className="hero-links">
-            <Link href="/protocol">Read the protocol</Link>
-            <span>no wallet · no account · play chips only</span>
+            <Link href="/protocol">Protocol and verification</Link>
           </div>
         </div>
 
@@ -28,40 +26,36 @@ export default function Home() {
           <div className="hero-card hero-card-2">?</div>
           <div className="hero-card hero-card-1">?</div>
           <div className="hero-proof-line">
-            <span>commit</span>
-            <span>contribute</span>
+            <span>server commits</span>
+            <span>players contribute</span>
             <span>deal</span>
-            <span>reveal</span>
+            <span>public audit</span>
           </div>
         </div>
       </section>
 
       <section className="lobby-wrap" aria-labelledby="lobby-title">
-        <div className="section-index">
-          <span>01</span>
-          <p>Open a table</p>
-        </div>
         <div>
-          <h2 id="lobby-title">Choose the game, not a dashboard.</h2>
+          <h2 id="lobby-title">Create a game</h2>
           <Lobby />
         </div>
       </section>
 
-      <section className="trust-strip" aria-label="What the cryptography establishes">
+      <section className="trust-strip" aria-label="What can be verified">
         <article>
-          <span>Deal integrity</span>
-          <strong>Rebuild all 52 positions</strong>
-          <p>After settlement, anyone can recompute the commitment, seed, shuffle and deal.</p>
+          <span>Deck audit</span>
+          <strong>Reconstruct the hand</strong>
+          <p>Verify the commitment, entropy, shuffle, hole cards, burns and board after settlement.</p>
         </article>
         <article>
           <span>Private bounty</span>
-          <strong>Verify the win, not the objective</strong>
-          <p>The public sees two valid proofs and one award while the objective stays sealed.</p>
+          <strong>Verify the award</strong>
+          <p>Two Noir proofs establish that a hidden catalog objective was fairly drawn and completed.</p>
         </article>
         <article>
-          <span>Honest limit</span>
-          <strong>Auditable, not mental poker</strong>
-          <p>The authoritative server sees cards. The protocol proves the deck was not changed.</p>
+          <span>Security model</span>
+          <strong>The server sees the cards</strong>
+          <p>Completed deck selection is auditable. Server aborts and full collusion remain outside the guarantee.</p>
         </article>
       </section>
     </main>
