@@ -15,11 +15,11 @@ const entryId = entryIdForSeat(tableId, 3, nonce);
 
 assert.equal(
   fieldHex(tableId),
-  "0x013473e9646e40301dc44449195db2ef544fa00f7195bd172dedc5ff2887770",
+  "0x13473e9646e40301dc44449195db2ef544fa00f7195bd172dedc5ff2887770",
 );
 assert.equal(
   fieldHex(entryId),
-  "0x0986ddfd3a4c3f4945049fe7596ae04c083ef6a56da3cafba7bdd987cc5ef2d",
+  "0x986ddfd3a4c3f4945049fe7596ae04c083ef6a56da3cafba7bdd987cc5ef2d",
 );
 assert.deepEqual(nonceFromHex(nonceHex(nonce)), nonce);
 assert.notEqual(entryIdForSeat(tableId, 2, nonce), entryId);
