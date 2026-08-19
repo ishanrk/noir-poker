@@ -14,14 +14,23 @@ export default function Home() {
         <div className="hero-copy">
           <h1 id="home-title" aria-label="Noir Poker">
             <span className="hero-title-noir" aria-hidden="true">
-              <span className="noir-letter noir-letter-n">N</span>
-              <span className="noir-letter noir-letter-o">o</span>
-              <span className="noir-letter noir-letter-i">i</span>
-              <span className="noir-letter noir-letter-r">r</span>
+              {[
+                ["N", "n"],
+                ["o", "o"],
+                ["i", "i"],
+                ["r", "r"],
+              ].map(([letter, key]) => (
+                <span className={`noir-letter noir-letter-${key}`} key={key}>
+                  <span className="noir-letter-inner">
+                    <span className="noir-letter-face">{letter}</span>
+                    <span className="noir-letter-face noir-letter-question">?</span>
+                  </span>
+                </span>
+              ))}
             </span>{" "}
             Poker
           </h1>
-          <p className="hero-tagline">The server cannot secretly choose a favorable completed deck.</p>
+          <p className="hero-tagline">The game server cannot cheat even if it wanted to.</p>
         </div>
 
         <div className="hero-deck" aria-label="Animated sealed cards">
@@ -54,15 +63,16 @@ export default function Home() {
           </a>
         </div>
 
-        <div className="home-rule-row">
+        <div className="home-rule-row home-rule-challenge">
           <div>
             <h3>Private challenge</h3>
             <p>
-              Between hands, every active player receives one random private challenge. A completed
+              Between hands, every active player receives one random private challenge. Examples
+              include reach showdown, check on the flop, or finish the hand ahead. A completed
               challenge earns proof points without revealing the challenge or the player&apos;s hole cards.
             </p>
           </div>
-          <Link href="/rules">Challenge rules →</Link>
+          <Link href="/rules">Examples and proofs →</Link>
         </div>
       </section>
     </main>
