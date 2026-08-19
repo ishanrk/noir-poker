@@ -784,7 +784,7 @@ index 0000000..71a23ba
 +    }
 +}
 diff --git a/apps/server/src/main.rs b/apps/server/src/main.rs
-index 058be4d..1e5b5dc 100644
+index 058be4d..5d4ae44 100644
 --- a/apps/server/src/main.rs
 +++ b/apps/server/src/main.rs
 @@ -1,4 +1,5 @@
@@ -1410,7 +1410,21 @@ index 058be4d..1e5b5dc 100644
          hole: game.hole[seat].map(card_view),
          board: game.board.iter().copied().map(card_view).collect(),
          pot: game.pot,
-@@ -2875,7 +3146,7 @@ mod tests {
+@@ -1925,8 +2196,12 @@ mod tests {
+             .into_iter()
+             .find(|room| room.id == id)
+             .unwrap();
++        let mut room = restore_room(stored).unwrap();
++        let players = room.config.players;
+ 
+-        restore_room(stored).unwrap()
++        room.ceremony = fairness::load_pending(db, id, players).await.unwrap();
++        room.current_commitment = fairness::current_commitment(db, id).await.unwrap();
++        room
+     }
+ 
+     async fn persist(db: &Db, id: Uuid, room: &mut Room, seat: usize, action: Action) {
+@@ -2875,7 +3150,7 @@ mod tests {
          let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
          let db = Db::connect(&url).await.unwrap();
  
@@ -1419,7 +1433,7 @@ index 058be4d..1e5b5dc 100644
              .execute(db.pool())
              .await
              .unwrap();
-@@ -3283,7 +3554,7 @@ mod tests {
+@@ -3283,7 +3558,7 @@ mod tests {
          assert_eq!(restored_hand.game.pot, 0);
  
          let latest_id = Uuid::new_v4();
@@ -1428,7 +1442,7 @@ index 058be4d..1e5b5dc 100644
  
          sqlx::query(
              "INSERT INTO hands (id, room_id, hand_no, seed, dealer, starting_stacks) \
-@@ -3297,13 +3568,20 @@ mod tests {
+@@ -3297,13 +3572,20 @@ mod tests {
          .await
          .unwrap();
  
@@ -1455,7 +1469,89 @@ index 058be4d..1e5b5dc 100644
  
          let ready_id = Uuid::new_v4();
          let ready_first = Uuid::new_v4();
-@@ -3903,7 +4181,7 @@ mod tests {
+@@ -3316,44 +3598,68 @@ mod tests {
+             big_blind: 10,
+         };
+         let ready_stacks = vec![100, 100];
+-        let mut live = Room::new(ready_config, hash_token(ready_first)).unwrap();
++        let ready_first_hash = hash_token(ready_first);
++        let ready_second_hash = hash_token(ready_second);
++        let ready_first_share = [0x61; 32];
++        let ready_second_share = [0x62; 32];
++        let ready_ceremony = fairness::random_ceremony(ready_id, 0, ready_config.players).unwrap();
++        let mut live = Room::new_fair(
++            ready_config,
++            ready_first_hash,
++            ready_ceremony,
++            ready_first_share,
++        )
++        .unwrap();
++        let ready_ceremony = live.ceremony.as_ref().unwrap().clone();
++        let ready_seed = ready_ceremony
++            .seed_with(ready_id, 1, ready_second_share)
++            .unwrap();
++        let ready_next_ceremony =
++            fairness::random_ceremony(ready_id, 1, ready_config.players).unwrap();
+ 
+-        db.create_room(
++        fairness::create_room(
++            &db,
+             ready_id,
+-            ready_config.players,
+-            100,
+-            ready_config.small_blind,
+-            ready_config.big_blind,
+-            &hash_token(ready_first),
++            ready_config,
++            &ready_first_hash,
++            &ready_ceremony,
++            ready_first_share,
+         )
+         .await
+         .unwrap();
+-        db.join_room(
++        fairness::join_room(
++            &db,
+             ready_id,
+             1,
+-            &hash_token(ready_second),
++            &ready_second_hash,
++            ready_second_share,
+             0,
+             1,
++            &ready_ceremony,
+             Some(NewHand {
+                 id: ready_hand,
+                 no: 0,
+-                seed: &SEED,
++                seed: &ready_seed,
+                 dealer: 0,
+                 stacks: &ready_stacks,
+             }),
++            Some(&ready_next_ceremony),
+         )
+         .await
+         .unwrap();
+-        live.commit_join(
+-            hash_token(ready_second),
++        live.commit_fair_join(
++            ready_second_hash,
++            1,
++            ready_second_share,
+             Some(live_hand(
+                 ready_hand,
+                 0,
+-                SEED,
++                ready_seed,
+                 0,
+                 ready_stacks.clone(),
+                 ready_config,
+             )),
++            Some(ready_next_ceremony),
+             1,
+         );
+ 
+@@ -3903,7 +4209,7 @@ mod tests {
          let bb = std::env::var("BB_PATH").expect("BB_PATH");
          let db = Db::connect(&url).await.unwrap();
  
