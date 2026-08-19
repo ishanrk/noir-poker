@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/noir-poker-aztec-play-money
+  pull_request:
+    branches:
+      - agent/noir-poker-ui-zk-redesign
 
 permissions:
   contents: write
@@ -14,7 +17,7 @@ concurrency:
 
 jobs:
   validate:
-    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
 
