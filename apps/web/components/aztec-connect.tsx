@@ -23,6 +23,7 @@ import {
   playChipBalance,
   type PlayChips,
 } from "@/lib/aztec/play-chips";
+import type { AztecSession } from "@/lib/aztec/session";
 import {
   approveAztecWallet,
   discoverAztecWallets,
@@ -43,15 +44,6 @@ type PendingChannel = {
   emojis: string;
   confirm: () => Promise<Wallet>;
   cancel: () => void;
-};
-
-export type AztecSession = {
-  connection: ConnectedAztecWallet;
-  contract: PlayChips;
-  balance: bigint;
-  claimed: boolean;
-  ready: boolean;
-  refresh: () => Promise<void>;
 };
 
 type AztecConnectProps = {
@@ -142,8 +134,10 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
   const connect = useCallback(
     (automatic = false) => {
       if (!configured) {
-        setError("Aztec mode is not configured on this deployment");
-        setPhase("error");
+        if (!automatic) {
+          setError("Aztec mode is not configured on this deployment");
+          setPhase("error");
+        }
         return;
       }
 
@@ -334,7 +328,7 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
               </button>
             )}
             {claimed && <span className="aztec-ready">Ready</span>}
-            {!compact && <Link href="/chips">Manage</Link>}
+            {compact && <Link href="/chips">Manage</Link>}
             <button className="text-action" type="button" onClick={() => void disconnect()}>
               Disconnect
             </button>
@@ -342,7 +336,9 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
         </div>
       )}
 
-      {providerName && busy && <p className="aztec-connect-status">Connecting {providerName}</p>}
+      {providerName && busy && !connection && (
+        <p className="aztec-connect-status">Connecting {providerName}</p>
+      )}
       {error && <p className="aztec-connect-error">{error}</p>}
     </section>
   );
