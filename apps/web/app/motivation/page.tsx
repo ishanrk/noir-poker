@@ -12,10 +12,10 @@ export default function MotivationPage() {
 
       <header className="motivation-hero motivation-hero-new">
         <p className="motivation-kicker">Motivation</p>
-        <h1>Online poker makes you trust a server you cannot see.</h1>
+        <h1>An online poker room controls things the players cannot see.</h1>
         <p>
-          The server chooses the deck and decides whether private challenge claims are real. A normal
-          client can only believe those decisions were honest. Noir Poker makes both decisions checkable.
+          The deck is generated on someone else&apos;s machine. Private challenge claims are judged on
+          someone else&apos;s machine. Without a public check, every player is trusting that machine.
         </p>
       </header>
 
@@ -25,61 +25,56 @@ export default function MotivationPage() {
           <strong>Insiders could see opponents&apos; hole cards.</strong>
           <p>
             A hidden superuser system exposed private cards during live online play. PokerNews reports
-            that players were cheated out of more than $50 million across the UltimateBet and Absolute
-            Poker scandals.
+            more than $50 million was stolen across the UltimateBet and Absolute Poker scandals.
           </p>
-          <a href={ULTIMATE_BET} target="_blank" rel="noreferrer">Read the case ↗</a>
+          <a href={ULTIMATE_BET} target="_blank" rel="noreferrer">PokerNews report ↗</a>
         </article>
         <article className="case-card">
           <span>Full Tilt Poker</span>
-          <strong>The operator told players their money was safe when it was not.</strong>
+          <strong>Players had to trust claims made by the operator.</strong>
           <p>
-            This was a different failure, but the trust model was the same. The U.S. Department of
-            Justice said Full Tilt owed players hundreds of millions while holding only a fraction of
-            that amount in its bank accounts.
+            The failure was different, but the lesson is useful. The U.S. Department of Justice said
+            Full Tilt owed players hundreds of millions while holding only a fraction of that amount.
           </p>
-          <a href={FULL_TILT} target="_blank" rel="noreferrer">Read the DOJ case ↗</a>
+          <a href={FULL_TILT} target="_blank" rel="noreferrer">DOJ case ↗</a>
         </article>
       </section>
 
-      <section className="motivation-story">
+      <section className="motivation-story motivation-story-deck">
         <div className="motivation-story-copy">
-          <p className="motivation-kicker">Deal fairness</p>
-          <h2>The server cannot wait for a good deck and pretend it was random.</h2>
+          <p className="motivation-kicker">The deck</p>
+          <h2>The server has to commit before it sees player randomness.</h2>
           <p>
-            Before player randomness arrives, the server commits to its own secret value. Every player
-            then contributes fresh randomness. Those values determine the final deck together.
+            The server fixes its contribution first. Players then add fresh randomness. Together those
+            values determine the deck. After the hand, anyone can rebuild the same shuffle and every
+            card position.
           </p>
           <p>
-            After the hand, the transcript opens. Any player can rebuild the seed, shuffle and card
-            positions independently. If the server changed its earlier contribution, the commitment no
-            longer matches.
+            So the server cannot keep trying completed decks until one favors a particular seat and
+            then pretend that was the original random result.
           </p>
         </div>
-        <div className="motivation-flow" aria-label="Deal verification sequence">
-          <span>server commits</span>
+        <div className="motivation-deck-scene" aria-hidden="true">
+          <span className="motivation-server-card">server</span>
+          <span className="motivation-player-card">player</span>
+          <span className="motivation-deck-card">?</span>
           <i />
-          <span>players add randomness</span>
-          <i />
-          <span>hand is dealt</span>
-          <i />
-          <span>everyone can replay it</span>
         </div>
       </section>
 
       <section className="motivation-story motivation-story-challenge">
         <div className="motivation-story-copy">
-          <p className="motivation-kicker">Private challenge</p>
-          <h2>A player should not have to reveal the challenge or hole cards to prove completion.</h2>
+          <p className="motivation-kicker">The challenge</p>
+          <h2>A public result should not require a player to reveal private information.</h2>
           <p>
-            In a normal online game, the server can simply announce that a private challenge was
-            completed. Everyone else either trusts that verdict or asks the player to reveal private
-            information.
+            Suppose the private challenge is <strong>reach showdown</strong>. A normal server can simply
+            announce that it was completed. Everyone else either trusts the server or asks for enough
+            information to check the claim themselves.
           </p>
           <p>
-            Here the browser proves that the challenge came from the fixed challenge catalog and that
-            the same hidden challenge was completed. Other players can verify the proof without seeing
-            the objective or the player&apos;s hole cards.
+            Noir Poker instead publishes a proof. Other players can verify that the private challenge
+            was selected from the fixed catalog and completed without learning the challenge or the
+            player&apos;s hole cards.
           </p>
         </div>
         <div className="challenge-proof-scene" aria-hidden="true">
@@ -93,8 +88,8 @@ export default function MotivationPage() {
         <h2>Current boundary</h2>
         <p>
           Challenge completion is currently proven against hand facts committed by the server. The
-          challenge and hole cards stay private, but a fully server independent challenge verifier still
-          needs a public action transcript that can rebuild those facts.
+          challenge and hole cards stay private, but complete server independent reconstruction of
+          those hand facts still needs a public action transcript.
         </p>
         <Link href="/protocol">Open the protocol →</Link>
       </section>
