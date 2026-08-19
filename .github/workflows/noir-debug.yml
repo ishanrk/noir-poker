@@ -1,0 +1,87 @@
+name: debug isolated noir poker redesign
+
+on:
+  push:
+    branches:
+      - agent/noir-poker-ui-zk-redesign
+
+permissions:
+  contents: write
+
+concurrency:
+  group: noir-poker-ui-zk-redesign-debug
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout isolated branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/noir-poker-ui-zk-redesign
+
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.93.0
+          components: rustfmt, clippy
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+
+      - name: Rebuild transformed source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat tools/regen/noir-tools.part.* | base64 --decode > "$RUNNER_TEMP/noir-tools.tar.xz"
+          echo "db20d0ff5ffcb9541da5e09ec84b27d4ea7c6e9064dba4bd51f562fe5a449ec7  $RUNNER_TEMP/noir-tools.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/noir-tools.tar.xz" -C tools/regen
+          python -m py_compile tools/regen/common.py tools/regen/backend.py tools/regen/frontend.py tools/regen/apply.py
+          PYTHONPATH=tools/regen python tools/regen/apply.py
+          cargo fmt --all
+
+      - name: Capture diagnostics
+        shell: bash
+        run: |
+          set +e
+          mkdir -p artifacts/failure
+          : > artifacts/failure/status.txt
+          run() {
+            name="$1"
+            shift
+            echo "== $name ==" >> artifacts/failure/status.txt
+            "$@" > "artifacts/failure/$name.log" 2>&1
+            code=$?
+            echo "$code" >> artifacts/failure/status.txt
+            return 0
+          }
+          run cargo-check cargo check --workspace
+          run cargo-fmt cargo fmt --all -- --check
+          run cargo-test cargo test --workspace --locked
+          run cargo-clippy cargo clippy --workspace --all-targets --locked -- -D warnings
+          run npm-ci npm --prefix apps/web ci
+          run challenge-test npm --prefix apps/web run challenge:test
+          run deal-test npm --prefix apps/web run deal:test
+          run receipt-test npm --prefix apps/web run receipt:test
+          run eslint npm --prefix apps/web run lint
+          run next-build npm --prefix apps/web run build
+          git diff --check > artifacts/failure/diff-check.log 2>&1
+          git status --short > artifacts/failure/status-short.txt
+          git diff --stat > artifacts/failure/diff-stat.txt
+
+      - name: Persist diagnostics on isolated branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "agent/noir-poker-ui-zk-redesign"
+          git config user.name "noir-poker-validation"
+          git config user.email "actions@users.noreply.github.com"
+          git add artifacts/failure
+          git commit -m "save redesign diagnostics [skip ci]"
+          git push origin HEAD:refs/heads/agent/noir-poker-ui-zk-redesign
