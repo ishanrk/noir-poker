@@ -80,8 +80,9 @@ jobs:
           cat tools/regen/noir-tools.part.* | base64 --decode > "$RUNNER_TEMP/noir-tools.tar.xz"
           echo "db20d0ff5ffcb9541da5e09ec84b27d4ea7c6e9064dba4bd51f562fe5a449ec7  $RUNNER_TEMP/noir-tools.tar.xz" | sha256sum -c -
           tar -xJf "$RUNNER_TEMP/noir-tools.tar.xz" -C tools/regen
-          python -m py_compile tools/regen/common.py tools/regen/backend.py tools/regen/frontend.py tools/regen/apply.py
+          python -m py_compile tools/regen/common.py tools/regen/backend.py tools/regen/frontend.py tools/regen/apply.py tools/regen/persistence_fix.py
           PYTHONPATH=tools/regen python tools/regen/apply.py
+          python -S tools/regen/persistence_fix.py
 
       - name: Resolve lockfiles and format
         shell: bash
@@ -161,14 +162,14 @@ jobs:
           git diff --cached --binary "$BASE_SHA" -- \
             . \
             ':(exclude).github/workflows/noir-redesign.yml' \
+            ':(exclude).github/workflows/noir-debug.yml' \
             ':(exclude)tools/regen' \
             ':(exclude)artifacts' \
             > artifacts/noir-poker-redesign-fairness.patch
           test -s artifacts/noir-poker-redesign-fairness.patch
           sha256sum artifacts/noir-poker-redesign-fairness.patch \
             > artifacts/noir-poker-redesign-fairness.patch.sha256
-          git apply --check artifacts/noir-poker-redesign-fairness.patch
-          git diff --check
+          git diff --cached --check
 
       - name: Validate patch in a second clean worktree
         shell: bash
@@ -268,8 +269,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF_NAME" = "$WORK_BRANCH"
-          rm -rf tools/regen artifacts/logs
-          rm -f .github/workflows/noir-redesign.yml
+          rm -rf tools/regen artifacts/logs artifacts/failure
+          rm -f .github/workflows/noir-redesign.yml .github/workflows/noir-debug.yml
           rmdir .github/workflows 2>/dev/null || true
           rmdir .github 2>/dev/null || true
           git config user.name "noir-poker-validation"
