@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import {
+  AZTEC_TABLE_STACK,
   AZTEC_WALLET_KEY,
   PLAY_CHIPS_CLAIM_AMOUNT,
   PLAY_CHIPS_CONTRACT_ADDRESS,
@@ -201,6 +202,10 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
       await refresh(connected, attached);
       setPhase("connected");
     } catch (cause) {
+      pending.cancel();
+      pendingRef.current = null;
+      selected.current = false;
+      setPending(undefined);
       setError(message(cause));
       setPhase("error");
     }
@@ -265,6 +270,7 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
 
   const address = connection?.account.item.toString();
   const busy = phase === "discovering" || phase === "connecting";
+  const tableReady = claimed && balance !== undefined && balance >= BigInt(AZTEC_TABLE_STACK);
 
   return (
     <section className={`aztec-connect${compact ? " aztec-connect-compact" : ""}`}>
@@ -279,14 +285,16 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
             className="primary-action"
             type="button"
             onClick={() => connect(false)}
-            disabled={busy || !configured}
+            disabled={busy}
           >
             {phase === "discovering" ? "Open your wallet" : "Connect Aztec"}
           </button>
           <p>
             {phase === "discovering"
               ? "Approve Noir Poker in the wallet extension"
-              : "Testnet only"}
+              : configured
+                ? "Testnet only"
+                : "Contract not deployed"}
           </p>
         </div>
       )}
@@ -327,7 +335,8 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
                 Claim {PLAY_CHIPS_CLAIM_AMOUNT.toLocaleString()} PLAY
               </button>
             )}
-            {claimed && <span className="aztec-ready">Ready</span>}
+            {tableReady && <span className="aztec-ready">Ready</span>}
+            {claimed && !tableReady && <span className="aztec-low">Low balance</span>}
             {compact && <Link href="/chips">Manage</Link>}
             <button className="text-action" type="button" onClick={() => void disconnect()}>
               Disconnect
