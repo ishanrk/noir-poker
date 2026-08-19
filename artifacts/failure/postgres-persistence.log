@@ -3,8 +3,8 @@
 
 running 1 test
 
-thread 'tests::persistence' (8822) panicked at apps/server/src/main.rs:2200:30:
-called `Result::unwrap()` on an `Err` value: Custom { kind: InvalidData, error: "cannot restore room 622edff5-113a-4ebb-a518-1183d633bf19: current challenge missing" }
+thread 'tests::persistence' (8651) panicked at apps/server/src/main.rs:3569:10:
+called `Result::unwrap()` on an `Err` value: Database(PgDatabaseError { severity: Error, code: "42804", message: "column \"seed\" is of type bytea but expression is of type integer[]", detail: None, hint: Some("You will need to rewrite or cast the expression."), position: Some(Original(92)), where: None, schema: None, table: None, column: None, data_type: None, constraint: None, file: Some("parse_target.c"), line: Some(588), routine: Some("transformAssignedExpr") })
 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 test tests::persistence ... FAILED
 
@@ -13,6 +13,6 @@ failures:
 failures:
     tests::persistence
 
-test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 40 filtered out; finished in 0.29s
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 40 filtered out; finished in 0.27s
 
 [1m[91merror[0m: test failed, to rerun pass `-p server --bin server`

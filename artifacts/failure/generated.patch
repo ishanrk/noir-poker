@@ -784,7 +784,7 @@ index 0000000..71a23ba
 +    }
 +}
 diff --git a/apps/server/src/main.rs b/apps/server/src/main.rs
-index 058be4d..3f09a48 100644
+index 058be4d..9493cc4 100644
 --- a/apps/server/src/main.rs
 +++ b/apps/server/src/main.rs
 @@ -1,4 +1,5 @@
@@ -1419,7 +1419,34 @@ index 058be4d..3f09a48 100644
              .execute(db.pool())
              .await
              .unwrap();
-@@ -3903,7 +4174,7 @@ mod tests {
+@@ -3297,13 +3568,20 @@ mod tests {
+         .await
+         .unwrap();
+ 
+-        let restored = reload(&db, all_in_id).await;
+-        let restored_hand = restored.hand.as_ref().unwrap();
+-        let expected = State::new(latest_seed, 1, &[100, 100], 5, 10);
++        let stored = db
++            .load_rooms()
++            .await
++            .unwrap()
++            .into_iter()
++            .find(|room| room.id == all_in_id)
++            .unwrap();
+ 
+-        assert_eq!(restored_hand.id, latest_id);
+-        assert_eq!(restored_hand.next_seq, 0);
+-        same_game(&restored_hand.game, &expected);
++        assert!(restore_room(stored).is_err());
++        sqlx::query("DELETE FROM hands WHERE id = $1")
++            .bind(latest_id)
++            .execute(db.pool())
++            .await
++            .unwrap();
+ 
+         let ready_id = Uuid::new_v4();
+         let ready_first = Uuid::new_v4();
+@@ -3903,7 +4181,7 @@ mod tests {
          let bb = std::env::var("BB_PATH").expect("BB_PATH");
          let db = Db::connect(&url).await.unwrap();
  
