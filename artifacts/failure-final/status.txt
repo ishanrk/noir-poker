@@ -1,0 +1,47 @@
+ M Cargo.lock
+ M Cargo.toml
+ M apps/server/Cargo.toml
+ M apps/server/src/db.rs
+ M apps/server/src/main.rs
+ M apps/server/src/room.rs
+ M apps/web/app/globals.css
+ M apps/web/app/layout.tsx
+ M apps/web/app/page.tsx
+ M apps/web/app/proof/[nullifier]/page.tsx
+ M apps/web/app/table/[room]/page.tsx
+ M apps/web/components/card.tsx
+ M apps/web/components/contract.tsx
+ M apps/web/components/lobby.tsx
+ M apps/web/components/multiplayer-game.tsx
+ M apps/web/components/proof-receipt.tsx
+ M apps/web/components/seat.tsx
+ M apps/web/components/table.tsx
+ M apps/web/lib/challenge-proof.ts
+ M apps/web/lib/receipt.ts
+ M apps/web/lib/server.ts
+ M apps/web/package.json
+ M apps/web/scripts/verify-receipt.mjs
+ M crates/challenge-core/src/lib.rs
+ M crates/game-core/Cargo.toml
+ M crates/game-core/src/card.rs
+ M crates/game-core/src/deck.rs
+?? apps/server/migrations/20260822000000_fair_deals.sql
+?? apps/server/src/fairness.rs
+?? apps/web/app/audit/
+?? apps/web/app/protocol/
+?? apps/web/components/deal-audit.tsx
+?? apps/web/components/deal-integrity.tsx
+?? apps/web/components/protocol-demo.tsx
+?? apps/web/components/site-header.tsx
+?? apps/web/lib/deal.test.ts
+?? apps/web/lib/deal.ts
+?? apps/web/lib/receipt.test.ts
+?? apps/web/scripts/verify-deal.mjs
+?? artifacts/failure-final/
+?? artifacts/logs/
+?? crates/deal-core/
+?? tools/regen/__pycache__/
+?? tools/regen/apply.py
+?? tools/regen/backend.py
+?? tools/regen/common.py
+?? tools/regen/frontend.py

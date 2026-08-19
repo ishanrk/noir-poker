@@ -1,0 +1,22 @@
+total 20
+drwxr-xr-x  5 runner runner 4096 Aug 19 01:24 .
+drwxr-xr-x 11 runner runner 4096 Aug 19 01:22 ..
+drwxr-xr-x  3 runner runner 4096 Aug 19 01:22 failure
+drwxr-xr-x  2 runner runner 4096 Aug 19 01:24 failure-final
+drwxr-xr-x  2 runner runner 4096 Aug 19 01:24 logs
+total 84
+drwxr-xr-x 2 runner runner  4096 Aug 19 01:24 .
+drwxr-xr-x 5 runner runner  4096 Aug 19 01:24 ..
+-rw-r--r-- 1 runner runner   495 Aug 19 01:23 cargo-clippy.log
+-rw-r--r-- 1 runner runner     0 Aug 19 01:23 cargo-fmt.log
+-rw-r--r-- 1 runner runner 14785 Aug 19 01:23 cargo-test.log
+-rw-r--r-- 1 runner runner   573 Aug 19 01:23 challenge-test.log
+-rw-r--r-- 1 runner runner   583 Aug 19 01:23 deal-test.log
+-rw-r--r-- 1 runner runner    41 Aug 19 01:23 eslint.log
+-rw-r--r-- 1 runner runner  1326 Aug 19 01:24 next-build.log
+-rw-r--r-- 1 runner runner   322 Aug 19 01:24 postgres-persistence.log
+-rw-r--r-- 1 runner runner   535 Aug 19 01:24 real-claim.log
+-rw-r--r-- 1 runner runner   609 Aug 19 01:24 real-proof.log
+-rw-r--r-- 1 runner runner   593 Aug 19 01:23 receipt-test.log
+-rw-r--r-- 1 runner runner 16971 Aug 19 01:23 resolve.log
+-rw-r--r-- 1 runner runner   516 Aug 19 01:23 zk-build.log
