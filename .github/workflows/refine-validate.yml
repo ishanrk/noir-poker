@@ -54,24 +54,54 @@ jobs:
           test "$(git rev-parse "$BASE_SHA")" = "$BASE_SHA"
           git merge-base --is-ancestor "$BASE_SHA" HEAD
 
-      - name: Apply final CORS cleanup
+      - name: Apply final source cleanup
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
 
-          path = Path("apps/server/src/main.rs")
-          text = path.read_text()
+          main_path = Path("apps/server/src/main.rs")
+          main = main_path.read_text()
           block = '''#[cfg(test)]
           fn app(state: AppState, origin: HeaderValue) -> Router {
               app_with_origins(state, vec![origin])
           }
 
           '''
-          if text.count(block) != 1:
-              raise SystemExit(f"expected one obsolete app wrapper found {text.count(block)}")
-          path.write_text(text.replace(block, "", 1))
+          if main.count(block) != 1:
+              raise SystemExit(f"expected one obsolete app wrapper found {main.count(block)}")
+          main_path.write_text(main.replace(block, "", 1))
+
+          replacements = {
+              "apps/web/app/table/[room]/page.tsx": [
+                  ("server-authoritative hold&apos;em · auditable deals · local zero-knowledge proving", "server-authoritative hold&apos;em with auditable deals and local zero-knowledge proving"),
+              ],
+              "apps/web/components/table.tsx": [
+                  ('.join(" · ")', '.join(", ")'),
+              ],
+              "apps/web/components/proof-receipt.tsx": [
+                  ("Room {receipt.room.slice(0, 8)} · hand {receipt.hand_no} · seat {receipt.seat + 1}", "Room {receipt.room.slice(0, 8)}, hand {receipt.hand_no}, seat {receipt.seat + 1}"),
+                  ("Noir · UltraHonk · Barretenberg {receipt.bb_version}", "Noir, UltraHonk, Barretenberg {receipt.bb_version}"),
+              ],
+              "apps/web/components/deal-audit.tsx": [
+                  ('Seat {seat + 1}{audit.dealer === seat ? " · D" : ""}', 'Seat {seat + 1}{audit.dealer === seat ? " (dealer)" : ""}'),
+                  ('layout.burns.map(cardValue).join(" · ")', 'layout.burns.map(cardValue).join(", ")'),
+              ],
+              "apps/web/components/protocol-demo.tsx": [
+                  ('"seat 0 · seat 1 · seat 2"', '"seat 0, seat 1, seat 2"'),
+              ],
+          }
+
+          for name, pairs in replacements.items():
+              path = Path(name)
+              text = path.read_text()
+              for old, new in pairs:
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f"{name}: expected one {old!r}, found {count}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
           PY
 
       - name: Install Rust
@@ -140,16 +170,19 @@ jobs:
             TEST_DATABASE_URL="$TEST_DATABASE_URL" cargo test -p server persistence -- --ignored --nocapture
             BB_PATH="$BB_PATH" CHALLENGE_VK_PATH="$verify/apps/server/zk/challenge_v2.vk" cargo test -p server real_proof -- --ignored --nocapture
             BB_PATH="$BB_PATH" CHALLENGE_VK_PATH="$verify/apps/server/zk/challenge_v2.vk" TEST_DATABASE_URL="$TEST_DATABASE_URL" cargo test -p server real_claim -- --ignored --nocapture
-            ! grep -R --include='*.tsx' --include='*.ts' '·' apps/web
-            ! grep -R --include='*.tsx' -E 'not marketing|not mental|not the objective|Choose .*not|, not ' apps/web
-            ! grep -R --include='*.tsx' 'type="number"' apps/web
-            ! grep -R --include='*.css' -E 'linear-gradient|radial-gradient|backdrop-filter' apps/web/app/globals.css
-            ! grep -F '?? "http://localhost:3001"' apps/web/lib/server.ts
+            if grep -R --include='*.tsx' --include='*.ts' '·' apps/web; then exit 1; fi
+            if grep -R --include='*.tsx' -E 'not marketing|not mental|not the objective|Choose .*not|, not ' apps/web; then exit 1; fi
+            if grep -R --include='*.tsx' 'type="number"' apps/web; then exit 1; fi
+            if grep -R --include='*.css' -E 'linear-gradient|radial-gradient|backdrop-filter' apps/web/app/globals.css; then exit 1; fi
+            if grep -F '?? "http://localhost:3001"' apps/web/lib/server.ts; then exit 1; fi
             grep -F 'WEB_ORIGINS' apps/server/src/main.rs >/dev/null
             grep -F 'AllowOrigin::list' apps/server/src/main.rs >/dev/null
           )
           git -C "$verify" diff --binary "$BASE_SHA" -- . > "$RUNNER_TEMP/reapplied.patch"
-          cmp "$RUNNER_TEMP/reapplied.patch" "$GITHUB_WORKSPACE/artifacts/noir-poker-redesign-fairness.patch"
+          if ! cmp "$RUNNER_TEMP/reapplied.patch" "$GITHUB_WORKSPACE/artifacts/noir-poker-redesign-fairness.patch"; then
+            diff -u "$GITHUB_WORKSPACE/artifacts/noir-poker-redesign-fairness.patch" "$RUNNER_TEMP/reapplied.patch" > artifacts/refine-logs/patch-diff.log || true
+            exit 1
+          fi
 
       - name: Write durable report
         shell: bash
