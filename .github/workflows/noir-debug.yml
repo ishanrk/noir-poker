@@ -16,7 +16,7 @@ jobs:
   diagnose:
     if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:18-alpine
@@ -32,7 +32,6 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      BASE_SHA: 340a9be579c2ca26715146b4c79ff0c8f681a1b5
       TEST_DATABASE_URL: postgres://noir_poker:noir_poker@localhost:5432/noir_poker_test
 
     steps:
@@ -46,12 +45,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.93.0
-          components: rustfmt, clippy
-
-      - name: Install Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.20.0
+          components: rustfmt
 
       - name: Rebuild transformed source
         shell: bash
@@ -65,80 +59,21 @@ jobs:
           python -S tools/regen/persistence_fix.py
           cargo fmt --all
 
-      - name: Install pinned Noir and Barretenberg
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/noir-bin"
-          cd "$RUNNER_TEMP/noir-bin"
-          curl -fL --retry 5 --retry-delay 2 -o nargo.tar.gz https://github.com/noir-lang/noir/releases/download/v1.0.0-beta.26/nargo-x86_64-unknown-linux-gnu.tar.gz
-          echo "64048040befd55a987158b11137d8f38f9688f696db4d84910dd1bcf0442fb80  nargo.tar.gz" | sha256sum -c -
-          tar -xzf nargo.tar.gz
-          chmod 0755 nargo
-          curl -fL --retry 5 --retry-delay 2 -o bb.tar.gz https://github.com/AztecProtocol/aztec-packages/releases/download/v5.2.0/barretenberg-amd64-linux.tar.gz
-          echo "17ab8476961728cdc5c69b6c4ff427c9092cef11d1e0b0166929a0417dfa7cfb  bb.tar.gz" | sha256sum -c -
-          tar -xzf bb.tar.gz
-          chmod 0755 bb
-
-      - name: Capture diagnostics
+      - name: Capture persistence diagnostic
         shell: bash
         run: |
           set +e
           rm -rf artifacts/failure
           mkdir -p artifacts/failure/source
-          : > artifacts/failure/status.txt
-          run() {
-            name="$1"
-            shift
-            echo "== $name ==" >> artifacts/failure/status.txt
-            "$@" > "artifacts/failure/$name.log" 2>&1
-            code=$?
-            echo "$code" >> artifacts/failure/status.txt
-            return 0
-          }
-          NARGO="$RUNNER_TEMP/noir-bin/nargo"
-          BB="$RUNNER_TEMP/noir-bin/bb"
-          VK="$GITHUB_WORKSPACE/apps/server/zk/challenge_v2.vk"
-          run cargo-check cargo check --workspace
-          run cargo-fmt cargo fmt --all -- --check
-          run cargo-test cargo test --workspace --locked
-          run cargo-clippy cargo clippy --workspace --all-targets --locked -- -D warnings
-          run npm-ci npm --prefix apps/web ci
-          run challenge-test npm --prefix apps/web run challenge:test
-          run deal-test npm --prefix apps/web run deal:test
-          run receipt-test npm --prefix apps/web run receipt:test
-          run eslint npm --prefix apps/web run lint
-          run next-build npm --prefix apps/web run build
-          run zk-build env NARGO_PATH="$NARGO" BB_PATH="$BB" ./scripts/build-zk.sh
-          run postgres-persistence env TEST_DATABASE_URL="$TEST_DATABASE_URL" cargo test -p server persistence -- --ignored --nocapture
-          run real-proof env BB_PATH="$BB" CHALLENGE_VK_PATH="$VK" cargo test -p server real_proof -- --ignored --nocapture
-          run real-claim env BB_PATH="$BB" CHALLENGE_VK_PATH="$VK" TEST_DATABASE_URL="$TEST_DATABASE_URL" cargo test -p server real_claim -- --ignored --nocapture
+          TEST_DATABASE_URL="$TEST_DATABASE_URL" cargo test -p server persistence -- --ignored --nocapture \
+            > artifacts/failure/postgres-persistence.log 2>&1
+          code=$?
+          printf '== postgres-persistence ==\n%s\n' "$code" > artifacts/failure/status.txt
+          nl -ba apps/server/src/main.rs | sed -n '4100,4230p' > artifacts/failure/source/persistence-window.txt
           git diff --check > artifacts/failure/diff-check.log 2>&1
-          echo "== diff-check ==" >> artifacts/failure/status.txt
-          echo "$?" >> artifacts/failure/status.txt
-          git add -A
-          git diff --cached --binary "$BASE_SHA" -- . \
-            ':(exclude).github/workflows/noir-redesign.yml' \
-            ':(exclude).github/workflows/noir-debug.yml' \
-            ':(exclude)tools/regen' \
-            ':(exclude)artifacts' \
-            > artifacts/failure/generated.patch
-          git reset >/dev/null
-          git apply --check artifacts/failure/generated.patch > artifacts/failure/patch-check.log 2>&1
-          echo "== patch-check ==" >> artifacts/failure/status.txt
-          echo "$?" >> artifacts/failure/status.txt
           git status --short > artifacts/failure/status-short.txt
-          git diff --stat > artifacts/failure/diff-stat.txt
-          nl -ba apps/server/src/main.rs | sed -n '4135,4205p' > artifacts/failure/source/persistence-window.txt
-          cp apps/web/lib/deal.ts artifacts/failure/source/deal.ts
-          cp apps/web/lib/deal.test.ts artifacts/failure/source/deal.test.ts
-          cp apps/web/lib/receipt.ts artifacts/failure/source/receipt.ts
-          cp apps/web/lib/receipt.test.ts artifacts/failure/source/receipt.test.ts
-          cp apps/web/components/protocol-demo.tsx artifacts/failure/source/protocol-demo.tsx
-          cp apps/web/app/protocol/page.tsx artifacts/failure/source/protocol-page.tsx
-          cp crates/deal-core/src/lib.rs artifacts/failure/source/deal-core.rs
 
-      - name: Persist diagnostics on isolated branch
+      - name: Persist diagnostic on isolated branch
         shell: bash
         run: |
           set -euo pipefail
@@ -146,5 +81,5 @@ jobs:
           git config user.name "noir-poker-validation"
           git config user.email "actions@users.noreply.github.com"
           git add artifacts/failure
-          git commit -m "save full redesign diagnostics [skip ci]"
+          git commit -m "save persistence diagnostic [skip ci]"
           git push origin HEAD:refs/heads/agent/noir-poker-ui-zk-redesign
