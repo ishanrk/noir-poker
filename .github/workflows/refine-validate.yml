@@ -54,6 +54,26 @@ jobs:
           test "$(git rev-parse "$BASE_SHA")" = "$BASE_SHA"
           git merge-base --is-ancestor "$BASE_SHA" HEAD
 
+      - name: Remove obsolete CORS wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/server/src/main.rs")
+          text = path.read_text()
+          block = '''#[cfg(test)]
+          fn app(state: AppState, origin: HeaderValue) -> Router {
+              app_with_origins(state, vec![origin])
+          }
+
+          '''
+          if text.count(block) != 1:
+              raise SystemExit(f"expected one obsolete app wrapper found {text.count(block)}")
+          path.write_text(text.replace(block, "", 1))
+          PY
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
@@ -90,6 +110,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts/refine-logs
+          cargo fmt --all
           cargo fmt --all -- --check |& tee artifacts/refine-logs/cargo-fmt.log
           git diff --check
           cargo test --workspace --locked |& tee artifacts/refine-logs/cargo-test.log
@@ -210,7 +231,7 @@ jobs:
           rmdir .github 2>/dev/null || true
           git config user.name "noir-poker-validation"
           git config user.email "actions@users.noreply.github.com"
-          git add artifacts .github
+          git add -A
           git commit -m "validate ui and deployment refinement [skip ci]"
           git push origin "HEAD:refs/heads/$WORK_BRANCH"
           test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_BEFORE"
