@@ -10,6 +10,9 @@ const manifest = await readFile(
   new URL("../play_chips_contract/Nargo.toml", import.meta.url),
   "utf8",
 );
+const packageJson = JSON.parse(
+  await readFile(new URL("../package.json", import.meta.url), "utf8"),
+) as { dependencies: Record<string, string> };
 
 test("play chips expose no user transfer or redemption path", () => {
   for (const forbidden of [
@@ -46,6 +49,9 @@ test("play chips are limited to faucet table entry and settlement", () => {
   assert.match(source, /assert\(!self\.storage\.table_settled\.at\(table_id\)\.read\(\)/);
 });
 
-test("contract and client tooling use the current testnet release", () => {
-  assert.match(manifest, /tag = "v5\.2\.0"/);
+test("contract and client tooling match the live testnet release", () => {
+  assert.match(manifest, /tag = "v5\.1\.0"/);
+  assert.equal(packageJson.dependencies["@aztec/accounts"], "5.1.0");
+  assert.equal(packageJson.dependencies["@aztec/aztec.js"], "5.1.0");
+  assert.equal(packageJson.dependencies["@aztec/wallets"], "5.1.0");
 });
