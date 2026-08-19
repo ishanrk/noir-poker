@@ -73,8 +73,8 @@ for (const [entryId, amount] of [
 const { result: pool } = await contract.methods.table_pool_of(tableId).simulate({ from: alice });
 assert.equal(pool, 2_000n);
 
-const recipients = [alice, bob, alice, alice, alice, alice] as const;
-const payouts = [1_500n, 500n, 0n, 0n, 0n, 0n] as const;
+const recipients = [alice, bob, alice, alice, alice, alice];
+const payouts = [1_500n, 500n, 0n, 0n, 0n, 0n];
 
 await assert.rejects(
   contract.methods.settle_private(tableId, recipients, payouts).simulate({ from: bob }),
