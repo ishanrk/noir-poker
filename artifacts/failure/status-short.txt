@@ -21,19 +21,23 @@
  M apps/web/lib/server.ts
  M apps/web/package.json
  M apps/web/scripts/verify-receipt.mjs
- M artifacts/failure/cargo-check.log
- M artifacts/failure/cargo-clippy.log
- M artifacts/failure/cargo-test.log
- M artifacts/failure/challenge-test.log
- M artifacts/failure/deal-test.log
+ D artifacts/failure/cargo-check.log
+ D artifacts/failure/cargo-clippy.log
+ D artifacts/failure/cargo-fmt.log
+ D artifacts/failure/cargo-test.log
+ D artifacts/failure/challenge-test.log
+ D artifacts/failure/deal-test.log
+ M artifacts/failure/diff-check.log
  D artifacts/failure/diff-stat.txt
- M artifacts/failure/generated.patch
- M artifacts/failure/next-build.log
- M artifacts/failure/npm-ci.log
+ D artifacts/failure/eslint.log
+ D artifacts/failure/generated.patch
+ D artifacts/failure/next-build.log
+ D artifacts/failure/npm-ci.log
+ D artifacts/failure/patch-check.log
  M artifacts/failure/postgres-persistence.log
- M artifacts/failure/real-claim.log
- M artifacts/failure/real-proof.log
- M artifacts/failure/receipt-test.log
+ D artifacts/failure/real-claim.log
+ D artifacts/failure/real-proof.log
+ D artifacts/failure/receipt-test.log
  D artifacts/failure/source/deal-core.rs
  D artifacts/failure/source/deal.test.ts
  D artifacts/failure/source/deal.ts
@@ -42,7 +46,8 @@
  D artifacts/failure/source/receipt.test.ts
  D artifacts/failure/source/receipt.ts
  M artifacts/failure/status-short.txt
- M artifacts/failure/zk-build.log
+ M artifacts/failure/status.txt
+ D artifacts/failure/zk-build.log
  M crates/challenge-core/src/lib.rs
  M crates/game-core/Cargo.toml
  M crates/game-core/src/card.rs
@@ -59,6 +64,7 @@
 ?? apps/web/lib/deal.ts
 ?? apps/web/lib/receipt.test.ts
 ?? apps/web/scripts/verify-deal.mjs
+?? artifacts/failure/source/persistence-window.txt
 ?? crates/deal-core/
 ?? tools/regen/__pycache__/
 ?? tools/regen/apply.py

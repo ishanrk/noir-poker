@@ -1,0 +1,131 @@
+  4100	        assert_eq!(
+  4101	            sqlx::query("SELECT COUNT(*) AS count FROM hands WHERE room_id = $1")
+  4102	                .bind(ready_id)
+  4103	                .fetch_one(db.pool())
+  4104	                .await
+  4105	                .unwrap()
+  4106	                .get::<i64, _>("count"),
+  4107	            3
+  4108	        );
+  4109	
+  4110	        let short_id = Uuid::new_v4();
+  4111	        let short_first = hash_token(Uuid::new_v4());
+  4112	        let short_second = hash_token(Uuid::new_v4());
+  4113	        let short_hand = Uuid::new_v4();
+  4114	        let short_config = RoomConfig {
+  4115	            stack: 10,
+  4116	            ..ready_config
+  4117	        };
+  4118	        let short_stacks = vec![10, 10];
+  4119	        let short_first_share = [0x71; 32];
+  4120	        let short_second_share = [0x72; 32];
+  4121	        let short_ceremony = fairness::random_ceremony(short_id, 0, short_config.players).unwrap();
+  4122	        let mut short =
+  4123	            Room::new_fair(short_config, short_first, short_ceremony, short_first_share).unwrap();
+  4124	        let short_ceremony = short.ceremony.as_ref().unwrap().clone();
+  4125	        let short_seed = short_ceremony
+  4126	            .seed_with(short_id, 1, short_second_share)
+  4127	            .unwrap();
+  4128	        let short_next_ceremony =
+  4129	            fairness::random_ceremony(short_id, 1, short_config.players).unwrap();
+  4130	
+  4131	        fairness::create_room(
+  4132	            &db,
+  4133	            short_id,
+  4134	            short_config,
+  4135	            &short_first,
+  4136	            &short_ceremony,
+  4137	            short_first_share,
+  4138	        )
+  4139	        .await
+  4140	        .unwrap();
+  4141	        fairness::join_room(
+  4142	            &db,
+  4143	            short_id,
+  4144	            1,
+  4145	            &short_second,
+  4146	            short_second_share,
+  4147	            0,
+  4148	            1,
+  4149	            &short_ceremony,
+  4150	            Some(NewHand {
+  4151	                id: short_hand,
+  4152	                no: 0,
+  4153	                seed: &short_seed,
+  4154	                dealer: 0,
+  4155	                stacks: &short_stacks,
+  4156	            }),
+  4157	            Some(&short_next_ceremony),
+  4158	        )
+  4159	        .await
+  4160	        .unwrap();
+  4161	        short.commit_fair_join(
+  4162	            short_second,
+  4163	            1,
+  4164	            short_second_share,
+  4165	            Some(live_hand(
+  4166	                short_hand,
+  4167	                0,
+  4168	                short_seed,
+  4169	                0,
+  4170	                short_stacks.clone(),
+  4171	                short_config,
+  4172	            )),
+  4173	            Some(short_next_ceremony),
+  4174	            1,
+  4175	        );
+  4176	
+  4177	        let mut rooms = HashMap::new();
+  4178	        rooms.insert(short_id, Arc::new(Mutex::new(short)));
+  4179	        let short_state = AppState::test(db.clone(), rooms);
+  4180	
+  4181	        apply_action(&short_state, short_id, 0, Action::Fold)
+  4182	            .await
+  4183	            .unwrap();
+  4184	        challenge_room(&short_state, short_id, 0, 1, &encode_hex([5; 32]))
+  4185	            .await
+  4186	            .unwrap();
+  4187	        challenge_room(&short_state, short_id, 1, 1, &encode_hex([6; 32]))
+  4188	            .await
+  4189	            .unwrap();
+  4190	        {
+  4191	            let live = find_room(&short_state, short_id).await.unwrap();
+  4192	            let mut room = live.lock().await;
+  4193	
+  4194	            persist_draw(&db, short_id, &mut room, 0).await;
+  4195	            persist_draw(&db, short_id, &mut room, 1).await;
+  4196	        }
+  4197	        ready_room(&short_state, short_id, 0).await.unwrap();
+  4198	        ready_room(&short_state, short_id, 1).await.unwrap();
+  4199	
+  4200	        let short = find_room(&short_state, short_id).await.unwrap();
+  4201	        let short = short.lock().await;
+  4202	        let hand = short.hand.as_ref().unwrap();
+  4203	
+  4204	        assert_eq!(hand.id, short_hand);
+  4205	        assert_eq!(hand.no, 0);
+  4206	        assert_eq!(hand.game.players[0].stack, 5);
+  4207	        assert!(room_view(short_id, &short, hand, 0).ready.unwrap().complete);
+  4208	        assert_eq!(
+  4209	            sqlx::query("SELECT COUNT(*) AS count FROM hands WHERE room_id = $1")
+  4210	                .bind(short_id)
+  4211	                .fetch_one(db.pool())
+  4212	                .await
+  4213	                .unwrap()
+  4214	                .get::<i64, _>("count"),
+  4215	            1
+  4216	        );
+  4217	        drop(short);
+  4218	
+  4219	        let short = reload(&db, short_id).await;
+  4220	        let hand = short.hand.as_ref().unwrap();
+  4221	
+  4222	        assert!(room_view(short_id, &short, hand, 1).ready.unwrap().complete);
+  4223	        assert_eq!(hand.id, short_hand);
+  4224	    }
+  4225	
+  4226	    #[tokio::test]
+  4227	    #[ignore = "requires TEST_DATABASE_URL BB_PATH and built ZK artifacts"]
+  4228	    async fn real_claim() {
+  4229	        use base64::Engine;
+  4230	        use base64::engine::general_purpose::STANDARD;
