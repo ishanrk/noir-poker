@@ -1,6 +1,0 @@
-Scheme is: ultra_honk, num threads: 4 (mem: 4.94 MiB)
-CircuitProve: Proving key computed in 150 ms (mem: 106.85 MiB)
-VK saved to "/tmp/tmp.yblXr01158/vk/vk" (mem: 106.85 MiB)
-VK Hash saved to "/tmp/tmp.yblXr01158/vk/vk_hash" (mem: 106.85 MiB)
-1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d  /home/runner/work/noir-poker/noir-poker/apps/web/zk/challenge_v2.json
-b435db9d240683e181d8bad47203bf85d57ca27982bc676cf2686b5cf3de1d67  /home/runner/work/noir-poker/noir-poker/apps/server/zk/challenge_v2.vk

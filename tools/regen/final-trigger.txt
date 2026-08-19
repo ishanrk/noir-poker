@@ -1,1 +1,0 @@
-final isolated validation trigger

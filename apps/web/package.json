@@ -6,10 +6,13 @@
     "runtime": "../../scripts/web-runtime.sh update",
     "runtime:check": "../../scripts/web-runtime.sh check",
     "dev": "next dev",
-    "build": "bash ../../tools/regen/vercel-build.sh",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint .",
     "challenge:test": "node --experimental-strip-types lib/challenge.test.ts",
+    "deal:test": "node --experimental-strip-types lib/deal.test.ts",
+    "receipt:test": "node --experimental-strip-types lib/receipt.test.ts",
+    "deal:verify": "node --experimental-strip-types scripts/verify-deal.mjs",
     "proof:verify": "node scripts/verify-receipt.mjs"
   },
   "dependencies": {

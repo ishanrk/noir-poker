@@ -1,4 +1,4 @@
-import circuit from "@/zk/challenge_v2.json";
+import circuit from "../zk/challenge_v2.json" with { type: "json" };
 
 export type ProofStatus = "preparing" | "proving";
 

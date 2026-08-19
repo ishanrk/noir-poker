@@ -1,20 +1,21 @@
 import { MultiplayerGame } from "@/components/multiplayer-game";
+import { SiteHeader } from "@/components/site-header";
 
-type TablePageProps = {
-  params: Promise<{ room: string }>;
-};
+type TablePageProps = { params: Promise<{ room: string }> };
 
 export default async function TablePage({ params }: TablePageProps) {
   const { room } = await params;
 
   return (
-    <main className="page">
-      <header className="page-header">
-        <p className="eyebrow">Live / Fair draw</p>
-        <h1>Noir Poker</h1>
-        <p>server-authoritative poker · private objectives · local proving</p>
+    <main className="site-shell table-page">
+      <SiteHeader compact />
+      <header className="table-page-header">
+        <div>
+          <p className="eyebrow">Live table / {room.slice(0, 8)}</p>
+          <h1>Noir Poker</h1>
+        </div>
+        <p>server-authoritative hold&apos;em · auditable deals · local zero-knowledge proving</p>
       </header>
-
       <MultiplayerGame key={room} room={room} />
     </main>
   );

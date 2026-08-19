@@ -1,4 +1,5 @@
 mod db;
+mod fairness;
 mod proof;
 mod room;
 
@@ -30,14 +31,14 @@ use uuid::Uuid;
 
 use crate::db::{
     ChallengeEntropy, ClaimUpdate, Db, DrawUpdate, NewAction, NewChallenge, NewHand, ProofReceipt,
-    ReadyUpdate, StoredAction, StoredChallenge, StoredHand, StoredRoom,
+    StoredAction, StoredChallenge, StoredHand, StoredRoom,
 };
 use crate::proof::{
     ARTIFACT_SHA256, BB_VERSION, CIRCUIT_ID, PROOF_SYSTEM, ProofInputs, ProofVerifier, VK_SHA256,
     decode_bytes, decode_proof,
 };
 use crate::room::{
-    Challenge, Challenges, HandResult, HandResultKind, JoinError, LiveHand, PendingClaim,
+    Ceremony, Challenge, Challenges, HandResult, HandResultKind, JoinError, LiveHand, PendingClaim,
     PendingDraw, PlayedAction, Room, RoomConfig, Seat, TokenHash, bind_facts, replay_hand,
     start_game,
 };
@@ -78,6 +79,33 @@ struct SeatResponse {
     token: Uuid,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateRoomRequest {
+    players: usize,
+    stack: u32,
+    small_blind: u32,
+    big_blind: u32,
+    entropy: String,
+}
+
+impl CreateRoomRequest {
+    const fn config(&self) -> RoomConfig {
+        RoomConfig {
+            players: self.players,
+            stack: self.stack,
+            small_blind: self.small_blind,
+            big_blind: self.big_blind,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EntropyRequest {
+    entropy: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
@@ -105,20 +133,40 @@ enum ClientMessage {
         proof: String,
         public_inputs: String,
     },
-    Ready,
+    Ready {
+        entropy: Option<String>,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerMessage {
-    Waiting { joined: usize, players: usize },
-    Snapshot { rev: u64, view: Box<SeatView> },
-    Error { message: &'static str },
+    Waiting {
+        joined: usize,
+        players: usize,
+    },
+    WaitingFair {
+        joined: usize,
+        players: usize,
+        deal: DealView,
+    },
+    Snapshot {
+        rev: u64,
+        view: Box<SeatView>,
+    },
+    Error {
+        message: &'static str,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
 struct SeatView {
     players: Vec<PlayerView>,
+    hand_no: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deal: Option<DealView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_deal: Option<DealView>,
     hole: [CardView; 2],
     board: Vec<CardView>,
     pot: u32,
@@ -138,6 +186,38 @@ struct SeatView {
     challenge: Option<ChallengeView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     claim: Option<ClaimView>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct DealView {
+    hand_no: u64,
+    commitment: String,
+    contributors: usize,
+    required: usize,
+    mine: bool,
+    state: &'static str,
+    audit: bool,
+}
+
+#[derive(Serialize)]
+struct AuditEntropyView {
+    seat: usize,
+    share: String,
+}
+
+#[derive(Serialize)]
+struct AuditView {
+    protocol_version: u8,
+    algorithm: &'static str,
+    room: Uuid,
+    hand_no: u64,
+    players: usize,
+    dealer: usize,
+    commitment: String,
+    server_secret: String,
+    contributions: Vec<AuditEntropyView>,
+    seed: String,
+    deck: Vec<CardView>,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -187,6 +267,8 @@ struct ClaimView {
 #[derive(Serialize)]
 struct ReceiptView {
     protocol_version: u8,
+    room: Uuid,
+    hand_no: u64,
     proof_system: &'static str,
     circuit_id: &'static str,
     bb_version: &'static str,
@@ -257,9 +339,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let vk = env::var("CHALLENGE_VK_PATH")
         .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/zk/challenge_v2.vk").to_owned());
     let db = Db::connect(&database_url).await?;
+    fairness::ensure_pending(&db).await?;
     finish_pending_challenges(&db).await?;
     let proof = ProofVerifier::load(bb, vk)?;
     let rooms = restore_rooms(db.load_rooms().await?)?;
+    attach_fairness(&db, &rooms).await?;
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
 
     axum::serve(listener, app(AppState::new(db, rooms, proof), origin)).await?;
@@ -273,6 +357,7 @@ fn app(state: AppState, origin: HeaderValue) -> Router {
         .route("/rooms/{room}/join", post(join_room))
         .route("/rooms/{room}/ws", get(room_ws))
         .route("/proofs/{nullifier}", get(proof_receipt))
+        .route("/audits/{room}/{hand_no}", get(deal_audit))
         .with_state(state)
         .layer(
             CorsLayer::new()
@@ -284,6 +369,67 @@ fn app(state: AppState, origin: HeaderValue) -> Router {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+async fn deal_audit(
+    AxumState(state): AxumState<AppState>,
+    Path((room, hand_no)): Path<(Uuid, u64)>,
+) -> Result<Json<AuditView>, HttpError> {
+    let stored = fairness::audit(&state.db, room, hand_no)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot load deal audit"))?
+        .ok_or((StatusCode::NOT_FOUND, "deal audit not found"))?;
+    let expected_commitment =
+        deal_core::commitment(*room.as_bytes(), hand_no, stored.server_secret);
+    let expected_seed = deal_core::seed(
+        *room.as_bytes(),
+        hand_no,
+        stored.server_secret,
+        &stored.shares,
+    )
+    .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "invalid deal audit"))?;
+    let (hand, _) = restore_hand(room, stored.config, stored.hand)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "invalid deal audit"))?;
+
+    if !hand.game.settled {
+        return Err((StatusCode::CONFLICT, "hand is still active"));
+    }
+
+    if expected_commitment != stored.commitment
+        || expected_seed != stored.final_seed
+        || expected_seed != hand.seed
+    {
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "deal audit mismatch"));
+    }
+
+    let deck = game_core::Deck::from_seed(expected_seed)
+        .cards()
+        .iter()
+        .copied()
+        .map(card_view)
+        .collect();
+
+    Ok(Json(AuditView {
+        protocol_version: deal_core::PROTOCOL_VERSION,
+        algorithm: "sha256-counter-rejection-fisher-yates-v1",
+        room,
+        hand_no,
+        players: stored.config.players,
+        dealer: hand.game.dealer,
+        commitment: encode_hex(stored.commitment),
+        server_secret: encode_hex(stored.server_secret),
+        contributions: stored
+            .shares
+            .into_iter()
+            .enumerate()
+            .map(|(seat, share)| AuditEntropyView {
+                seat,
+                share: encode_hex(share),
+            })
+            .collect(),
+        seed: encode_hex(expected_seed),
+        deck,
+    }))
 }
 
 async fn proof_receipt(
@@ -305,6 +451,7 @@ async fn proof_receipt(
 }
 
 fn receipt_view(receipt: ProofReceipt) -> Result<ReceiptView, ()> {
+    let hand_no = u64::try_from(receipt.hand_no).map_err(|_| ())?;
     let hand_tag = receipt.hand_tag.try_into().map_err(|_| ())?;
     let commitment = receipt.commitment.try_into().map_err(|_| ())?;
     let nonce = receipt.nonce.try_into().map_err(|_| ())?;
@@ -320,6 +467,8 @@ fn receipt_view(receipt: ProofReceipt) -> Result<ReceiptView, ()> {
 
     Ok(ReceiptView {
         protocol_version: PROTOCOL_VERSION,
+        room: receipt.room,
+        hand_no,
         proof_system: PROOF_SYSTEM,
         circuit_id: CIRCUIT_ID,
         bb_version: BB_VERSION,
@@ -342,23 +491,27 @@ fn receipt_view(receipt: ProofReceipt) -> Result<ReceiptView, ()> {
 
 async fn create_room(
     AxumState(state): AxumState<AppState>,
-    Json(config): Json<RoomConfig>,
+    Json(request): Json<CreateRoomRequest>,
 ) -> Result<(StatusCode, Json<SeatResponse>), HttpError> {
+    let config = request.config();
+    config
+        .validate()
+        .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
+    let share =
+        decode_hex(&request.entropy).ok_or((StatusCode::BAD_REQUEST, "invalid deal entropy"))?;
     let token = Uuid::new_v4();
     let token_hash = hash_token(token);
-    let room = Room::new(config, token_hash).map_err(|err| (StatusCode::BAD_REQUEST, err))?;
     let id = Uuid::new_v4();
-
-    state
-        .db
-        .create_room(
-            id,
-            config.players,
-            config.stack,
-            config.small_blind,
-            config.big_blind,
-            &token_hash,
+    let ceremony = fairness::random_ceremony(id, 0, config.players).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "cannot create deal ceremony",
         )
+    })?;
+    let room = Room::new_fair(config, token_hash, ceremony.clone(), share)
+        .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
+
+    fairness::create_room(&state.db, id, config, &token_hash, &ceremony, share)
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot create room"))?;
     state
@@ -380,7 +533,10 @@ async fn create_room(
 async fn join_room(
     AxumState(state): AxumState<AppState>,
     Path(id): Path<Uuid>,
+    Json(request): Json<EntropyRequest>,
 ) -> Result<Json<SeatResponse>, HttpError> {
+    let share =
+        decode_hex(&request.entropy).ok_or((StatusCode::BAD_REQUEST, "invalid deal entropy"))?;
     let room = find_room(&state, id)
         .await
         .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
@@ -395,7 +551,13 @@ async fn join_room(
         .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "revision limit reached"))?;
     let final_join = seat + 1 == room.config.players;
     let seed = if final_join {
-        Some(secure_seed().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot start room"))?)
+        Some(
+            room.ceremony
+                .as_ref()
+                .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "deal ceremony missing"))?
+                .seed_with(id, seat, share)
+                .map_err(|err| (StatusCode::BAD_REQUEST, err))?,
+        )
     } else {
         None
     };
@@ -418,13 +580,38 @@ async fn join_room(
         next_seq: 0,
         actions: Vec::new(),
     });
+    let next = if final_join {
+        Some(
+            fairness::random_ceremony(id, 1, room.config.players).map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "cannot create deal ceremony",
+                )
+            })?,
+        )
+    } else {
+        None
+    };
+    let ceremony = room
+        .ceremony
+        .as_ref()
+        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "deal ceremony missing"))?;
 
-    state
-        .db
-        .join_room(id, seat, &token_hash, room.rev, next_rev, hand)
-        .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot join room"))?;
-    room.commit_join(token_hash, game, next_rev);
+    fairness::join_room(
+        &state.db,
+        id,
+        seat,
+        &token_hash,
+        share,
+        room.rev,
+        next_rev,
+        ceremony,
+        hand,
+        next.as_ref(),
+    )
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot join room"))?;
+    room.commit_fair_join(token_hash, seat, share, game, next, next_rev);
 
     Ok(Json(SeatResponse {
         room: id,
@@ -521,7 +708,10 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                     } => {
                         claim_room(&state, id, seat, hand_no, &proof, &public_inputs).await
                     }
-                    ClientMessage::Ready => ready_room(&state, id, seat).await,
+                    ClientMessage::Ready { entropy } => match entropy {
+                        Some(entropy) => ready_room_entropy(&state, id, seat, &entropy).await,
+                        None => Err("deal entropy required"),
+                    },
                     ClientMessage::Auth { .. } => {
                         send_error(&mut socket, "already authenticated").await;
                         continue;
@@ -829,51 +1019,71 @@ fn claim_matches(inputs: ProofInputs, claim: PendingClaim) -> bool {
         && inputs.nullifier != [0; 32]
 }
 
+#[cfg(test)]
 async fn ready_room(state: &AppState, id: Uuid, seat: usize) -> Result<(), &'static str> {
+    let share = secure_nonce().map_err(|_| "cannot create deal entropy")?;
+    ready_room_entropy(state, id, seat, &encode_hex(share)).await
+}
+
+async fn ready_room_entropy(
+    state: &AppState,
+    id: Uuid,
+    seat: usize,
+    entropy: &str,
+) -> Result<(), &'static str> {
+    let share = decode_hex(entropy).ok_or("invalid deal entropy")?;
     let room = find_room(state, id).await.ok_or("room not found")?;
     let mut room = room.lock().await;
-    let ready = room.stage_ready(seat)?;
-
-    if !ready.all {
-        state
-            .db
-            .ready(ReadyUpdate {
-                room: id,
-                hand: ready.hand,
-                seat,
-                rev: room.rev,
-                next_rev: ready.rev,
-                next_hand: None,
-            })
-            .await
-            .map_err(|_| "cannot persist ready")?;
-        room.commit_ready(seat, None, ready.rev);
-        return Ok(());
-    }
-
-    let seed = secure_seed().map_err(|_| "cannot start hand")?;
-    let next = room.stage_next_hand(seed)?;
-    let new_hand = next.as_ref().map(|hand| NewHand {
+    let pending = room.stage_fair_ready(seat, share)?;
+    let seed = if pending.all {
+        Some(
+            room.ceremony
+                .as_ref()
+                .ok_or("deal ceremony missing")?
+                .seed_with(id, seat, share)?,
+        )
+    } else {
+        None
+    };
+    let next_hand = match seed {
+        Some(seed) => room.stage_next_hand(seed)?,
+        None => None,
+    };
+    let new_hand = next_hand.as_ref().map(|hand| NewHand {
         id: hand.id,
         no: hand.no,
         seed: &hand.seed,
         dealer: hand.game.dealer,
         stacks: &hand.starting_stacks,
     });
+    let next = match next_hand.as_ref() {
+        Some(hand) => Some(
+            fairness::random_ceremony(
+                id,
+                hand.no.checked_add(1).ok_or("hand limit reached")?,
+                room.config.players,
+            )
+            .map_err(|_| "cannot create deal ceremony")?,
+        ),
+        None => None,
+    };
+    let ceremony = room.ceremony.as_ref().ok_or("deal ceremony missing")?;
 
-    state
-        .db
-        .ready(ReadyUpdate {
-            room: id,
-            hand: ready.hand,
-            seat,
-            rev: room.rev,
-            next_rev: ready.rev,
-            next_hand: new_hand,
-        })
-        .await
-        .map_err(|_| "cannot persist ready")?;
-    room.commit_ready(seat, next, ready.rev);
+    fairness::ready(
+        &state.db,
+        id,
+        pending.hand,
+        seat,
+        share,
+        room.rev,
+        pending.rev,
+        ceremony,
+        new_hand,
+        next.as_ref(),
+    )
+    .await
+    .map_err(|_| "cannot persist deal contribution")?;
+    room.commit_fair_ready(seat, pending, next_hand, next);
     Ok(())
 }
 
@@ -890,15 +1100,37 @@ fn room_message(id: Uuid, room: &Room, seat: usize) -> ServerMessage {
             rev: room.rev,
             view: Box::new(room_view(id, room, hand, seat)),
         },
-        None => ServerMessage::Waiting {
-            joined: room.seats.len(),
-            players: room.config.players,
+        None => match room.ceremony.as_ref() {
+            Some(ceremony) => ServerMessage::WaitingFair {
+                joined: room.seats.len(),
+                players: room.config.players,
+                deal: pending_deal_view(ceremony, seat, room.config.players),
+            },
+            None => ServerMessage::Waiting {
+                joined: room.seats.len(),
+                players: room.config.players,
+            },
         },
     }
 }
 
 fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
     let mut view = seat_view(&hand.game, seat);
+
+    view.hand_no = hand.no;
+    view.deal = room.current_commitment.map(|commitment| DealView {
+        hand_no: hand.no,
+        commitment: encode_hex(commitment),
+        contributors: room.config.players,
+        required: room.config.players,
+        mine: true,
+        state: if hand.game.settled {
+            "revealed"
+        } else {
+            "sealed"
+        },
+        audit: hand.game.settled,
+    });
 
     for (player, stored) in view.players.iter_mut().zip(&room.seats) {
         player.proof_points = stored.proof_points;
@@ -923,6 +1155,10 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
         });
 
         let next_no = hand.no.checked_add(1).expect("valid hand number");
+        view.next_deal = room
+            .ceremony
+            .as_ref()
+            .map(|ceremony| pending_deal_view(ceremony, seat, room.config.players));
         view.challenge = Some(challenge_view(
             next_no,
             hand_tag(*id.as_bytes(), next_no),
@@ -961,6 +1197,21 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
     }
 
     view
+}
+
+fn pending_deal_view(ceremony: &Ceremony, seat: usize, players: usize) -> DealView {
+    DealView {
+        hand_no: ceremony.hand_no,
+        commitment: encode_hex(ceremony.commitment),
+        contributors: ceremony.contributors(),
+        required: players,
+        mine: ceremony
+            .shares
+            .get(seat)
+            .is_some_and(|share| share.is_some()),
+        state: "collecting",
+        audit: false,
+    }
 }
 
 fn challenge_view(
@@ -1015,13 +1266,6 @@ fn seat_for_token(room: &Room, token: Uuid) -> Option<usize> {
 }
 
 // server seed for new hand
-fn secure_seed() -> Result<[u8; 32], getrandom::Error> {
-    let mut seed = [0u8; 32];
-
-    getrandom::fill(&mut seed)?;
-    Ok(seed)
-}
-
 fn secure_nonce() -> Result<[u8; 32], getrandom::Error> {
     let mut nonce = [0u8; 32];
 
@@ -1091,6 +1335,28 @@ const fn hex_nibble(byte: u8) -> Option<u8> {
         b'a'..=b'f' => Some(byte - b'a' + 10),
         _ => None,
     }
+}
+
+async fn attach_fairness(
+    db: &Db,
+    rooms: &HashMap<Uuid, Arc<Mutex<Room>>>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let entries: Vec<_> = rooms
+        .iter()
+        .map(|(id, room)| (*id, Arc::clone(room)))
+        .collect();
+
+    for (id, room) in entries {
+        let players = room.lock().await.config.players;
+        let pending = fairness::load_pending(db, id, players).await?;
+        let current = fairness::current_commitment(db, id).await?;
+        let mut room = room.lock().await;
+
+        room.ceremony = pending;
+        room.current_commitment = current;
+    }
+
+    Ok(())
 }
 
 fn restore_rooms(stored: Vec<StoredRoom>) -> Result<HashMap<Uuid, Arc<Mutex<Room>>>, io::Error> {
@@ -1258,6 +1524,8 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
         config,
         seats,
         hand,
+        current_commitment: None,
+        ceremony: None,
         current_challenges,
         next_challenges,
         rev,
@@ -1606,6 +1874,9 @@ fn seat_view(game: &State, seat: usize) -> SeatView {
 
     SeatView {
         players,
+        hand_no: 0,
+        deal: None,
+        next_deal: None,
         hole: game.hole[seat].map(card_view),
         board: game.board.iter().copied().map(card_view).collect(),
         pot: game.pot,
@@ -1925,8 +2196,12 @@ mod tests {
             .into_iter()
             .find(|room| room.id == id)
             .unwrap();
+        let mut room = restore_room(stored).unwrap();
+        let players = room.config.players;
 
-        restore_room(stored).unwrap()
+        room.ceremony = fairness::load_pending(db, id, players).await.unwrap();
+        room.current_commitment = fairness::current_commitment(db, id).await.unwrap();
+        room
     }
 
     async fn persist(db: &Db, id: Uuid, room: &mut Room, seat: usize, action: Action) {
@@ -2875,7 +3150,7 @@ mod tests {
         let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE challenge_assignments, hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();
@@ -3283,7 +3558,7 @@ mod tests {
         assert_eq!(restored_hand.game.pot, 0);
 
         let latest_id = Uuid::new_v4();
-        let latest_seed = [0x24; 32];
+        let latest_seed = [0x24u8; 32];
 
         sqlx::query(
             "INSERT INTO hands (id, room_id, hand_no, seed, dealer, starting_stacks) \
@@ -3297,13 +3572,20 @@ mod tests {
         .await
         .unwrap();
 
-        let restored = reload(&db, all_in_id).await;
-        let restored_hand = restored.hand.as_ref().unwrap();
-        let expected = State::new(latest_seed, 1, &[100, 100], 5, 10);
+        let stored = db
+            .load_rooms()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|room| room.id == all_in_id)
+            .unwrap();
 
-        assert_eq!(restored_hand.id, latest_id);
-        assert_eq!(restored_hand.next_seq, 0);
-        same_game(&restored_hand.game, &expected);
+        assert!(restore_room(stored).is_err());
+        sqlx::query("DELETE FROM hands WHERE id = $1")
+            .bind(latest_id)
+            .execute(db.pool())
+            .await
+            .unwrap();
 
         let ready_id = Uuid::new_v4();
         let ready_first = Uuid::new_v4();
@@ -3316,44 +3598,68 @@ mod tests {
             big_blind: 10,
         };
         let ready_stacks = vec![100, 100];
-        let mut live = Room::new(ready_config, hash_token(ready_first)).unwrap();
+        let ready_first_hash = hash_token(ready_first);
+        let ready_second_hash = hash_token(ready_second);
+        let ready_first_share = [0x61; 32];
+        let ready_second_share = [0x62; 32];
+        let ready_ceremony = fairness::random_ceremony(ready_id, 0, ready_config.players).unwrap();
+        let mut live = Room::new_fair(
+            ready_config,
+            ready_first_hash,
+            ready_ceremony,
+            ready_first_share,
+        )
+        .unwrap();
+        let ready_ceremony = live.ceremony.as_ref().unwrap().clone();
+        let ready_seed = ready_ceremony
+            .seed_with(ready_id, 1, ready_second_share)
+            .unwrap();
+        let ready_next_ceremony =
+            fairness::random_ceremony(ready_id, 1, ready_config.players).unwrap();
 
-        db.create_room(
+        fairness::create_room(
+            &db,
             ready_id,
-            ready_config.players,
-            100,
-            ready_config.small_blind,
-            ready_config.big_blind,
-            &hash_token(ready_first),
+            ready_config,
+            &ready_first_hash,
+            &ready_ceremony,
+            ready_first_share,
         )
         .await
         .unwrap();
-        db.join_room(
+        fairness::join_room(
+            &db,
             ready_id,
             1,
-            &hash_token(ready_second),
+            &ready_second_hash,
+            ready_second_share,
             0,
             1,
+            &ready_ceremony,
             Some(NewHand {
                 id: ready_hand,
                 no: 0,
-                seed: &SEED,
+                seed: &ready_seed,
                 dealer: 0,
                 stacks: &ready_stacks,
             }),
+            Some(&ready_next_ceremony),
         )
         .await
         .unwrap();
-        live.commit_join(
-            hash_token(ready_second),
+        live.commit_fair_join(
+            ready_second_hash,
+            1,
+            ready_second_share,
             Some(live_hand(
                 ready_hand,
                 0,
-                SEED,
+                ready_seed,
                 0,
                 ready_stacks.clone(),
                 ready_config,
             )),
+            Some(ready_next_ceremony),
             1,
         );
 
@@ -3810,37 +4116,61 @@ mod tests {
             ..ready_config
         };
         let short_stacks = vec![10, 10];
-        let mut short = Room::new(short_config, short_first).unwrap();
-
-        db.create_room(short_id, 2, 10, 5, 10, &short_first)
-            .await
+        let short_first_share = [0x71; 32];
+        let short_second_share = [0x72; 32];
+        let short_ceremony = fairness::random_ceremony(short_id, 0, short_config.players).unwrap();
+        let mut short =
+            Room::new_fair(short_config, short_first, short_ceremony, short_first_share).unwrap();
+        let short_ceremony = short.ceremony.as_ref().unwrap().clone();
+        let short_seed = short_ceremony
+            .seed_with(short_id, 1, short_second_share)
             .unwrap();
-        db.join_room(
+        let short_next_ceremony =
+            fairness::random_ceremony(short_id, 1, short_config.players).unwrap();
+
+        fairness::create_room(
+            &db,
             short_id,
-            1,
-            &short_second,
-            0,
-            1,
-            Some(NewHand {
-                id: short_hand,
-                no: 0,
-                seed: &SEED,
-                dealer: 0,
-                stacks: &short_stacks,
-            }),
+            short_config,
+            &short_first,
+            &short_ceremony,
+            short_first_share,
         )
         .await
         .unwrap();
-        short.commit_join(
+        fairness::join_room(
+            &db,
+            short_id,
+            1,
+            &short_second,
+            short_second_share,
+            0,
+            1,
+            &short_ceremony,
+            Some(NewHand {
+                id: short_hand,
+                no: 0,
+                seed: &short_seed,
+                dealer: 0,
+                stacks: &short_stacks,
+            }),
+            Some(&short_next_ceremony),
+        )
+        .await
+        .unwrap();
+        short.commit_fair_join(
             short_second,
+            1,
+            short_second_share,
             Some(live_hand(
                 short_hand,
                 0,
-                SEED,
+                short_seed,
                 0,
                 short_stacks.clone(),
                 short_config,
             )),
+            Some(short_next_ceremony),
             1,
         );
 
@@ -3903,7 +4233,7 @@ mod tests {
         let bb = std::env::var("BB_PATH").expect("BB_PATH");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE challenge_assignments, hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();

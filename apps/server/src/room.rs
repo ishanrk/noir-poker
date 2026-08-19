@@ -47,6 +47,8 @@ pub(super) struct Room {
     pub(super) config: RoomConfig,
     pub(super) seats: Vec<Seat>,
     pub(super) hand: Option<LiveHand>,
+    pub(super) current_commitment: Option<[u8; 32]>,
+    pub(super) ceremony: Option<Ceremony>,
     pub(super) current_challenges: Challenges,
     pub(super) next_challenges: Challenges,
     pub(super) rev: u64,
@@ -66,11 +68,27 @@ impl Room {
                 proof_points: 0,
             }],
             hand: None,
+            current_commitment: None,
+            ceremony: None,
             current_challenges: vec![None; config.players],
             next_challenges: vec![None; config.players],
             rev: 0,
             notify,
         })
+    }
+
+    pub(super) fn new_fair(
+        config: RoomConfig,
+        token_hash: TokenHash,
+        ceremony: Ceremony,
+        share: [u8; 32],
+    ) -> Result<Self, &'static str> {
+        let mut room = Self::new(config, token_hash)?;
+        let mut ceremony = ceremony;
+
+        ceremony.shares[0] = Some(share);
+        room.ceremony = Some(ceremony);
+        Ok(room)
     }
 
     pub(super) fn next_seat(&self) -> Result<usize, JoinError> {
@@ -81,6 +99,7 @@ impl Room {
         Ok(self.seats.len())
     }
 
+    #[cfg(test)]
     pub(super) fn commit_join(&mut self, token_hash: TokenHash, hand: Option<LiveHand>, rev: u64) {
         self.seats.push(Seat {
             token_hash,
@@ -88,6 +107,33 @@ impl Room {
             proof_points: 0,
         });
         self.hand = hand;
+        self.changed(rev);
+    }
+
+    pub(super) fn commit_fair_join(
+        &mut self,
+        token_hash: TokenHash,
+        seat: usize,
+        share: [u8; 32],
+        hand: Option<LiveHand>,
+        next: Option<Ceremony>,
+        rev: u64,
+    ) {
+        let ceremony = self.ceremony.as_mut().expect("fair join ceremony");
+
+        ceremony.shares[seat] = Some(share);
+        self.seats.push(Seat {
+            token_hash,
+            ready_hand: None,
+            proof_points: 0,
+        });
+
+        if let Some(hand) = hand {
+            self.current_commitment = Some(ceremony.commitment);
+            self.hand = Some(hand);
+            self.ceremony = next;
+        }
+
         self.changed(rev);
     }
 
@@ -122,6 +168,37 @@ impl Room {
             hand: hand.id,
             rev: self.rev.checked_add(1).ok_or("revision limit reached")?,
             all,
+        })
+    }
+
+    pub(super) fn stage_fair_ready(
+        &self,
+        seat: usize,
+        share: [u8; 32],
+    ) -> Result<PendingFairReady, &'static str> {
+        let ready = self.stage_ready(seat)?;
+        let ceremony = self.ceremony.as_ref().ok_or("deal ceremony missing")?;
+        let hand = self.hand.as_ref().expect("ready hand");
+
+        if ceremony.hand_no != hand.no.checked_add(1).ok_or("hand limit reached")? {
+            return Err("wrong deal ceremony");
+        }
+
+        if ceremony.shares.get(seat).and_then(|share| *share).is_some() {
+            return Err("deal entropy already submitted");
+        }
+
+        let all = ceremony
+            .shares
+            .iter()
+            .enumerate()
+            .all(|(index, stored)| index == seat || stored.is_some());
+
+        Ok(PendingFairReady {
+            hand: ready.hand,
+            rev: ready.rev,
+            all: ready.all && all,
+            share,
         })
     }
 
@@ -167,6 +244,30 @@ impl Room {
         }
 
         self.changed(rev);
+    }
+
+    pub(super) fn commit_fair_ready(
+        &mut self,
+        seat: usize,
+        pending: PendingFairReady,
+        hand: Option<LiveHand>,
+        next: Option<Ceremony>,
+    ) {
+        self.ceremony.as_mut().expect("fair ready ceremony").shares[seat] = Some(pending.share);
+
+        if let Some(hand) = hand {
+            let commitment = self
+                .ceremony
+                .as_ref()
+                .expect("fair ready ceremony")
+                .commitment;
+
+            self.commit_ready(seat, Some(hand), pending.rev);
+            self.current_commitment = Some(commitment);
+            self.ceremony = next;
+        } else {
+            self.commit_ready(seat, None, pending.rev);
+        }
     }
 
     pub(super) fn stage_challenge(
@@ -401,6 +502,45 @@ impl Room {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct Ceremony {
+    pub(super) hand_no: u64,
+    pub(super) server_secret: [u8; 32],
+    pub(super) commitment: [u8; 32],
+    pub(super) shares: Vec<Option<[u8; 32]>>,
+}
+
+impl Ceremony {
+    pub(super) fn contributors(&self) -> usize {
+        self.shares.iter().flatten().count()
+    }
+
+    pub(super) fn seed_with(
+        &self,
+        room: Uuid,
+        seat: usize,
+        share: [u8; 32],
+    ) -> Result<[u8; 32], &'static str> {
+        let mut shares = self.shares.clone();
+        let slot = shares
+            .get_mut(seat)
+            .ok_or("invalid deal contribution seat")?;
+
+        if slot.is_some() {
+            return Err("deal entropy already submitted");
+        }
+
+        *slot = Some(share);
+        let shares = shares
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .ok_or("deal contributions missing")?;
+
+        deal_core::seed(*room.as_bytes(), self.hand_no, self.server_secret, &shares)
+            .ok_or("cannot derive deal seed")
+    }
+}
+
 pub(super) struct Seat {
     pub(super) token_hash: TokenHash,
     pub(super) ready_hand: Option<Uuid>,
@@ -457,6 +597,13 @@ pub(super) struct PendingDraw {
     pub(super) nonce: [u8; 32],
     pub(super) catalog_root: [u8; 32],
     pub(super) rev: u64,
+}
+
+pub(super) struct PendingFairReady {
+    pub(super) hand: Uuid,
+    pub(super) rev: u64,
+    pub(super) all: bool,
+    pub(super) share: [u8; 32],
 }
 
 pub(super) struct PendingReady {

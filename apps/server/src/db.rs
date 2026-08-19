@@ -21,15 +21,6 @@ pub struct NewHand<'a> {
     pub stacks: &'a [u32],
 }
 
-pub struct ReadyUpdate<'a> {
-    pub room: Uuid,
-    pub hand: Uuid,
-    pub seat: usize,
-    pub rev: u64,
-    pub next_rev: u64,
-    pub next_hand: Option<NewHand<'a>>,
-}
-
 pub struct NewChallenge {
     pub room: Uuid,
     pub hand_no: u64,
@@ -166,6 +157,8 @@ pub struct StoredChallenge {
 }
 
 pub struct ProofReceipt {
+    pub room: Uuid,
+    pub hand_no: i64,
     pub hand_tag: Vec<u8>,
     pub seat: i32,
     pub commitment: Vec<u8>,
@@ -193,6 +186,7 @@ impl Db {
         Ok(Self { pool })
     }
 
+    #[cfg(test)]
     pub async fn create_room(
         &self,
         id: Uuid,
@@ -225,6 +219,7 @@ impl Db {
         Ok(())
     }
 
+    #[cfg(test)]
     pub async fn join_room(
         &self,
         room: Uuid,
@@ -268,55 +263,6 @@ impl Db {
             .await?;
         }
 
-        tx.commit().await?;
-        Ok(())
-    }
-
-    pub async fn ready(&self, ready: ReadyUpdate<'_>) -> DbResult<()> {
-        let mut tx = self.pool.begin().await?;
-        let changed = query(
-            "UPDATE seats SET ready_hand = $3 \
-             WHERE room_id = $1 AND seat = $2 AND ready_hand IS NULL",
-        )
-        .bind(ready.room)
-        .bind(i32::try_from(ready.seat)?)
-        .bind(ready.hand)
-        .execute(&mut *tx)
-        .await?;
-
-        if changed.rows_affected() != 1 {
-            return Err(io::Error::other("seat readiness mismatch").into());
-        }
-
-        if let Some(hand) = ready.next_hand {
-            let stacks: Vec<_> = hand.stacks.iter().copied().map(i64::from).collect();
-
-            query(
-                "INSERT INTO hands (id, room_id, hand_no, seed, dealer, starting_stacks) \
-                 VALUES ($1, $2, $3, $4, $5, $6)",
-            )
-            .bind(hand.id)
-            .bind(ready.room)
-            .bind(i64::try_from(hand.no)?)
-            .bind(hand.seed.as_slice())
-            .bind(i32::try_from(hand.dealer)?)
-            .bind(stacks)
-            .execute(&mut *tx)
-            .await?;
-            query("UPDATE seats SET ready_hand = NULL WHERE room_id = $1")
-                .bind(ready.room)
-                .execute(&mut *tx)
-                .await?;
-        }
-
-        let changed = query("UPDATE rooms SET rev = $2 WHERE id = $1 AND rev = $3")
-            .bind(ready.room)
-            .bind(i64::try_from(ready.next_rev)?)
-            .bind(i64::try_from(ready.rev)?)
-            .execute(&mut *tx)
-            .await?;
-
-        one_row(changed)?;
         tx.commit().await?;
         Ok(())
     }
@@ -723,9 +669,9 @@ impl Db {
 
     pub async fn proof_receipt(&self, nullifier: &[u8; 32]) -> DbResult<Option<ProofReceipt>> {
         let row = query(
-            "SELECT hand_tag, seat, commitment, nonce, facts_hash, nullifier, catalog_root, points, \
-             draw_proof, draw_public_inputs, completion_proof, completion_public_inputs \
-             FROM challenge_assignments WHERE nullifier = $1",
+            "SELECT room_id, hand_no, hand_tag, seat, commitment, nonce, facts_hash, nullifier, \
+             catalog_root, points, draw_proof, draw_public_inputs, completion_proof, \
+             completion_public_inputs FROM challenge_assignments WHERE nullifier = $1",
         )
         .bind(nullifier.as_slice())
         .fetch_optional(&self.pool)
@@ -733,6 +679,8 @@ impl Db {
 
         row.map(|row| {
             Ok(ProofReceipt {
+                room: row.try_get("room_id")?,
+                hand_no: row.try_get("hand_no")?,
                 hand_tag: row.try_get("hand_tag")?,
                 seat: row.try_get("seat")?,
                 commitment: row.try_get("commitment")?,
@@ -750,8 +698,7 @@ impl Db {
         .transpose()
     }
 
-    #[cfg(test)]
-    pub fn pool(&self) -> &PgPool {
+    pub(super) fn pool(&self) -> &PgPool {
         &self.pool
     }
 }

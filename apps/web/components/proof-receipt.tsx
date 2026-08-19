@@ -1,194 +1,204 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { SiteHeader } from "@/components/site-header";
 import { verifyReceipt, type ReceiptProof } from "@/lib/receipt";
 import { loadProofReceipt, type ProofReceipt } from "@/lib/server";
 
-type VerificationState = "waiting" | "verifying" | "verified" | "failed";
-
-function statusLabel(state: VerificationState) {
-  switch (state) {
-    case "waiting":
-      return "waiting";
-    case "verifying":
-      return "verifying locally";
-    case "verified":
-      return "verified";
-    case "failed":
-      return "invalid";
-  }
-}
+type State = "waiting" | "verifying" | "verified" | "failed";
+const status = (state: State) =>
+  ({ waiting: "queued", verifying: "checking locally", verified: "verified", failed: "invalid" })[
+    state
+  ];
 
 export function ProofReceiptView({ nullifier }: { nullifier: string }) {
   const [receipt, setReceipt] = useState<ProofReceipt>();
-  const [draw, setDraw] = useState<VerificationState>("waiting");
-  const [completion, setCompletion] = useState<VerificationState>("waiting");
+  const receiptRef = useRef<ProofReceipt | undefined>(undefined);
+  const running = useRef(false);
+  const mounted = useRef(true);
+  const [draw, setDraw] = useState<State>("waiting");
+  const [completion, setCompletion] = useState<State>("waiting");
   const [error, setError] = useState<string>();
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function verify(loaded?: ProofReceipt) {
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    setError(undefined);
+    setDraw("waiting");
+    setCompletion("waiting");
+    let step: ReceiptProof = "draw";
+
+    try {
+      const value = loaded ?? receiptRef.current ?? (await loadProofReceipt(nullifier));
+      if (!mounted.current) return;
+      receiptRef.current = value;
+      setReceipt(value);
+      setDraw("verifying");
+      await verifyReceipt(value, (proof) => {
+        if (!mounted.current) return;
+        if (proof === "draw") {
+          step = "completion";
+          setDraw("verified");
+          setCompletion("verifying");
+        } else {
+          setCompletion("verified");
+        }
+      });
+    } catch (cause) {
+      if (!mounted.current) return;
+      if (step === "draw") setDraw("failed");
+      else setCompletion("failed");
+      setError(cause instanceof Error ? cause.message : "proof verification failed");
+    } finally {
+      running.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  }
 
   useEffect(() => {
+    mounted.current = true;
     let live = true;
 
-    async function load() {
-      let loaded = false;
-      let step: ReceiptProof = "draw";
-
-      try {
-        const value = await loadProofReceipt(nullifier);
-
-        if (!live) {
-          return;
-        }
-        loaded = true;
+    void loadProofReceipt(nullifier)
+      .then((value) => {
+        if (!live) return;
+        receiptRef.current = value;
         setReceipt(value);
-        setDraw("verifying");
-        await verifyReceipt(value, (verified) => {
-          if (!live) {
-            return;
-          }
-
-          if (verified === "draw") {
-            step = "completion";
-            setDraw("verified");
-            setCompletion("verifying");
-          } else {
-            setCompletion("verified");
-          }
-        });
-      } catch (cause) {
-        if (!live) {
-          return;
-        }
-
-        if (loaded) {
-          if (step === "draw") {
-            setDraw("failed");
-          } else {
-            setCompletion("failed");
-          }
-        }
-
-        setError(cause instanceof Error ? cause.message : "proof verification failed");
-      }
-    }
-
-    void load();
+        return verify(value);
+      })
+      .catch((cause) => {
+        if (!live) return;
+        setDraw("failed");
+        setError(cause instanceof Error ? cause.message : "proof receipt unavailable");
+      });
 
     return () => {
       live = false;
+      mounted.current = false;
     };
+    // verify is intentionally scoped to the receipt loaded for this nullifier
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nullifier]);
 
-  function download() {
-    if (!receipt) {
-      return;
-    }
+  async function copyLink() {
+    await navigator.clipboard.writeText(window.location.href);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
+  }
 
+  function exportReceipt() {
+    if (!receipt) return;
     const url = URL.createObjectURL(
       new Blob([JSON.stringify(receipt, null, 2)], { type: "application/json" }),
     );
     const link = document.createElement("a");
-
     link.href = url;
-    link.download = `noir-poker-proof-${receipt.nullifier.slice(0, 12)}.json`;
+    link.download = `noir-poker-bounty-${receipt.nullifier.slice(0, 12)}.json`;
     link.click();
     URL.revokeObjectURL(url);
   }
 
   const verified = draw === "verified" && completion === "verified";
-  const fields: [string, string][] = receipt
-    ? [
-        ["hand tag", receipt.hand_tag],
-        ["seat", String(receipt.seat)],
-        ["commitment", receipt.commitment],
-        ["server nonce", receipt.nonce],
-        ["catalog root", receipt.catalog_root],
-        ["facts commitment", receipt.facts_hash],
-        ["nullifier", receipt.nullifier],
-        ["proof points", String(receipt.points)],
-        ["circuit", receipt.circuit_id],
-        ["proof system", receipt.proof_system],
-        ["artifact sha256", receipt.artifact_sha256],
-        ["vk sha256", receipt.vk_sha256],
-      ]
-    : [];
-
   return (
-    <main className="proof-page">
-      <header className="proof-header">
-        <p className="eyebrow">Noir Poker / Proof receipt</p>
-        <h1>Independent verification</h1>
-        <p>
-          {verified
-            ? "both proofs verified locally in this browser"
-            : "the browser verifies the receipt without trusting the server result"}
-        </p>
+    <main className="site-shell proof-page">
+      <SiteHeader compact />
+      <header className="receipt-hero">
+        <div>
+          <p className="eyebrow">Public bounty verifier</p>
+          <h1>{verified ? "The bounty was earned." : "Verifying a sealed bounty."}</h1>
+          <p>
+            This browser checks both UltraHonk proofs. The objective and the private fact vector
+            never appear in the receipt.
+          </p>
+        </div>
+        <div className="receipt-seal" data-verified={verified}>
+          <span>Hidden objective</span>
+          <strong>{verified ? "✓" : "?"}</strong>
+          <small>{verified ? `+${receipt?.points ?? 20} proof points` : "still sealed"}</small>
+          <i aria-hidden="true" />
+        </div>
       </header>
 
-      <section className="proof-verification" aria-live="polite">
-        <div>
-          <span>Fair draw</span>
-          <strong data-state={draw}>{statusLabel(draw)}</strong>
+      <section className="verification-timeline" aria-live="polite">
+        <div data-state={receipt ? "verified" : "verifying"}>
+          <span>01</span>
+          <p>Receipt context</p>
+          <strong>{receipt ? "room + hand bound" : "loading"}</strong>
         </div>
-        <div>
-          <span>Challenge completion</span>
-          <strong data-state={completion}>{statusLabel(completion)}</strong>
+        <div data-state={draw}>
+          <span>02</span>
+          <p>Hidden draw proof</p>
+          <strong>{status(draw)}</strong>
+        </div>
+        <div data-state={completion}>
+          <span>03</span>
+          <p>Completion proof</p>
+          <strong>{status(completion)}</strong>
+        </div>
+        <div data-state={verified ? "verified" : "waiting"}>
+          <span>04</span>
+          <p>One-time award</p>
+          <strong>{verified ? "accepted once" : "waiting"}</strong>
         </div>
       </section>
 
       {error && <p className="proof-error">{error}</p>}
 
       {receipt && (
-        <>
-          <section className="proof-privacy" aria-label="Private values">
-            <div>
-              <span>challenge</span>
-              <strong>hidden</strong>
+        <section className="receipt-statement">
+          <div className="section-index">
+            <span>Statement</span>
+            <p>What was proved</p>
+          </div>
+          <div>
+            <h2>
+              A committed secret selected one valid catalog leaf, and that same hidden leaf was
+              satisfied by the committed hand facts.
+            </h2>
+            <div className="statement-grid">
+              <article>
+                <span>Public</span>
+                <strong>
+                  Room {receipt.room.slice(0, 8)} · hand {receipt.hand_no} · seat {receipt.seat + 1}
+                </strong>
+              </article>
+              <article>
+                <span>Hidden</span>
+                <strong>Objective, secret, Merkle path and six hand facts</strong>
+              </article>
+              <article>
+                <span>Toolchain</span>
+                <strong>Noir · UltraHonk · Barretenberg {receipt.bb_version}</strong>
+              </article>
+              <article>
+                <span>Replay guard</span>
+                <strong>{receipt.nullifier.slice(0, 18)}…</strong>
+              </article>
             </div>
-            <div>
-              <span>private hand facts</span>
-              <strong>hidden</strong>
-            </div>
-          </section>
-
-          <dl className="proof-fields">
-            {fields.map(([name, value]) => (
-              <div key={name}>
-                <dt>{name}</dt>
-                <dd>
-                  <code>{value}</code>
-                </dd>
-              </div>
-            ))}
-          </dl>
-
-          <section className="proof-toolchain" aria-label="Proof toolchain">
-            <span>UltraHonk</span>
-            <span>Noir 1.0.0-beta.26</span>
-            <span>Barretenberg {receipt.bb_version}</span>
-            <span>protocol v{receipt.protocol_version}</span>
-          </section>
-        </>
+          </div>
+        </section>
       )}
 
-      <div className="proof-actions">
-        <button type="button" onClick={download} disabled={!receipt}>
-          Download receipt
+      <section className="receipt-actions">
+        <button type="button" onClick={() => void copyLink()} disabled={!receipt}>
+          {copied ? "Link copied" : "Share verifier"}
         </button>
-        <a
-          href="https://github.com/ishanrk/noir-poker/blob/main/apps/web/scripts/verify-receipt.mjs"
-          target="_blank"
-          rel="noreferrer"
-        >
-          verifier source
-        </a>
-        <Link href="/">back to lobby</Link>
-      </div>
-
-      <section className="proof-cli">
-        <span>CLI verification</span>
-        <code>npm --prefix apps/web run proof:verify -- /path/to/receipt.json</code>
+        <button type="button" onClick={() => void verify()} disabled={!receipt || busy}>
+          Run again
+        </button>
+        <details>
+          <summary>Developer verification</summary>
+          <code>npm --prefix apps/web run proof:verify -- receipt.json</code>
+          <button type="button" onClick={exportReceipt}>
+            Export JSON
+          </button>
+        </details>
+        <Link href="/protocol#bounties">Read the exact circuit statement →</Link>
       </section>
     </main>
   );
