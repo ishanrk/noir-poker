@@ -21,6 +21,18 @@
  M apps/web/lib/server.ts
  M apps/web/package.json
  M apps/web/scripts/verify-receipt.mjs
+ M artifacts/failure-final/status.txt
+ M artifacts/logs/cargo-clippy.log
+ M artifacts/logs/cargo-test.log
+ M artifacts/logs/challenge-test.log
+ M artifacts/logs/deal-test.log
+ M artifacts/logs/next-build.log
+ M artifacts/logs/postgres-persistence.log
+ M artifacts/logs/real-claim.log
+ M artifacts/logs/real-proof.log
+ M artifacts/logs/receipt-test.log
+ M artifacts/logs/resolve.log
+ M artifacts/logs/zk-build.log
  M crates/challenge-core/src/lib.rs
  M crates/game-core/Cargo.toml
  M crates/game-core/src/card.rs
@@ -37,8 +49,9 @@
 ?? apps/web/lib/deal.ts
 ?? apps/web/lib/receipt.test.ts
 ?? apps/web/scripts/verify-deal.mjs
-?? artifacts/failure-final/
-?? artifacts/logs/
+?? artifacts/logs/ai-style.log
+?? artifacts/logs/dependency-shuffle.log
+?? artifacts/logs/numeric-spinner.log
 ?? crates/deal-core/
 ?? tools/regen/__pycache__/
 ?? tools/regen/apply.py

@@ -1,4 +1,4 @@
-[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 0.15s
 [1m[92m     Running[0m unittests src/main.rs (target/debug/deps/server-3e49819e4ce08812)
 
 running 1 test
