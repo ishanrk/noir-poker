@@ -8,6 +8,29 @@ const ROOM = "00112233-4455-6677-8899-aabbccddeeff";
 const SECRET = new Uint8Array(32).fill(0x11);
 const SHARES = [0x22, 0x33, 0x44].map((byte) => new Uint8Array(32).fill(byte));
 
+const STEPS = [
+  {
+    label: "Server commitment",
+    title: "The server fixes its random value first.",
+    copy: "A 32 byte server secret is committed before any player random value is accepted.",
+  },
+  {
+    label: "Player randomness",
+    title: "Each occupied seat contributes 32 random bytes.",
+    copy: "The values are bound to seat order and mixed with the already committed server secret.",
+  },
+  {
+    label: "Shuffle",
+    title: "One seed determines one 52 card permutation.",
+    copy: "SHA 256 counter output feeds rejection sampling and Fisher Yates, so the same seed always replays the same deck.",
+  },
+  {
+    label: "Deal map",
+    title: "Poker consumes fixed positions from that permutation.",
+    copy: "Two hole card rounds are followed by burn, flop, burn, turn, burn and river positions.",
+  },
+] as const;
+
 export function ProtocolDemo() {
   const [step, setStep] = useState(0);
   const values = useMemo(() => {
@@ -16,33 +39,33 @@ export function ProtocolDemo() {
     const deck = shuffleDeck(seed);
     return { commitment, seed, deck, layout: dealLayout(deck, 3, 1) };
   }, []);
-  const labels = ["Server commits", "Players add randomness", "Shuffle", "Deal"];
+  const current = STEPS[step];
 
   return (
     <div className="protocol-demo">
       <div className="demo-controls">
-        {labels.map((label, index) => (
-          <button key={label} type="button" data-active={step === index} onClick={() => setStep(index)}>
-            {label}
+        {STEPS.map((item, index) => (
+          <button
+            key={item.label}
+            type="button"
+            data-active={step === index}
+            onClick={() => setStep(index)}
+          >
+            {item.label}
           </button>
         ))}
       </div>
       <div className="demo-stage" data-step={step}>
         <div className="demo-stack">{Array.from({ length: 6 }, (_, index) => <i key={index} />)}</div>
         <div className="demo-output">
-          <span>{labels[step]}</span>
+          <strong>{current.title}</strong>
+          <p>{current.copy}</p>
           <code>
-            {step === 0 && `${encodeHex(values.commitment).slice(0, 32)}…`}
-            {step === 1 && "seat 0, seat 1, seat 2"}
-            {step === 2 && values.deck.slice(0, 12).map(cardValue).join("  ")}
-            {step === 3 && values.layout.board.map(cardValue).join("  ")}
+            {step === 0 && `commitment ${encodeHex(values.commitment).slice(0, 24)}…`}
+            {step === 1 && `seed ${encodeHex(values.seed).slice(0, 24)}…`}
+            {step === 2 && values.deck.slice(0, 10).map(cardValue).join("  ")}
+            {step === 3 && `board ${values.layout.board.map(cardValue).join("  ")}`}
           </code>
-          <p>
-            {step === 0 && "The commitment exists before player randomness is accepted."}
-            {step === 1 && "Seat indices are encoded, so reordering the same values changes the seed."}
-            {step === 2 && "SHA 256 counter blocks feed rejection sampling and Fisher Yates."}
-            {step === 3 && "The Rust engine and public verifier consume the same canonical positions."}
-          </p>
         </div>
       </div>
     </div>
