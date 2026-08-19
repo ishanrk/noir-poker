@@ -6,6 +6,7 @@ import { SiteFooter } from "@/components/site-footer";
 import "./globals.css";
 import "./pages.css";
 import "./refine.css";
+import "./finish.css";
 
 export const metadata: Metadata = {
   title: "Noir Poker",
