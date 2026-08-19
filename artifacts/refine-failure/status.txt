@@ -2,15 +2,4 @@
  M artifacts/noir-poker-redesign-fairness.patch
  M artifacts/noir-poker-redesign-fairness.patch.sha256
  M artifacts/refine-failure/status.txt
- M artifacts/refine-logs/cargo-clippy.log
- M artifacts/refine-logs/cargo-test.log
-?? artifacts/refine-logs/challenge-test.log
-?? artifacts/refine-logs/deal-test.log
-?? artifacts/refine-logs/eslint.log
-?? artifacts/refine-logs/next-build.log
-?? artifacts/refine-logs/npm-ci.log
-?? artifacts/refine-logs/postgres-persistence.log
-?? artifacts/refine-logs/real-claim.log
-?? artifacts/refine-logs/real-proof.log
-?? artifacts/refine-logs/receipt-test.log
-?? artifacts/refine-logs/zk-build.log
+?? artifacts/refine-logs/patch-replay.log
