@@ -1,0 +1,221 @@
+/* keep visuals only where they explain the rule */
+
+.challenge-example-grid-clean article {
+  min-height: 190px;
+}
+
+.example-flop-clean,
+.example-raise-clean,
+.example-showdown-clean,
+.example-seven-two-clean {
+  position: relative;
+  height: 116px;
+}
+
+.example-flop-clean span,
+.example-showdown-clean span,
+.example-seven-two-clean span {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--ink);
+  border-radius: 2px;
+  background: var(--paper);
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 700;
+  transition: transform 260ms ease;
+}
+
+.example-flop-clean span {
+  top: 12px;
+  left: 50%;
+  width: 44px;
+  aspect-ratio: 5 / 7;
+  font-size: 13px;
+}
+.example-flop-clean span:nth-child(1) { transform: translateX(-132%) rotate(-6deg); }
+.example-flop-clean span:nth-child(2) { transform: translateX(-50%); }
+.example-flop-clean span:nth-child(3) { transform: translateX(32%) rotate(6deg); }
+.challenge-example-grid-clean article:hover .example-flop-clean span:nth-child(1) { transform: translateX(-145%) translateY(-5px) rotate(-9deg); }
+.challenge-example-grid-clean article:hover .example-flop-clean span:nth-child(2) { transform: translateX(-50%) translateY(-8px); }
+.challenge-example-grid-clean article:hover .example-flop-clean span:nth-child(3) { transform: translateX(45%) translateY(-5px) rotate(9deg); }
+
+.example-raise-clean {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 6px;
+}
+.raise-chip-stack {
+  position: relative;
+  width: 112px;
+  height: 72px;
+}
+.raise-chip-stack i {
+  position: absolute;
+  display: block;
+  width: 38px;
+  height: 38px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 5px var(--paper), inset 0 0 0 7px var(--blue);
+  transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.raise-chip-stack i:nth-child(1) { left: 20px; bottom: 2px; }
+.raise-chip-stack i:nth-child(2) { left: 44px; bottom: 10px; }
+.raise-chip-stack i:nth-child(3) { left: 68px; bottom: 18px; background: var(--lime); }
+.example-raise-clean b,
+.example-showdown-clean b,
+.example-seven-two-clean b {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.challenge-example-grid-clean article:hover .raise-chip-stack i:nth-child(1) { transform: translateY(-4px); }
+.challenge-example-grid-clean article:hover .raise-chip-stack i:nth-child(2) { transform: translateY(-9px); }
+.challenge-example-grid-clean article:hover .raise-chip-stack i:nth-child(3) { transform: translateY(-17px); }
+
+.example-showdown-clean,
+.example-seven-two-clean {
+  display: grid;
+  justify-items: center;
+  align-content: end;
+  gap: 8px;
+}
+.example-showdown-clean > div,
+.example-seven-two-clean > div {
+  position: relative;
+  width: 112px;
+  height: 82px;
+}
+.example-showdown-clean span,
+.example-seven-two-clean span {
+  top: 7px;
+  left: 50%;
+  width: 49px;
+  aspect-ratio: 5 / 7;
+  font-size: 14px;
+}
+.example-showdown-clean span:first-child,
+.example-seven-two-clean span:first-child { transform: translateX(-84%) rotate(-7deg); }
+.example-showdown-clean span:nth-child(2),
+.example-seven-two-clean span:nth-child(2) { transform: translateX(-16%) rotate(7deg); }
+.example-seven-two-clean span:nth-child(2) { color: var(--card-red); }
+.challenge-example-grid-clean article:hover .example-showdown-clean span:first-child,
+.challenge-example-grid-clean article:hover .example-seven-two-clean span:first-child { transform: translateX(-98%) rotate(-12deg); }
+.challenge-example-grid-clean article:hover .example-showdown-clean span:nth-child(2),
+.challenge-example-grid-clean article:hover .example-seven-two-clean span:nth-child(2) { transform: translateX(-2%) rotate(12deg); }
+
+.rule-row-clean {
+  grid-template-columns: minmax(0, 1fr) 230px;
+}
+
+.rule-row-clean .rule-symbol {
+  width: 180px;
+  height: 138px;
+}
+
+.rule-symbol-draw-clean,
+.rule-symbol-private-clean,
+.rule-symbol-proof-clean,
+.rule-symbol-once-clean {
+  display: grid;
+  place-items: center;
+}
+
+.rule-symbol-draw-clean > span,
+.rule-symbol-private-clean > span,
+.rule-symbol-proof-clean > span,
+.rule-symbol-once-clean > span {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 700;
+  transition: transform 300ms ease, opacity 220ms ease;
+}
+
+.rule-symbol-draw-clean > span {
+  width: 76px;
+  height: 76px;
+  color: var(--lime);
+  background: var(--blue);
+  font-size: 33px;
+}
+.rule-row-clean:hover .rule-symbol-draw-clean > span { transform: rotate(10deg) scale(1.08); }
+
+.rule-symbol-private-clean > span {
+  width: 72px;
+  height: 72px;
+  color: var(--lime);
+  background: var(--blue);
+  font-size: 31px;
+}
+.rule-symbol-private-clean > b {
+  margin-top: -22px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.rule-row-clean:hover .rule-symbol-private-clean > span {
+  opacity: 0.28;
+  transform: rotateY(82deg);
+}
+
+.rule-symbol-proof-clean,
+.rule-symbol-once-clean {
+  grid-template-columns: repeat(2, 70px);
+  gap: 14px;
+}
+.rule-symbol-proof-clean .rule-hidden-challenge {
+  width: 66px;
+  height: 66px;
+  color: var(--lime);
+  background: var(--blue);
+  font-size: 29px;
+}
+.rule-symbol-proof-clean .rule-proof-check,
+.rule-symbol-once-clean .rule-first-claim {
+  width: 66px;
+  height: 66px;
+  border: 2px solid var(--success);
+  color: var(--success);
+  background: var(--paper);
+  font-size: 28px;
+}
+.rule-row-clean:hover .rule-symbol-proof-clean .rule-hidden-challenge { transform: translateX(-7px) rotate(-7deg); }
+.rule-row-clean:hover .rule-symbol-proof-clean .rule-proof-check { transform: translateX(7px) scale(1.08); }
+
+.rule-symbol-once-clean .rule-second-claim {
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--line-strong);
+  color: var(--danger);
+  background: var(--paper);
+  font-size: 24px;
+  opacity: 0.55;
+}
+.rule-row-clean:hover .rule-symbol-once-clean .rule-first-claim { transform: scale(1.08); }
+.rule-row-clean:hover .rule-symbol-once-clean .rule-second-claim { opacity: 0.12; transform: translateX(10px); }
+
+.motivation-story-text-only {
+  grid-template-columns: minmax(0, 780px);
+}
+
+@media (max-width: 760px) {
+  .rule-row-clean { grid-template-columns: 1fr; }
+  .rule-row-clean .rule-symbol { justify-self: start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .example-flop-clean span,
+  .raise-chip-stack i,
+  .example-showdown-clean span,
+  .example-seven-two-clean span,
+  .rule-row-clean .rule-symbol * { transition: none; }
+}
