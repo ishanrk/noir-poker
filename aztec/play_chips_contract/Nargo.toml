@@ -3,5 +3,5 @@ name = "play_chips_contract"
 type = "contract"
 
 [dependencies]
-aztec = { git = "https://github.com/AztecProtocol/aztec-nr/", tag = "v5.2.0", directory = "aztec" }
-balance_set = { git = "https://github.com/AztecProtocol/aztec-nr/", tag = "v5.2.0", directory = "balance-set" }
+aztec = { git = "https://github.com/AztecProtocol/aztec-nr/", tag = "v5.1.0", directory = "aztec" }
+balance_set = { git = "https://github.com/AztecProtocol/aztec-nr/", tag = "v5.1.0", directory = "balance-set" }
