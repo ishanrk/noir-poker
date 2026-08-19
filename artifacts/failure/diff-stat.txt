@@ -1,9 +1,9 @@
  Cargo.lock                               |   36 +-
  Cargo.toml                               |    2 +-
  apps/server/Cargo.toml                   |    1 +
- apps/server/src/db.rs                    |  150 +--
- apps/server/src/main.rs                  |  410 +++++++--
- apps/server/src/room.rs                  |  129 ++-
+ apps/server/src/db.rs                    |   17 +-
+ apps/server/src/main.rs                  |  409 +++++++--
+ apps/server/src/room.rs                  |  147 +++
  apps/web/app/globals.css                 | 1480 +++++++++++-------------------
  apps/web/app/layout.tsx                  |    7 +-
  apps/web/app/page.tsx                    |   70 +-
@@ -20,8 +20,16 @@
  apps/web/lib/server.ts                   |   61 +-
  apps/web/package.json                    |    5 +-
  apps/web/scripts/verify-receipt.mjs      |   48 +-
+ artifacts/failure/cargo-check.log        |  459 +++++----
+ artifacts/failure/cargo-clippy.log       |  657 +------------
+ artifacts/failure/cargo-test.log         |  712 ++------------
+ artifacts/failure/challenge-test.log     |    2 +-
+ artifacts/failure/diff-stat.txt          |   27 -
+ artifacts/failure/next-build.log         |    4 +-
+ artifacts/failure/status-short.txt       |    9 +-
+ artifacts/failure/status.txt             |    2 +-
  crates/challenge-core/src/lib.rs         |    4 +-
  crates/game-core/Cargo.toml              |    3 +-
  crates/game-core/src/card.rs             |   19 +-
  crates/game-core/src/deck.rs             |   86 +-
- 26 files changed, 1773 insertions(+), 2301 deletions(-)
+ 34 files changed, 2129 insertions(+), 3701 deletions(-)
