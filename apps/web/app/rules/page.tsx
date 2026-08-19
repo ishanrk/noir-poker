@@ -8,13 +8,13 @@ const CHALLENGES = [
   { title: "See the flop", kind: "flop" },
   { title: "Raise before the flop", kind: "raise" },
   { title: "Reach showdown", kind: "showdown" },
-  { title: "Finish the hand ahead", kind: "profit" },
+  { title: "Bluff and win with seven-deuce", kind: "seven-two" },
 ] as const;
 
 const CHALLENGE_RULES = [
   {
     title: "A challenge is dealt between hands",
-    body: "Every active player receives one random challenge for the next hand. The selection comes from the fixed eight challenge catalog using randomness from the player and server.",
+    body: "Every active player receives one random challenge for the next hand. The selection uses randomness from the player and server.",
     kind: "draw",
   },
   {
@@ -37,7 +37,7 @@ const CHALLENGE_RULES = [
 function ChallengeVisual({ kind }: { kind: (typeof CHALLENGES)[number]["kind"] }) {
   if (kind === "flop") {
     return (
-      <div className="example-flop" aria-hidden="true">
+      <div className="example-flop-clean" aria-hidden="true">
         <span>2♣</span><span>8♥</span><span>K♠</span>
       </div>
     );
@@ -45,23 +45,26 @@ function ChallengeVisual({ kind }: { kind: (typeof CHALLENGES)[number]["kind"] }
 
   if (kind === "raise") {
     return (
-      <div className="example-raise" aria-hidden="true">
-        <i /><i /><i /><strong>↑</strong>
+      <div className="example-raise-clean" aria-hidden="true">
+        <div className="raise-chip-stack"><i /><i /><i /></div>
+        <b>raise</b>
       </div>
     );
   }
 
   if (kind === "showdown") {
     return (
-      <div className="example-showdown" aria-hidden="true">
-        <span>A♠</span><span>Q♦</span><b>show</b>
+      <div className="example-showdown-clean" aria-hidden="true">
+        <div><span>A♠</span><span>Q♦</span></div>
+        <b>showdown</b>
       </div>
     );
   }
 
   return (
-    <div className="example-profit" aria-hidden="true">
-      <i /><i /><i /><strong>+</strong>
+    <div className="example-seven-two-clean" aria-hidden="true">
+      <div><span>7♠</span><span>2♥</span></div>
+      <b>bluff</b>
     </div>
   );
 }
@@ -69,31 +72,34 @@ function ChallengeVisual({ kind }: { kind: (typeof CHALLENGES)[number]["kind"] }
 function RuleVisual({ kind }: { kind: (typeof CHALLENGE_RULES)[number]["kind"] }) {
   if (kind === "draw") {
     return (
-      <div className="rule-symbol rule-symbol-draw" aria-hidden="true">
-        <span>?</span><i /><i />
+      <div className="rule-symbol rule-symbol-draw-clean" aria-hidden="true">
+        <span>?</span>
       </div>
     );
   }
 
   if (kind === "private") {
     return (
-      <div className="rule-symbol rule-symbol-private" aria-hidden="true">
-        <span>?</span><i />
+      <div className="rule-symbol rule-symbol-private-clean" aria-hidden="true">
+        <span>?</span>
+        <b>private</b>
       </div>
     );
   }
 
   if (kind === "proof") {
     return (
-      <div className="rule-symbol rule-symbol-proof" aria-hidden="true">
-        <span>✓</span><i /><b>Noir</b>
+      <div className="rule-symbol rule-symbol-proof-clean" aria-hidden="true">
+        <span className="rule-hidden-challenge">?</span>
+        <span className="rule-proof-check">✓</span>
       </div>
     );
   }
 
   return (
-    <div className="rule-symbol rule-symbol-once" aria-hidden="true">
-      <span>✓</span><span>×</span><i />
+    <div className="rule-symbol rule-symbol-once-clean" aria-hidden="true">
+      <span className="rule-first-claim">✓</span>
+      <span className="rule-second-claim">×</span>
     </div>
   );
 }
@@ -114,9 +120,9 @@ export default function RulesPage() {
       <section className="challenge-examples" aria-labelledby="challenge-examples-title">
         <div>
           <h2 id="challenge-examples-title">Challenge examples</h2>
-          <p>These four are already in the challenge catalog used by the circuit.</p>
+          <p>Examples of the private goals a player can be asked to complete.</p>
         </div>
-        <div className="challenge-example-grid challenge-example-grid-semantic">
+        <div className="challenge-example-grid challenge-example-grid-clean">
           {CHALLENGES.map((challenge) => (
             <article key={challenge.title}>
               <ChallengeVisual kind={challenge.kind} />
@@ -126,23 +132,9 @@ export default function RulesPage() {
         </div>
       </section>
 
-      <section className="seven-two-example" aria-labelledby="seven-two-title">
-        <div>
-          <p>Card-specific challenge</p>
-          <h2 id="seven-two-title">Bluff and win with seven-deuce</h2>
-          <span>
-            Hold 7–2, win the hand, and do it without reaching showdown. This is the card-specific
-            challenge design; the current circuit still needs a hole-card fact before it can be claimed.
-          </span>
-        </div>
-        <div className="seven-two-cards" aria-hidden="true">
-          <span>7♠</span><span>2♥</span><i>?</i>
-        </div>
-      </section>
-
       <section className="rules-list" aria-label="Private challenge rules">
         {CHALLENGE_RULES.map((rule) => (
-          <article className="rule-row rule-row-semantic" key={rule.title}>
+          <article className="rule-row rule-row-clean" key={rule.title}>
             <div className="rule-copy">
               <h2>{rule.title}</h2>
               <p>{rule.body}</p>
