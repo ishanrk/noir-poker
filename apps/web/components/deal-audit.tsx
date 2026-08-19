@@ -41,6 +41,18 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
     return layout.hole.flat().concat(layout.burns, layout.board).map(cardValue);
   }, [layout]);
 
+  function exportAudit() {
+    if (!audit) return;
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(audit, null, 2)], { type: "application/json" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `noir-poker-deal-${audit.room.slice(0, 8)}-${audit.hand_no}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <main className="site-shell audit-page">
       <SiteHeader compact />
@@ -48,7 +60,7 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
         <div>
           <p className="eyebrow">Independent deal audit</p>
           <h1>{state === "verified" ? "All 52 positions reproduce." : "Rebuilding the deck."}</h1>
-          <p>Nothing below trusts the server&apos;s “verified” label. The browser recomputes every hash and swap locally.</p>
+          <p>The browser recomputes the commitment, seed, shuffle and deal locally.</p>
         </div>
         <div className="audit-deck" data-state={state} data-replay={replay}>
           {Array.from({ length: 9 }, (_, index) => <i key={index} style={{ "--card-index": index } as CSSProperties} />)}
@@ -87,7 +99,7 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
 
           <section className="deal-replay" key={replay}>
             <header>
-              <div><p className="protocol-label">Deterministic deal map</p><h2>Watch the verified deck leave the stack.</h2></div>
+              <div><p className="protocol-label">Deterministic deal map</p><h2>Verified deal</h2></div>
               <button type="button" onClick={() => setReplay((value) => value + 1)}>Replay motion ↻</button>
             </header>
             <div className="audit-table">
@@ -108,8 +120,9 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
       )}
 
       <section className="receipt-actions">
-        <Link href="/protocol#deals">Read the byte-level protocol →</Link>
+        <button type="button" onClick={exportAudit} disabled={!audit}>Export JSON</button>
         <details><summary>CLI verifier</summary><code>npm --prefix apps/web run deal:verify -- audit.json</code></details>
+        <Link href="/protocol#deals">Read protocol →</Link>
       </section>
     </main>
   );
