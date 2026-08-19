@@ -4,25 +4,32 @@ import { SiteHeader } from "@/components/site-header";
 
 const WSOP_RULES = "https://assets.wsopcdn.com/wsop/853ee602-e1e9-4019-a0cf-381419d805c6.pdf";
 
+const CHALLENGES = [
+  { title: "See the flop", cards: ["?", "2♣", "8♥"] },
+  { title: "Raise before the flop", cards: ["?", "A♦", "5♣"] },
+  { title: "Reach showdown", cards: ["?", "K♠", "K♥"] },
+  { title: "Finish the hand ahead", cards: ["?", "7♠", "Q♦"] },
+] as const;
+
 const CHALLENGE_RULES = [
   {
-    title: "Random assignment",
-    body: "Between hands, every active player receives one challenge for the next hand. The challenge is selected from the fixed challenge catalog using randomness from the player and server.",
+    title: "A challenge is dealt between hands",
+    body: "Every active player receives one random challenge for the next hand. The selection comes from the fixed eight challenge catalog using randomness from the player and server.",
     cards: ["?", "?", "A♥"],
   },
   {
-    title: "Private during play",
-    body: "Only the player’s browser learns the challenge. Other players do not see it, and the player does not need to reveal hole cards to keep the challenge active.",
+    title: "The challenge stays private",
+    body: "Only that player’s browser learns the challenge. The server and other players do not need the objective or the player’s hole cards while the hand is being played.",
     cards: ["7♣", "?", "K♠"],
   },
   {
-    title: "Proof after the hand",
-    body: "If the condition is met, the browser generates a Noir proof. Anyone can verify that the private challenge was valid and completed without learning the objective or the player’s hole cards.",
+    title: "The browser proves completion",
+    body: "After the hand, the browser checks whether the private condition was met. If it was, the browser generates a Noir proof for the same hidden challenge.",
     cards: ["?", "✓", "?"],
   },
   {
-    title: "One claim",
-    body: "A completed challenge awards proof points once. The public receipt can be checked again later without opening the challenge.",
+    title: "The proof is accepted once",
+    body: "The server verifies the UltraHonk proof before awarding 20 proof points. A nullifier prevents the same challenge from being claimed twice.",
     cards: ["?", "20", "✓"],
   },
 ] as const;
@@ -34,11 +41,32 @@ export default function RulesPage() {
 
       <header className="rules-hero">
         <h1>Rules</h1>
-        <p>Noir Poker uses ordinary no-limit Texas Hold&apos;em plus one private challenge between hands.</p>
+        <p>Noir Poker is normal no-limit Texas Hold&apos;em plus one private challenge between hands.</p>
         <a className="rules-poker-link" href={WSOP_RULES} target="_blank" rel="noreferrer">
           Texas Hold&apos;em rules from WSOP ↗
         </a>
       </header>
+
+      <section className="challenge-examples" aria-labelledby="challenge-examples-title">
+        <div>
+          <h2 id="challenge-examples-title">Challenge examples</h2>
+          <p>These are real entries from the fixed challenge catalog used by the circuit.</p>
+        </div>
+        <div className="challenge-example-grid">
+          {CHALLENGES.map((challenge) => (
+            <article key={challenge.title}>
+              <div className="challenge-example-cards" aria-hidden="true">
+                {challenge.cards.map((card, index) => (
+                  <span className={card === "?" ? "challenge-example-sealed" : ""} key={`${card}-${index}`}>
+                    {card}
+                  </span>
+                ))}
+              </div>
+              <strong>{challenge.title}</strong>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <section className="rules-list" aria-label="Private challenge rules">
         {CHALLENGE_RULES.map((rule, index) => (
@@ -60,6 +88,23 @@ export default function RulesPage() {
             </div>
           </article>
         ))}
+      </section>
+
+      <section className="challenge-proof-help" aria-labelledby="challenge-proof-help-title">
+        <div>
+          <h2 id="challenge-proof-help-title">Checking another player&apos;s proof</h2>
+          <p>
+            Every accepted challenge has a public receipt at <code>/proof/&lt;nullifier&gt;</code>. Open
+            that link and the browser verifies both UltraHonk proofs locally. The challenge and hole
+            cards are not revealed.
+          </p>
+        </div>
+        <div>
+          <h3>Download</h3>
+          <p>Use <strong>Export JSON</strong> on the receipt page to save the proof receipt.</p>
+          <h3>Verify from the repository</h3>
+          <code>npm --prefix apps/web run proof:verify -- receipt.json</code>
+        </div>
       </section>
 
       <footer className="rules-links">
