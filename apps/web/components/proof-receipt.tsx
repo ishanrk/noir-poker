@@ -98,7 +98,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
     );
     const link = document.createElement("a");
     link.href = url;
-    link.download = `noir-poker-bounty-${receipt.nullifier.slice(0, 12)}.json`;
+    link.download = `noir-poker-challenge-${receipt.nullifier.slice(0, 12)}.json`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -109,17 +109,17 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
       <SiteHeader compact />
       <header className="receipt-hero">
         <div>
-          <p className="eyebrow">Public bounty verifier</p>
-          <h1>{verified ? "The bounty was earned." : "Verifying a sealed bounty."}</h1>
+          <p className="eyebrow">Public challenge verifier</p>
+          <h1>{verified ? "The challenge was completed." : "Verifying a private challenge."}</h1>
           <p>
-            This browser checks both UltraHonk proofs. The objective and the private fact vector
-            never appear in the receipt.
+            This browser checks both UltraHonk proofs. The challenge and private fact vector never
+            appear in the receipt.
           </p>
         </div>
         <div className="receipt-seal" data-verified={verified}>
-          <span>Hidden objective</span>
+          <span>Hidden challenge</span>
           <strong>{verified ? "✓" : "?"}</strong>
-          <small>{verified ? `+${receipt?.points ?? 20} proof points` : "still sealed"}</small>
+          <small>{verified ? `+${receipt?.points ?? 20} proof points` : "still private"}</small>
           <i aria-hidden="true" />
         </div>
       </header>
@@ -132,7 +132,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
         </div>
         <div data-state={draw}>
           <span>02</span>
-          <p>Hidden draw proof</p>
+          <p>Private selection proof</p>
           <strong>{status(draw)}</strong>
         </div>
         <div data-state={completion}>
@@ -153,11 +153,11 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
         <section className="receipt-statement">
           <div className="section-index">
             <span>Statement</span>
-            <p>What was proved</p>
+            <p>Proof statement</p>
           </div>
           <div>
             <h2>
-              A committed secret selected one valid catalog leaf, and that same hidden leaf was
+              A committed secret selected one valid challenge, and that same hidden challenge was
               satisfied by the committed hand facts.
             </h2>
             <div className="statement-grid">
@@ -169,7 +169,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
               </article>
               <article>
                 <span>Hidden</span>
-                <strong>Objective, secret, Merkle path and six hand facts</strong>
+                <strong>Challenge, secret, Merkle path and six hand facts</strong>
               </article>
               <article>
                 <span>Toolchain</span>
@@ -198,7 +198,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
             Export JSON
           </button>
         </details>
-        <Link href="/protocol#bounties">Read the exact circuit statement →</Link>
+        <Link href="/protocol#challenge">Read the exact circuit statement →</Link>
       </section>
     </main>
   );
