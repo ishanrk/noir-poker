@@ -7,6 +7,7 @@ import "./globals.css";
 import "./pages.css";
 import "./refine.css";
 import "./finish.css";
+import "./protocol-v2.css";
 
 export const metadata: Metadata = {
   title: "Noir Poker",
