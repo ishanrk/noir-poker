@@ -28,8 +28,11 @@
  M artifacts/failure/deal-test.log
  M artifacts/failure/diff-check.log
  D artifacts/failure/diff-stat.txt
+ M artifacts/failure/generated.patch
  M artifacts/failure/next-build.log
- M artifacts/failure/npm-ci.log
+ M artifacts/failure/postgres-persistence.log
+ M artifacts/failure/real-claim.log
+ M artifacts/failure/real-proof.log
  M artifacts/failure/receipt-test.log
  D artifacts/failure/source/deal-core.rs
  D artifacts/failure/source/deal.test.ts
@@ -40,6 +43,7 @@
  D artifacts/failure/source/receipt.ts
  M artifacts/failure/status-short.txt
  M artifacts/failure/status.txt
+ M artifacts/failure/zk-build.log
  M crates/challenge-core/src/lib.rs
  M crates/game-core/Cargo.toml
  M crates/game-core/src/card.rs
@@ -56,12 +60,6 @@
 ?? apps/web/lib/deal.ts
 ?? apps/web/lib/receipt.test.ts
 ?? apps/web/scripts/verify-deal.mjs
-?? artifacts/failure/generated.patch
-?? artifacts/failure/patch-check.log
-?? artifacts/failure/postgres-persistence.log
-?? artifacts/failure/real-claim.log
-?? artifacts/failure/real-proof.log
-?? artifacts/failure/zk-build.log
 ?? crates/deal-core/
 ?? tools/regen/__pycache__/
 ?? tools/regen/apply.py

@@ -25,7 +25,7 @@
 == real-proof ==
 0
 == real-claim ==
-101
+0
 == diff-check ==
 0
 == patch-check ==

@@ -784,7 +784,7 @@ index 0000000..71a23ba
 +    }
 +}
 diff --git a/apps/server/src/main.rs b/apps/server/src/main.rs
-index 058be4d..dd3d5ac 100644
+index 058be4d..3f09a48 100644
 --- a/apps/server/src/main.rs
 +++ b/apps/server/src/main.rs
 @@ -1,4 +1,5 @@
@@ -1410,6 +1410,24 @@ index 058be4d..dd3d5ac 100644
          hole: game.hole[seat].map(card_view),
          board: game.board.iter().copied().map(card_view).collect(),
          pot: game.pot,
+@@ -2875,7 +3146,7 @@ mod tests {
+         let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
+         let db = Db::connect(&url).await.unwrap();
+ 
+-        sqlx::query("TRUNCATE challenge_assignments, hand_actions, hands, seats, rooms")
++        sqlx::query("TRUNCATE hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+             .execute(db.pool())
+             .await
+             .unwrap();
+@@ -3903,7 +4174,7 @@ mod tests {
+         let bb = std::env::var("BB_PATH").expect("BB_PATH");
+         let db = Db::connect(&url).await.unwrap();
+ 
+-        sqlx::query("TRUNCATE challenge_assignments, hand_actions, hands, seats, rooms")
++        sqlx::query("TRUNCATE hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+             .execute(db.pool())
+             .await
+             .unwrap();
 diff --git a/apps/server/src/room.rs b/apps/server/src/room.rs
 index 6ca4bf4..c3415ba 100644
 --- a/apps/server/src/room.rs
