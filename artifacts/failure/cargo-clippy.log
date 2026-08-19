@@ -2,28 +2,4 @@
 [1m[92m    Checking[0m challenge-core v0.1.0 (/home/runner/work/noir-poker/noir-poker/crates/challenge-core)
 [1m[92m    Checking[0m game-core v0.1.0 (/home/runner/work/noir-poker/noir-poker/crates/game-core)
 [1m[92m    Checking[0m server v0.1.0 (/home/runner/work/noir-poker/noir-poker/apps/server)
-[1m[91merror[0m[1m: function `secure_seed` is never used[0m
-    [1m[94m--> [0mapps/server/src/main.rs:1270:4
-     [1m[94m|[0m
-[1m[94m1270[0m [1m[94m|[0m fn secure_seed() -> Result<[u8; 32], getrandom::Error> {
-     [1m[94m|[0m    [1m[91m^^^^^^^^^^^[0m
-     [1m[94m|[0m
-     [1m[94m= [0m[1mnote[0m: `-D dead-code` implied by `-D warnings`
-     [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(dead_code)]`
-
-[1m[91merror[0m[1m: struct `ReadyUpdate` is never constructed[0m
-  [1m[94m--> [0mapps/server/src/db.rs:25:12
-   [1m[94m|[0m
-[1m[94m25[0m [1m[94m|[0m pub struct ReadyUpdate<'a> {
-   [1m[94m|[0m            [1m[91m^^^^^^^^^^^[0m
-
-[1m[91merror[0m[1m: method `ready` is never used[0m
-   [1m[94m--> [0mapps/server/src/db.rs:281:18
-    [1m[94m|[0m
-[1m[94m191[0m [1m[94m|[0m impl Db {
-    [1m[94m|[0m [1m[94m-------[0m [1m[94mmethod in this implementation[0m
-[1m[94m...[0m
-[1m[94m281[0m [1m[94m|[0m     pub async fn ready(&self, ready: ReadyUpdate<'_>) -> DbResult<()> {
-    [1m[94m|[0m                  [1m[91m^^^^^[0m
-
-[1m[91merror[0m: could not compile `server` (bin "server" test) due to 3 previous errors
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 2.52s

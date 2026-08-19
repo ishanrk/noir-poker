@@ -3,18 +3,18 @@
 == cargo-fmt ==
 0
 == cargo-test ==
-101
+0
 == cargo-clippy ==
-101
+0
 == npm-ci ==
 0
 == challenge-test ==
 0
 == deal-test ==
-1
+0
 == receipt-test ==
-1
+0
 == eslint ==
-1
+0
 == next-build ==
-1
+0

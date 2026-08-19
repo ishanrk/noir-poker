@@ -2,12 +2,3 @@
 > noir-poker-web@0.1.0 lint
 > eslint .
 
-
-/home/runner/work/noir-poker/noir-poker/apps/web/app/protocol/page.tsx
-  24:27  error  `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`  react/no-unescaped-entities
-  24:36  error  `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`  react/no-unescaped-entities
-  29:38  error  `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`  react/no-unescaped-entities
-  29:47  error  `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`  react/no-unescaped-entities
-
-✖ 4 problems (4 errors, 0 warnings)
-

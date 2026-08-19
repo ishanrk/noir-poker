@@ -3,7 +3,7 @@
 > next build
 
 ▲ Next.js 16.3.1 (Turbopack)
-✓ Running next.config.ts took 23ms
+✓ Running next.config.ts took 40ms
 ⚠ No build cache found. Please configure build caching for faster rebuilds. Read more: https://nextjs.org/docs/messages/no-cache
 Attention: Next.js now collects completely anonymous telemetry regarding usage.
 This information is used to shape Next.js' roadmap and prioritize features.
@@ -14,18 +14,26 @@ https://nextjs.org/telemetry
   ⨯ useTypeScriptCli
 
   Creating an optimized production build ...
-✓ Compiled successfully in 4.3s
+✓ Compiled successfully in 4.6s
   Running TypeScript ...
-Failed to type check.
+  Finished TypeScript in 3.1s ...
+  Collecting page data using 3 workers ...
+  Generating static pages using 3 workers (0/4) ...
+  Generating static pages using 3 workers (1/4) 
+  Generating static pages using 3 workers (2/4) 
+  Generating static pages using 3 workers (3/4) 
+✓ Generating static pages using 3 workers (4/4) in 237ms
+  Finalizing page optimization ...
 
-./components/protocol-demo.tsx:14:45
-Type error: BigInt literals are not available when targeting lower than ES2020.
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /audit/[room]/[hand]
+├ ƒ /proof/[nullifier]
+├ ○ /protocol
+└ ƒ /table/[room]
 
-  [90m12 |[0m   [36mconst[0m [step, setStep] = useState([35m0[0m);
-  [90m13 |[0m   [36mconst[0m values = useMemo(() => {
-[31m[1m>[0m [90m14 |[0m     [36mconst[0m commitment = dealCommitment([33mROOM[0m, [35m7[0mn, [33mSECRET[0m);
-  [90m   |[0m                                             [31m[1m^[0m
-  [90m15 |[0m     [36mconst[0m seed = dealSeed([33mROOM[0m, [35m7[0mn, [33mSECRET[0m, [33mSHARES[0m);
-  [90m16 |[0m     [36mconst[0m deck = shuffleDeck(seed);
-  [90m17 |[0m     [36mreturn[0m { commitment, seed, deck, layout: dealLayout(deck, [35m3[0m, [35m1[0m) };
-Next.js build worker exited with code: 1 and signal: null
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

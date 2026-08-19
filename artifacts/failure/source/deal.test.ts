@@ -14,23 +14,25 @@ import {
 const room = "00112233-4455-6677-8899-aabbccddeeff";
 const secret = Uint8Array.from({ length: 32 }, () => 0x11);
 const shares = [0x22, 0x33, 0x44].map((byte) => Uint8Array.from({ length: 32 }, () => byte));
-const commitment = dealCommitment(room, 7n, secret);
-const seed = dealSeed(room, 7n, secret, shares);
+const commitment = dealCommitment(room, BigInt(7), secret);
+const seed = dealSeed(room, BigInt(7), secret, shares);
 const deck = shuffleDeck(seed);
 
 assert.equal(encodeHex(commitment), "e11f12bea858c9319b49f596f39f61976f5085010dd16069661ee759f7cda74a");
-assert.equal(encodeHex(seed), "7ee43ff91db755fb8deb2734d1c484ef9dcdfd0249cdab154ba10c467783db1f");
+assert.equal(encodeHex(seed), "2804b581997cff7e45e6801f10130d4638188c6c19115f7741273282cbef08bd");
 assert.deepEqual(deck, [
-  25, 11, 16, 18, 43, 9, 2, 17, 3, 42, 1, 15, 30, 8, 37, 20, 22, 38, 33, 49,
-  28, 26, 19, 4, 12, 45, 23, 14, 0, 7, 51, 13, 10, 21, 50, 31, 6, 39, 36, 29,
-  46, 44, 34, 5, 40, 35, 32, 47, 27, 41, 24, 48,
+  38, 18, 43, 22, 5, 11, 33, 35, 47, 24, 32, 25,
+  23, 2, 6, 46, 48, 27, 4, 3, 44, 42, 15, 13,
+  39, 30, 49, 41, 7, 1, 12, 37, 9, 10, 20, 40,
+  17, 21, 0, 29, 36, 8, 26, 16, 14, 28, 19, 51,
+  50, 31, 45, 34,
 ]);
 assert.deepEqual(dealLayout(deck, 3, 1), {
-  hole: [[11, 43], [16, 9], [25, 18]],
-  burns: [2, 1, 30],
-  board: [17, 3, 42, 15, 8],
+  hole: [[18, 5], [43, 11], [38, 22]],
+  burns: [33, 32, 23],
+  board: [35, 47, 24, 25, 2],
 });
-assert.deepEqual(deck.slice(0, 5).map(cardValue), ["A♦", "K♣", "5♦", "7♦", "6♠"]);
+assert.deepEqual(deck.slice(0, 5).map(cardValue), ["A♥", "7♦", "6♠", "J♦", "7♣"]);
 assert.equal(decodeHex(encodeHex(seed)).length, 32);
 
 const audit = {

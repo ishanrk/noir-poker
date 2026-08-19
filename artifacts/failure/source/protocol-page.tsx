@@ -21,12 +21,12 @@ export default function ProtocolPage() {
           <h2>The server cannot wait for every player input and then search for a favorable deck.</h2>
           <p>
             A room begins with a 32-byte server secret and the public value
-            <code> SHA256("NPDEAL01" || room_uuid || hand_no_be || server_secret)</code>.
+            <code> SHA256(&quot;NPDEAL01&quot; || room_uuid || hand_no_be || server_secret)</code>.
             Each browser contributes a fresh 32-byte share. The final joining player&apos;s share is
             unknown when the server commitment is fixed.
           </p>
           <p>
-            The seed is <code>SHA256("NPSEED01" || room || hand || count || ordered(seat, share) || server_secret)</code>.
+            The seed is <code>SHA256(&quot;NPSEED01&quot; || room || hand || count || ordered(seat, share) || server_secret)</code>.
             Seat bytes prevent reordering. The 52 canonical card identifiers are shuffled with
             SHA-256 counter blocks, 32-bit rejection sampling and descending Fisher–Yates swaps.
           </p>

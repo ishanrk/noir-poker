@@ -2,7 +2,7 @@ import {
   decodePublicInputs,
   verifyChallengeProofs,
   type ChallengePublicInputs,
-} from "@/lib/challenge-proof";
+} from "./challenge-proof.ts";
 import {
   CHALLENGE_POINTS,
   CHALLENGE_VERSION,
@@ -10,9 +10,9 @@ import {
   decodeHex,
   encodeHex,
   handTag,
-} from "@/lib/challenge";
-import { uuidBytes } from "@/lib/deal";
-import type { ProofReceipt } from "@/lib/server";
+} from "./challenge.ts";
+import { uuidBytes } from "./deal.ts";
+import type { ProofReceipt } from "./server.ts";
 
 const PROOF_SYSTEM = "ultra_honk";
 const CIRCUIT_ID = "challenge_v2";

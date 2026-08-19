@@ -137,11 +137,11 @@ export function uuidBytes(value: string) {
 }
 
 function* words(seed: Uint8Array) {
-  let counter = 0n;
+  let counter = BigInt(0);
 
   while (true) {
     const block = sha256(join(STREAM_DOMAIN, seed, u64(counter)));
-    counter += 1n;
+    counter += BigInt(1);
 
     for (let offset = 0; offset < block.length; offset += 4) {
       yield new DataView(block.buffer, block.byteOffset + offset, 4).getUint32(0);

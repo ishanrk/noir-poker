@@ -16,6 +16,7 @@
  M apps/web/components/proof-receipt.tsx
  M apps/web/components/seat.tsx
  M apps/web/components/table.tsx
+ M apps/web/lib/challenge-proof.ts
  M apps/web/lib/receipt.ts
  M apps/web/lib/server.ts
  M apps/web/package.json
@@ -24,8 +25,19 @@
  M artifacts/failure/cargo-clippy.log
  M artifacts/failure/cargo-test.log
  M artifacts/failure/challenge-test.log
+ M artifacts/failure/deal-test.log
+ M artifacts/failure/diff-check.log
  D artifacts/failure/diff-stat.txt
+ M artifacts/failure/eslint.log
  M artifacts/failure/next-build.log
+ M artifacts/failure/receipt-test.log
+ D artifacts/failure/source/deal-core.rs
+ D artifacts/failure/source/deal.test.ts
+ D artifacts/failure/source/deal.ts
+ D artifacts/failure/source/protocol-demo.tsx
+ D artifacts/failure/source/protocol-page.tsx
+ D artifacts/failure/source/receipt.test.ts
+ D artifacts/failure/source/receipt.ts
  M artifacts/failure/status-short.txt
  M artifacts/failure/status.txt
  M crates/challenge-core/src/lib.rs

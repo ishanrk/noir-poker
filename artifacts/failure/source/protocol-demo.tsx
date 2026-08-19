@@ -11,8 +11,8 @@ const SHARES = [0x22, 0x33, 0x44].map((byte) => new Uint8Array(32).fill(byte));
 export function ProtocolDemo() {
   const [step, setStep] = useState(0);
   const values = useMemo(() => {
-    const commitment = dealCommitment(ROOM, 7n, SECRET);
-    const seed = dealSeed(ROOM, 7n, SECRET, SHARES);
+    const commitment = dealCommitment(ROOM, BigInt(7), SECRET);
+    const seed = dealSeed(ROOM, BigInt(7), SECRET, SHARES);
     const deck = shuffleDeck(seed);
     return { commitment, seed, deck, layout: dealLayout(deck, 3, 1) };
   }, []);
