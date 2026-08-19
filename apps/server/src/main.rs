@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, broadcast};
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
 
 use crate::db::{
@@ -330,9 +330,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| "3001".to_owned())
         .parse()?;
-    let origin: HeaderValue = env::var("WEB_ORIGIN")
-        .unwrap_or_else(|_| "http://localhost:3000".to_owned())
-        .parse()?;
+    let origins = web_origins()?;
     let database_url =
         env::var("DATABASE_URL").map_err(|_| io::Error::other("DATABASE_URL missing"))?;
     let bb = env::var("BB_PATH").map_err(|_| io::Error::other("BB_PATH missing"))?;
@@ -346,11 +344,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     attach_fairness(&db, &rooms).await?;
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
 
-    axum::serve(listener, app(AppState::new(db, rooms, proof), origin)).await?;
+    axum::serve(
+        listener,
+        app_with_origins(AppState::new(db, rooms, proof), origins),
+    )
+    .await?;
     Ok(())
 }
 
+#[cfg(test)]
 fn app(state: AppState, origin: HeaderValue) -> Router {
+    app_with_origins(state, vec![origin])
+}
+
+fn app_with_origins(state: AppState, origins: Vec<HeaderValue>) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/rooms", post(create_room))
@@ -361,10 +368,28 @@ fn app(state: AppState, origin: HeaderValue) -> Router {
         .with_state(state)
         .layer(
             CorsLayer::new()
-                .allow_origin(origin)
+                .allow_origin(AllowOrigin::list(origins))
                 .allow_methods([Method::GET, Method::POST])
                 .allow_headers([CONTENT_TYPE]),
         )
+}
+
+fn web_origins() -> Result<Vec<HeaderValue>, Box<dyn std::error::Error + Send + Sync>> {
+    let raw = env::var("WEB_ORIGINS")
+        .or_else(|_| env::var("WEB_ORIGIN"))
+        .unwrap_or_else(|_| "http://localhost:3000".to_owned());
+    let origins = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+        .map(str::parse)
+        .collect::<Result<Vec<HeaderValue>, _>>()?;
+
+    if origins.is_empty() {
+        return Err(io::Error::other("WEB_ORIGINS empty").into());
+    }
+
+    Ok(origins)
 }
 
 async fn health() -> &'static str {
