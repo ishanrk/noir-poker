@@ -115,6 +115,43 @@ def fix_main() -> None:
         raise RuntimeError("database test reset missing")
     text = text.replace(old_reset, new_reset)
 
+    latest = (
+        "        let latest_id = Uuid::new_v4();\n"
+        "        let latest_seed = [0x24; 32];\n\n"
+        "        sqlx::query(\n"
+        "            \"INSERT INTO hands (id, room_id, hand_no, seed, dealer, starting_stacks) \\\\\n"
+        "             VALUES ($1, $2, 1, $3, 1, $4)\",\n"
+        "        )\n"
+        "        .bind(latest_id)\n"
+        "        .bind(all_in_id)\n"
+        "        .bind(latest_seed.as_slice())\n"
+        "        .bind(vec![100i64, 100])\n"
+        "        .execute(db.pool())\n"
+        "        .await\n"
+        "        .unwrap();\n\n"
+        "        let stored = db\n"
+        "            .load_rooms()\n"
+        "            .await\n"
+        "            .unwrap()\n"
+        "            .into_iter()\n"
+        "            .find(|room| room.id == all_in_id)\n"
+        "            .unwrap();\n\n"
+        "        assert!(restore_room(stored).is_err());\n"
+        "        sqlx::query(\"DELETE FROM hands WHERE id = $1\")\n"
+        "            .bind(latest_id)\n"
+        "            .execute(db.pool())\n"
+        "            .await\n"
+        "            .unwrap();\n"
+    )
+    text = sub_one(
+        text,
+        r"        let latest_id = Uuid::new_v4\(\);\n"
+        r"        let latest_seed = \[0x24; 32\];.*?"
+        r"        same_game\(&restored_hand\.game, &expected\);\n",
+        latest,
+        "invalid synthetic latest hand fixture",
+    )
+
     MAIN.write_text(text)
 
 
