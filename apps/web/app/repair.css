@@ -100,8 +100,206 @@
   opacity: 1;
 }
 
+/* tactile player controls */
+.action-copy span,
+.header-mark,
+.eyebrow,
+.protocol-label,
+.section-index,
+.form-heading > span,
+.mode-switch small,
+.scale-control output,
+.scale-ticks,
+.seat-panel small,
+.private-challenge span,
+.private-challenge small,
+.player-proof-line,
+.challenge-proofs header span {
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.plain-actions {
+  gap: 10px;
+  border: 0;
+}
+
+.plain-actions button,
+.raise-presets button,
+.raise-submit,
+.next-hand-action,
+.primary-action,
+.text-action,
+.private-challenge button,
+.player-proof-line button,
+.waiting-room button,
+.room-status button,
+.seat-scale label span {
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  clip-path: polygon(5px 0, calc(100% - 5px) 0, 100% 5px, 100% calc(100% - 5px), calc(100% - 5px) 100%, 5px 100%, 0 calc(100% - 5px), 0 5px);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 4px 0 var(--line-strong);
+  transform: translateY(0);
+  transition: transform 110ms ease, box-shadow 110ms ease, border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.plain-actions button:not(:disabled):hover,
+.raise-presets button:not(:disabled):hover,
+.private-challenge button:not(:disabled):hover,
+.player-proof-line button:not(:disabled):hover,
+.waiting-room button:not(:disabled):hover,
+.room-status button:not(:disabled):hover,
+.seat-scale label:hover span {
+  border-color: var(--blue);
+  color: var(--blue);
+  transform: translateY(-1px);
+  box-shadow: 0 5px 0 var(--line-strong);
+}
+
+.plain-actions button:not(:disabled):active,
+.raise-presets button:not(:disabled):active,
+.raise-submit:not(:disabled):active,
+.next-hand-action:not(:disabled):active,
+.primary-action:not(:disabled):active,
+.text-action:not(:disabled):active,
+.private-challenge button:not(:disabled):active,
+.player-proof-line button:not(:disabled):active,
+.waiting-room button:not(:disabled):active,
+.room-status button:not(:disabled):active,
+.seat-scale label:active span {
+  transform: translateY(4px);
+  box-shadow: 0 0 0 transparent;
+}
+
+.raise-submit,
+.next-hand-action,
+.primary-action {
+  border-color: var(--blue);
+  background: var(--blue);
+  color: white;
+  box-shadow: 0 4px 0 var(--blue-dark), 4px 7px 0 var(--lime);
+}
+
+.raise-submit:not(:disabled):hover,
+.next-hand-action:not(:disabled):hover,
+.primary-action:not(:disabled):hover {
+  border-color: var(--blue-dark);
+  background: var(--blue-dark);
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 5px 0 var(--blue-dark), 4px 8px 0 var(--lime);
+}
+
+.text-action {
+  min-height: 38px;
+  padding: 0 14px;
+  border-width: 1px;
+  text-decoration: none;
+}
+
+.next-hand-action {
+  width: fit-content;
+  min-width: 220px;
+  justify-self: start;
+}
+
+.raise-presets {
+  gap: 8px;
+}
+
+.raise-control input[type="range"],
+.scale-control input[type="range"] {
+  height: 30px;
+}
+
+.raise-control input[type="range"]::-webkit-slider-runnable-track,
+.scale-control input[type="range"]::-webkit-slider-runnable-track {
+  height: 7px;
+  border: 1px solid var(--line-strong);
+  background: linear-gradient(180deg, var(--paper), var(--line));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 85%);
+}
+
+.raise-control input[type="range"]::-moz-range-track,
+.scale-control input[type="range"]::-moz-range-track {
+  height: 7px;
+  border: 1px solid var(--line-strong);
+  background: linear-gradient(180deg, var(--paper), var(--line));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 85%);
+}
+
+.raise-control input[type="range"]::-webkit-slider-thumb,
+.scale-control input[type="range"]::-webkit-slider-thumb {
+  width: 24px;
+  height: 27px;
+  margin-top: -11px;
+  border: 2px solid var(--blue);
+  clip-path: polygon(4px 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 0 calc(100% - 4px), 0 4px);
+  background: var(--lime);
+  box-shadow: 0 4px 0 var(--blue-dark);
+}
+
+.raise-control input[type="range"]::-moz-range-thumb,
+.scale-control input[type="range"]::-moz-range-thumb {
+  width: 24px;
+  height: 27px;
+  border: 2px solid var(--blue);
+  border-radius: 0;
+  background: var(--lime);
+  box-shadow: 0 4px 0 var(--blue-dark);
+}
+
+.raise-control input[type="range"]:active::-webkit-slider-thumb,
+.scale-control input[type="range"]:active::-webkit-slider-thumb {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--blue-dark);
+}
+
+.mode-switch label > span {
+  box-shadow: 0 4px 0 var(--line-strong);
+}
+
+.mode-switch label:active > span {
+  transform: translateY(4px);
+  box-shadow: 0 0 0 transparent;
+}
+
+.mode-switch input:checked + span {
+  box-shadow: 0 4px 0 var(--blue-dark), 4px 7px 0 var(--lime);
+}
+
 @media (max-width: 700px) {
   .proof-receipt-preview .verification-timeline {
     grid-template-columns: 1fr;
+  }
+
+  .plain-actions {
+    gap: 7px;
+  }
+
+  .next-hand-action {
+    min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plain-actions button,
+  .raise-presets button,
+  .raise-submit,
+  .next-hand-action,
+  .primary-action,
+  .text-action,
+  .private-challenge button,
+  .player-proof-line button,
+  .waiting-room button,
+  .room-status button,
+  .seat-scale label span,
+  .mode-switch label > span {
+    transition: none;
   }
 }
