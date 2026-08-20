@@ -148,7 +148,7 @@ export function Lobby() {
             />
             <span>
               <strong>Single Player</strong>
-              <small>You plus bots</small>
+              <small>You + bots</small>
             </span>
           </label>
           <label>
@@ -164,7 +164,7 @@ export function Lobby() {
             />
             <span>
               <strong>Multiplayer</strong>
-              <small>No wallet</small>
+              <small>2–6 players</small>
             </span>
           </label>
           <label>
@@ -180,7 +180,7 @@ export function Lobby() {
             />
             <span>
               <strong>Aztec Poker</strong>
-              <small>Private PLAY</small>
+              <small>Private play</small>
             </span>
           </label>
         </div>

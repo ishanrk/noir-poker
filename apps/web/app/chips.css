@@ -1,11 +1,11 @@
 .mode-switch {
-  margin: 42px 0 0;
+  margin: 30px 0 0;
   padding: 0;
   border: 0;
 }
 
 .mode-switch legend {
-  margin-bottom: 9px;
+  margin-bottom: 11px;
   color: #535a63;
   font-size: 12px;
   font-weight: 700;
@@ -13,16 +13,18 @@
 
 .mode-switch > div {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  border: 1px solid var(--line-strong);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  border: 0;
 }
 
 .mode-switch label {
   position: relative;
+  min-width: 0;
 }
 
 .mode-switch label + label {
-  border-left: 1px solid var(--line-strong);
+  border: 0;
 }
 
 .mode-switch input {
@@ -32,30 +34,52 @@
 
 .mode-switch label > span {
   display: grid;
-  min-height: 62px;
+  min-height: 78px;
   align-content: center;
-  gap: 3px;
-  padding: 0 18px;
+  gap: 5px;
+  padding: 14px 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--paper);
   cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .mode-switch strong {
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 500;
+  line-height: 1.05;
 }
 
 .mode-switch small {
   color: var(--muted);
   font-family: "Courier New", monospace;
   font-size: 9px;
-  letter-spacing: .06em;
+  line-height: 1.2;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
+.mode-switch label:hover > span {
+  border-color: var(--blue);
+  transform: translateY(-2px);
+}
+
+.mode-switch label:active > span {
+  transform: translateY(0);
+}
+
 .mode-switch input:checked + span {
+  border-color: var(--blue);
   color: white;
   background: var(--blue);
+  box-shadow: 4px 4px 0 var(--lime);
 }
 
 .mode-switch input:checked + span small {
@@ -64,7 +88,7 @@
 
 .mode-switch input:focus-visible + span {
   outline: 3px solid var(--lime);
-  outline-offset: -3px;
+  outline-offset: 3px;
 }
 
 .aztec-connect {
@@ -359,12 +383,24 @@
 }
 
 @media (max-width: 700px) {
-  .mode-switch > div,
+  .mode-switch > div {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .mode-switch label + label {
+    border: 0;
+  }
+
+  .mode-switch label > span {
+    min-height: 64px;
+    padding: 12px 14px;
+  }
+
   .aztec-stakes {
     grid-template-columns: 1fr;
   }
 
-  .mode-switch label + label,
   .aztec-stakes > div + div {
     padding-left: 0;
     border-left: 0;
@@ -393,5 +429,16 @@
   .chips-network {
     grid-template-columns: 1fr;
     gap: 6px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mode-switch label > span {
+    transition: none;
+  }
+
+  .mode-switch label:hover > span,
+  .mode-switch label:active > span {
+    transform: none;
   }
 }
