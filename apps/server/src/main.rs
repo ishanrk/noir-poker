@@ -39,8 +39,8 @@ use crate::proof::{
 };
 use crate::room::{
     Ceremony, Challenge, Challenges, HandResult, HandResultKind, JoinError, LiveHand, PendingClaim,
-    PendingDraw, PlayedAction, Room, RoomConfig, Seat, TokenHash, bind_facts, replay_hand,
-    start_game,
+    PendingDraw, PlayedAction, Room, RoomConfig, RoomMode, Seat, TokenHash, bind_facts,
+    replay_hand, start_game,
 };
 
 type HttpError = (StatusCode, &'static str);
@@ -87,6 +87,7 @@ struct CreateRoomRequest {
     small_blind: u32,
     big_blind: u32,
     entropy: String,
+    mode: Option<RoomMode>,
 }
 
 impl CreateRoomRequest {
@@ -97,6 +98,10 @@ impl CreateRoomRequest {
             small_blind: self.small_blind,
             big_blind: self.big_blind,
         }
+    }
+
+    fn mode(&self) -> RoomMode {
+        self.mode.unwrap_or(RoomMode::Multiplayer)
     }
 }
 
@@ -514,6 +519,7 @@ async fn create_room(
     Json(request): Json<CreateRoomRequest>,
 ) -> Result<(StatusCode, Json<SeatResponse>), HttpError> {
     let config = request.config();
+    let mode = request.mode();
     config
         .validate()
         .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
@@ -528,12 +534,20 @@ async fn create_room(
             "cannot create deal ceremony",
         )
     })?;
-    let room = Room::new_fair(config, token_hash, ceremony.clone(), share)
+    let room = Room::new_fair(config, mode, token_hash, ceremony.clone(), share)
         .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
 
-    fairness::create_room(&state.db, id, config, &token_hash, &ceremony, share)
-        .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot create room"))?;
+    fairness::create_room(
+        &state.db,
+        id,
+        config,
+        room.mode,
+        &token_hash,
+        &ceremony,
+        share,
+    )
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot create room"))?;
     state
         .rooms
         .lock()
@@ -1396,6 +1410,7 @@ fn restore_rooms(stored: Vec<StoredRoom>) -> Result<HashMap<Uuid, Arc<Mutex<Room
 
 fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
     let id = stored.id;
+    let mode = RoomMode::parse(&stored.mode).ok_or_else(|| recovery_error(id, "invalid mode"))?;
     let config = RoomConfig {
         players: usize::try_from(stored.players)
             .map_err(|_| recovery_error(id, "invalid player count"))?,
@@ -1542,6 +1557,7 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
 
     Ok(Room {
         config,
+        mode,
         seats,
         hand,
         current_commitment: None,
@@ -2104,6 +2120,7 @@ mod tests {
     fn stored_room() -> StoredRoom {
         StoredRoom {
             id: TEST_ROOM,
+            mode: "multiplayer".to_owned(),
             players: 2,
             stack: 1000,
             small_blind: 5,
@@ -2262,6 +2279,35 @@ mod tests {
         assert_eq!(room.seats[0].token_hash, token_hash);
         assert!(room.hand.is_none());
         assert_eq!(room.rev, 0);
+        assert_eq!(room.mode, RoomMode::Multiplayer);
+    }
+
+    #[test]
+    fn room_modes() {
+        let request: CreateRoomRequest = serde_json::from_str(
+            r#"{"players":2,"stack":100,"small_blind":5,"big_blind":10,"entropy":"00"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(request.mode(), RoomMode::Multiplayer);
+
+        for (text, mode) in [
+            ("single", RoomMode::Single),
+            ("multiplayer", RoomMode::Multiplayer),
+            ("aztec", RoomMode::Aztec),
+        ] {
+            let request: CreateRoomRequest = serde_json::from_str(&format!(
+                r#"{{"players":2,"stack":100,"small_blind":5,"big_blind":10,"entropy":"00","mode":"{text}"}}"#
+            ))
+            .unwrap();
+
+            assert_eq!(request.mode(), mode);
+        }
+
+        assert!(serde_json::from_str::<CreateRoomRequest>(
+            r#"{"players":2,"stack":100,"small_blind":5,"big_blind":10,"entropy":"00","mode":"invalid"}"#
+        )
+        .is_err());
     }
 
     #[test]
@@ -3182,10 +3228,8 @@ mod tests {
 
         db.create_room(
             waiting_id,
-            waiting_config.players,
-            waiting_config.stack,
-            waiting_config.small_blind,
-            waiting_config.big_blind,
+            waiting_config,
+            RoomMode::Single,
             &hash_token(waiting_first),
         )
         .await
@@ -3197,6 +3241,7 @@ mod tests {
         let waiting = reload(&db, waiting_id).await;
 
         assert_eq!(waiting.seats.len(), 2);
+        assert_eq!(waiting.mode, RoomMode::Single);
         assert!(waiting.hand.is_none());
         assert_eq!(waiting.rev, 1);
         assert_eq!(waiting.next_seat(), Ok(2));
@@ -3215,16 +3260,9 @@ mod tests {
         let first = Uuid::new_v4();
         let first_hash = hash_token(first);
 
-        db.create_room(
-            id,
-            config.players,
-            config.stack,
-            config.small_blind,
-            config.big_blind,
-            &first_hash,
-        )
-        .await
-        .unwrap();
+        db.create_room(id, config, RoomMode::Aztec, &first_hash)
+            .await
+            .unwrap();
 
         let row = sqlx::query(
             "SELECT players, stack, small_blind, big_blind, rev FROM rooms WHERE id = $1",
@@ -3451,16 +3489,9 @@ mod tests {
         let other_hand = Uuid::new_v4();
         let mut other = Room::new(config, other_first).unwrap();
 
-        db.create_room(
-            other_id,
-            config.players,
-            config.stack,
-            config.small_blind,
-            config.big_blind,
-            &other_first,
-        )
-        .await
-        .unwrap();
+        db.create_room(other_id, config, RoomMode::Multiplayer, &other_first)
+            .await
+            .unwrap();
         db.join_room(
             other_id,
             1,
@@ -3528,10 +3559,8 @@ mod tests {
 
         db.create_room(
             all_in_id,
-            all_in_config.players,
-            all_in_config.stack,
-            all_in_config.small_blind,
-            all_in_config.big_blind,
+            all_in_config,
+            RoomMode::Multiplayer,
             &all_in_first,
         )
         .await
@@ -3625,6 +3654,7 @@ mod tests {
         let ready_ceremony = fairness::random_ceremony(ready_id, 0, ready_config.players).unwrap();
         let mut live = Room::new_fair(
             ready_config,
+            RoomMode::Multiplayer,
             ready_first_hash,
             ready_ceremony,
             ready_first_share,
@@ -3641,6 +3671,7 @@ mod tests {
             &db,
             ready_id,
             ready_config,
+            RoomMode::Multiplayer,
             &ready_first_hash,
             &ready_ceremony,
             ready_first_share,
@@ -4139,8 +4170,14 @@ mod tests {
         let short_first_share = [0x71; 32];
         let short_second_share = [0x72; 32];
         let short_ceremony = fairness::random_ceremony(short_id, 0, short_config.players).unwrap();
-        let mut short =
-            Room::new_fair(short_config, short_first, short_ceremony, short_first_share).unwrap();
+        let mut short = Room::new_fair(
+            short_config,
+            RoomMode::Multiplayer,
+            short_first,
+            short_ceremony,
+            short_first_share,
+        )
+        .unwrap();
         let short_ceremony = short.ceremony.as_ref().unwrap().clone();
         let short_seed = short_ceremony
             .seed_with(short_id, 1, short_second_share)
@@ -4152,6 +4189,7 @@ mod tests {
             &db,
             short_id,
             short_config,
+            RoomMode::Multiplayer,
             &short_first,
             &short_ceremony,
             short_first_share,
@@ -4283,16 +4321,9 @@ mod tests {
         let tokens = [Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
         let stacks = vec![config.stack; config.players];
 
-        db.create_room(
-            id,
-            config.players,
-            config.stack,
-            config.small_blind,
-            config.big_blind,
-            &hash_token(tokens[0]),
-        )
-        .await
-        .unwrap();
+        db.create_room(id, config, RoomMode::Multiplayer, &hash_token(tokens[0]))
+            .await
+            .unwrap();
         db.join_room(id, 1, &hash_token(tokens[1]), 0, 1, None)
             .await
             .unwrap();

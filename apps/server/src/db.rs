@@ -8,6 +8,8 @@ use sqlx::{PgPool, Row, query};
 use uuid::Uuid;
 
 use crate::room::FactCommitment;
+#[cfg(test)]
+use crate::room::{RoomConfig, RoomMode};
 
 type DbResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -99,6 +101,7 @@ pub struct NewAction<'a> {
 #[derive(Clone)]
 pub struct StoredRoom {
     pub id: Uuid,
+    pub mode: String,
     pub players: i32,
     pub stack: i64,
     pub small_blind: i64,
@@ -190,23 +193,22 @@ impl Db {
     pub async fn create_room(
         &self,
         id: Uuid,
-        players: usize,
-        stack: u32,
-        small_blind: u32,
-        big_blind: u32,
+        config: RoomConfig,
+        mode: RoomMode,
         token_hash: &[u8; 32],
     ) -> DbResult<()> {
         let mut tx = self.pool.begin().await?;
 
         query(
-            "INSERT INTO rooms (id, players, stack, small_blind, big_blind, rev) \
-             VALUES ($1, $2, $3, $4, $5, 0)",
+            "INSERT INTO rooms (id, mode, players, stack, small_blind, big_blind, rev) \
+             VALUES ($1, $2, $3, $4, $5, $6, 0)",
         )
         .bind(id)
-        .bind(i32::try_from(players)?)
-        .bind(i64::from(stack))
-        .bind(i64::from(small_blind))
-        .bind(i64::from(big_blind))
+        .bind(mode.text())
+        .bind(i32::try_from(config.players)?)
+        .bind(i64::from(config.stack))
+        .bind(i64::from(config.small_blind))
+        .bind(i64::from(config.big_blind))
         .execute(&mut *tx)
         .await?;
         query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, 0, $2)")
@@ -540,10 +542,11 @@ impl Db {
     }
 
     pub async fn load_rooms(&self) -> DbResult<Vec<StoredRoom>> {
-        let rows =
-            query("SELECT id, players, stack, small_blind, big_blind, rev FROM rooms ORDER BY id")
-                .fetch_all(&self.pool)
-                .await?;
+        let rows = query(
+            "SELECT id, mode, players, stack, small_blind, big_blind, rev FROM rooms ORDER BY id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
         let mut rooms = Vec::with_capacity(rows.len());
 
         for row in rows {
@@ -554,6 +557,7 @@ impl Db {
 
             rooms.push(StoredRoom {
                 id,
+                mode: row.try_get("mode")?,
                 players: row.try_get("players")?,
                 stack: row.try_get("stack")?,
                 small_blind: row.try_get("small_blind")?,

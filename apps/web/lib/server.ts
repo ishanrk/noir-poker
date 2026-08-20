@@ -19,7 +19,10 @@ export type RoomConfig = {
   stack: number;
   small_blind: number;
   big_blind: number;
+  mode?: RoomMode;
 };
+
+export type RoomMode = "single" | "multiplayer" | "aztec";
 
 export type RoomSeat = {
   seat: number;

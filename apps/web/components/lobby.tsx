@@ -91,6 +91,7 @@ export function Lobby() {
         stack,
         small_blind: smallBlind,
         big_blind: bigBlind,
+        mode: mode === "aztec" ? "aztec" : "multiplayer",
       });
 
       if (mode === "aztec" && aztec) {

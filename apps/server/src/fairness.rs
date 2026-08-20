@@ -6,7 +6,7 @@ use sqlx::{Postgres, Row, Transaction, query};
 use uuid::Uuid;
 
 use crate::db::{Db, NewHand, StoredAction, StoredHand};
-use crate::room::{Ceremony, RoomConfig};
+use crate::room::{Ceremony, RoomConfig, RoomMode};
 
 type FairResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -84,6 +84,7 @@ pub async fn create_room(
     db: &Db,
     id: Uuid,
     config: RoomConfig,
+    mode: RoomMode,
     token_hash: &[u8; 32],
     ceremony: &Ceremony,
     share: [u8; 32],
@@ -91,10 +92,11 @@ pub async fn create_room(
     let mut tx = db.pool().begin().await?;
 
     query(
-        "INSERT INTO rooms (id, players, stack, small_blind, big_blind, rev) \
-         VALUES ($1, $2, $3, $4, $5, 0)",
+        "INSERT INTO rooms (id, mode, players, stack, small_blind, big_blind, rev) \
+         VALUES ($1, $2, $3, $4, $5, $6, 0)",
     )
     .bind(id)
+    .bind(mode.text())
     .bind(i32::try_from(config.players)?)
     .bind(i64::from(config.stack))
     .bind(i64::from(config.small_blind))

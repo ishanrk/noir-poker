@@ -8,6 +8,33 @@ pub(super) type TokenHash = [u8; 32];
 pub(super) type Challenges = Vec<Option<Challenge>>;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum RoomMode {
+    Single,
+    Multiplayer,
+    Aztec,
+}
+
+impl RoomMode {
+    pub(super) const fn text(self) -> &'static str {
+        match self {
+            Self::Single => "single",
+            Self::Multiplayer => "multiplayer",
+            Self::Aztec => "aztec",
+        }
+    }
+
+    pub(super) fn parse(text: &str) -> Option<Self> {
+        match text {
+            "single" => Some(Self::Single),
+            "multiplayer" => Some(Self::Multiplayer),
+            "aztec" => Some(Self::Aztec),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 pub(super) struct RoomConfig {
     pub(super) players: usize,
     pub(super) stack: u32,
@@ -45,6 +72,7 @@ impl RoomConfig {
 
 pub(super) struct Room {
     pub(super) config: RoomConfig,
+    pub(super) mode: RoomMode,
     pub(super) seats: Vec<Seat>,
     pub(super) hand: Option<LiveHand>,
     pub(super) current_commitment: Option<[u8; 32]>,
@@ -56,12 +84,22 @@ pub(super) struct Room {
 }
 
 impl Room {
+    #[cfg(test)]
     pub(super) fn new(config: RoomConfig, token_hash: TokenHash) -> Result<Self, &'static str> {
+        Self::new_with_mode(config, RoomMode::Multiplayer, token_hash)
+    }
+
+    fn new_with_mode(
+        config: RoomConfig,
+        mode: RoomMode,
+        token_hash: TokenHash,
+    ) -> Result<Self, &'static str> {
         config.validate()?;
         let (notify, _) = broadcast::channel(16);
 
         Ok(Self {
             config,
+            mode,
             seats: vec![Seat {
                 token_hash,
                 ready_hand: None,
@@ -79,11 +117,12 @@ impl Room {
 
     pub(super) fn new_fair(
         config: RoomConfig,
+        mode: RoomMode,
         token_hash: TokenHash,
         ceremony: Ceremony,
         share: [u8; 32],
     ) -> Result<Self, &'static str> {
-        let mut room = Self::new(config, token_hash)?;
+        let mut room = Self::new_with_mode(config, mode, token_hash)?;
         let mut ceremony = ceremony;
 
         ceremony.shares[0] = Some(share);
