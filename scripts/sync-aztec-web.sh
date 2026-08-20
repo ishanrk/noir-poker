@@ -4,55 +4,30 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 artifact="$root/apps/web/lib/aztec/artifacts/PlayChips.ts"
 target="$root/apps/web/lib/aztec/target/play_chips_contract-PlayChips.json"
-stamp="$root/apps/web/lib/aztec/artifacts/source.sha256"
-sources=(
-  "$root/aztec/package.json"
-  "$root/aztec/Nargo.toml"
-  "$root/aztec/play_chips_contract/Nargo.toml"
-  "$root/aztec/play_chips_contract/src/main.nr"
-)
+mode="${1:-}"
 
-source_hash="$(
-  {
-    printf 'aztec 5.1.0\0'
-    for source in "${sources[@]}"; do
-      printf '%s\0' "${source#"$root/"}"
-      cat "$source"
-    done
-  } | sha256sum | awk '{print $1}'
-)"
+case "$mode" in
+  generate | check) ;;
+  *)
+    echo "usage $0 generate or check" >&2
+    exit 1
+    ;;
+esac
 
-if test "${1:-}" != "--force" \
-  && test -s "$artifact" \
-  && test -s "$target" \
-  && test -s "$stamp" \
-  && test "$(cat "$stamp")" = "$source_hash"; then
-  exit 0
+if ! command -v aztec >/dev/null 2>&1; then
+  echo "aztec 5.1.0 required" >&2
+  exit 1
 fi
 
-ensure_aztec() {
-  local aztec_bin
+version="$(aztec --version 2>&1)"
 
-  if command -v aztec >/dev/null 2>&1 \
-    && aztec --version 2>&1 | grep -q "5.1.0"; then
-    return
-  fi
-
-  # install pinned toolchain when missing
-  printf 'Y\n' | VERSION=5.1.0 bash -i <(curl -fsSL https://install.aztec.network/5.1.0)
-
-  if test -x "$HOME/.aztec/bin/aztec"; then
-    aztec_bin="$HOME/.aztec/bin/aztec"
-  else
-    aztec_bin="$(find -L "$HOME/.aztec" -type f -name aztec -perm -111 2>/dev/null | head -n 1)"
-  fi
-
-  test -n "$aztec_bin"
-  export PATH="$(dirname "$aztec_bin"):$PATH"
-  aztec --version 2>&1 | grep -q "5.1.0"
-}
-
-ensure_aztec
+case "$version" in
+  *5.1.0*) ;;
+  *)
+    echo "aztec 5.1.0 required found $version" >&2
+    exit 1
+    ;;
+esac
 
 (
   cd "$root/aztec"
@@ -65,7 +40,31 @@ ensure_aztec
 test -s "$root/aztec/artifacts/PlayChips.ts"
 test -s "$root/aztec/target/play_chips_contract-PlayChips.json"
 
-mkdir -p "$(dirname "$artifact")" "$(dirname "$target")"
-install -m 0644 "$root/aztec/artifacts/PlayChips.ts" "$artifact"
-install -m 0644 "$root/aztec/target/play_chips_contract-PlayChips.json" "$target"
-printf '%s\n' "$source_hash" > "$stamp"
+normalized_artifact="$(mktemp)"
+normalized_target="$(mktemp)"
+trap 'rm -f "$normalized_artifact" "$normalized_target"' EXIT
+
+sed -E 's/[[:space:]]+$//' \
+  "$root/aztec/artifacts/PlayChips.ts" >"$normalized_artifact"
+
+# stable source paths
+sed -E \
+  -e 's#("path"[[:space:]]*:[[:space:]]*")[^"]*/aztec/play_chips_contract/#\1/repo/aztec/play_chips_contract/#g' \
+  -e 's#("path"[[:space:]]*:[[:space:]]*")[^"]*/nargo/github.com/#\1/nargo/github.com/#g' \
+  "$root/aztec/target/play_chips_contract-PlayChips.json" >"$normalized_target"
+
+case "$mode" in
+  generate)
+    mkdir -p "$(dirname "$artifact")" "$(dirname "$target")"
+    install -m 0644 "$normalized_artifact" "$artifact"
+    install -m 0644 "$normalized_target" "$target"
+    ;;
+  check)
+    cmp -s "$normalized_artifact" "$artifact" \
+      && cmp -s "$normalized_target" "$target" \
+      || {
+        echo "aztec browser runtime drift" >&2
+        exit 1
+      }
+    ;;
+esac

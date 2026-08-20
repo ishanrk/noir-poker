@@ -8,10 +8,9 @@
   "scripts": {
     "runtime": "../../scripts/web-runtime.sh update",
     "runtime:check": "../../scripts/web-runtime.sh check",
-    "aztec:sync": "bash ../../scripts/sync-aztec-web.sh",
-    "predev": "npm run aztec:sync",
+    "aztec:generate": "bash ../../scripts/sync-aztec-web.sh generate",
+    "aztec:check": "bash ../../scripts/sync-aztec-web.sh check",
     "dev": "next dev",
-    "prebuild": "npm run aztec:sync",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
