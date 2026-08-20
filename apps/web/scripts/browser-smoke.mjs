@@ -81,10 +81,18 @@ async function waitForEnabled(locator, message) {
 }
 
 if (process.env.SINGLE_PLAYER_SMOKE === "1") {
+  await page.getByRole("radio", { name: "Multiplayer" }).check();
+  assert.equal(await page.getByRole("radio", { name: "Multiplayer" }).isChecked(), true);
+  assert.equal(await page.getByText("One human plus", { exact: false }).count(), 0);
+  await page.getByRole("heading", { name: "Join game" }).waitFor({ state: "visible" });
+  await page.getByRole("button", { name: "Create game" }).waitFor({ state: "visible" });
+
   await page.getByRole("radio", { name: "Single Player" }).check();
+  assert.equal(await page.getByRole("radio", { name: "Single Player" }).isChecked(), true);
+  assert.equal(await page.getByRole("heading", { name: "Join game" }).count(), 0);
   await page.getByRole("radio", { name: "2" }).check();
   assert.equal(await page.getByRole("button", { name: "Connect Aztec" }).count(), 0);
-  await page.getByRole("button", { name: "Create single player game" }).click();
+  await page.getByRole("button", { name: "Create game" }).click();
   await page.waitForURL(/\/table\//, { timeout: 15_000 });
 
   const commitment = await waitForFrame(

@@ -191,7 +191,14 @@ export function Lobby() {
       <div className="lobby">
         <form className="lobby-create" onSubmit={create}>
           <div className="form-heading">
-            <h3>{mode === "single" ? "Single player game" : "New game"}</h3>
+            <h3>New game</h3>
+            <span>
+              {mode === "single"
+                ? "Single player"
+                : mode === "multiplayer"
+                  ? "Multiplayer"
+                  : "Aztec poker"}
+            </span>
           </div>
 
           <fieldset className="seat-scale">
@@ -257,9 +264,7 @@ export function Lobby() {
               ? "Working"
               : mode === "aztec"
                 ? "Create Aztec game"
-                : mode === "single"
-                  ? "Create single player game"
-                  : "Create game"}
+                : "Create game"}
             {!busy && <span>→</span>}
           </button>
         </form>
