@@ -2,6 +2,7 @@ import { Card } from "@/components/card";
 import { Contract, type ContractView } from "@/components/contract";
 import { DealIntegrity, type DealView } from "@/components/deal-integrity";
 import { Seat } from "@/components/seat";
+import type { RoomMode } from "@/lib/server";
 
 type CardView = { value: string };
 export type AwardView = { player: number; amount: number };
@@ -46,6 +47,7 @@ export type ClaimView = {
   nullifier?: string;
 };
 export type View = {
+  mode: RoomMode;
   players: PlayerView[];
   hand_no: number;
   deal?: DealView;
@@ -86,7 +88,8 @@ type TableProps = {
 
 const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-const playerName = (player: number, viewer: number) => (player === viewer ? "You" : `Player ${player + 1}`);
+const playerName = (player: number, viewer: number, mode: RoomMode) =>
+  player === viewer ? "You" : mode === "single" ? `Bot ${player}` : `Player ${player + 1}`;
 
 export function Table({
   view,
@@ -119,7 +122,7 @@ export function Table({
     ? clamp(currentBet + Math.round((view.pot + (actions?.call ?? 0)) / 2), range.min_to, range.max_to)
     : 0;
   const payouts = result?.awards
-    .map((award) => `${playerName(award.player, viewer)} +${award.amount.toLocaleString("en-US")}`)
+    .map((award) => `${playerName(award.player, viewer, view.mode)} +${award.amount.toLocaleString("en-US")}`)
     .join(", ");
   let status = actions ? "Your action" : "Waiting for player";
   let message = actions ? "Choose the line" : "The table is moving";
@@ -169,7 +172,7 @@ export function Table({
             <Seat
               key={position}
               position={position}
-              name={playerName(position, viewer)}
+              name={playerName(position, viewer, view.mode)}
               stack={player?.stack}
               bet={player?.bet}
               proofPoints={player?.proof_points}

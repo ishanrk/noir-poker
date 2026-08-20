@@ -26,9 +26,9 @@ import {
   saveChallengeSecret,
 } from "@/lib/challenge";
 import { proveChallenge, type ProofStatus } from "@/lib/challenge-proof";
-import { freshEntropy, loadSeat, type RoomSeat, roomSocket } from "@/lib/server";
+import { freshEntropy, loadSeat, type RoomMode, type RoomSeat, roomSocket } from "@/lib/server";
 
-type Waiting = { joined: number; players: number; deal?: DealView };
+type Waiting = { joined: number; players: number; mode: RoomMode; deal?: DealView };
 type ServerMessage =
   | ({ type: "waiting" } & Waiting)
   | ({ type: "waiting_fair" } & Waiting & { deal: DealView })
@@ -42,7 +42,8 @@ type ClientAction =
   | { type: "challenge_commit"; hand_no: number; commitment: string }
   | { type: "challenge_draw"; hand_no: number; proof: string; public_inputs: string }
   | { type: "challenge_claim"; hand_no: number; proof: string; public_inputs: string }
-  | { type: "ready"; entropy: string };
+  | { type: "ready"; entropy: string }
+  | { type: "deal_entropy"; entropy: string };
 type Assignment = {
   hand_no: number;
   hand_tag: string;
@@ -134,6 +135,7 @@ export function MultiplayerGame({ room }: { room: string }) {
   const rev = useRef(-1);
   const drawing = useRef(false);
   const claiming = useRef(false);
+  const dealing = useRef(false);
   const [seat, setSeat] = useState<number | null>();
   const [waiting, setWaiting] = useState<Waiting>();
   const [view, setView] = useState<View>();
@@ -181,16 +183,33 @@ export function MultiplayerGame({ room }: { room: string }) {
       }
 
       if (message.type === "waiting" || message.type === "waiting_fair") {
-        setWaiting({ joined: message.joined, players: message.players, deal: message.type === "waiting_fair" ? message.deal : undefined });
+        setWaiting({
+          joined: message.joined,
+          players: message.players,
+          mode: message.mode,
+          deal: message.type === "waiting_fair" ? message.deal : undefined,
+        });
         setView(undefined);
         setConnected(true);
         setConnecting(false);
         setPending(false);
         setError(undefined);
+
+        if (
+          message.type === "waiting_fair" &&
+          message.mode === "single" &&
+          !message.deal.mine &&
+          !dealing.current
+        ) {
+          dealing.current = true;
+          setPending(true);
+          next.send(JSON.stringify({ type: "deal_entropy", entropy: freshEntropy() } satisfies ClientAction));
+        }
         return;
       }
 
       if (message.type === "snapshot") {
+        dealing.current = false;
         if (message.rev < rev.current) return;
         rev.current = message.rev;
         const currentChallenge = privateObjective(room, current.seat, challengeAssignment(message.view.challenge));
@@ -224,6 +243,7 @@ export function MultiplayerGame({ room }: { room: string }) {
       }
 
       if (message.type === "error") {
+        dealing.current = false;
         if (drawing.current) { drawing.current = false; setDrawState("failed"); }
         if (claiming.current) { claiming.current = false; setClaimState("failed"); }
         setConnecting(false);
@@ -235,6 +255,7 @@ export function MultiplayerGame({ room }: { room: string }) {
       if (socket.current === next) {
         drawing.current = false;
         claiming.current = false;
+        dealing.current = false;
         setConnecting(false);
         setPending(false);
         setError("Connection failed");
@@ -243,6 +264,7 @@ export function MultiplayerGame({ room }: { room: string }) {
     next.onclose = () => {
       if (socket.current === next) {
         socket.current = undefined;
+        dealing.current = false;
         setConnecting(false);
         setConnected(false);
         setPending(false);

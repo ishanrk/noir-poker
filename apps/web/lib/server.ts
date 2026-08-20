@@ -79,10 +79,11 @@ function entropy() {
 }
 
 export async function createRoom(config: RoomConfig): Promise<SeatResponse> {
+  const body = config.mode === "single" ? config : { ...config, entropy: entropy() };
   const response = await fetch(`${serverUrl()}/rooms`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...config, entropy: entropy() }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) throw new Error(await responseError(response));

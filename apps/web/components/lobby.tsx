@@ -10,13 +10,11 @@ import {
   AZTEC_TABLE_STACK,
 } from "@/lib/aztec/config";
 import type { AztecSession } from "@/lib/aztec/session";
-import { createRoom, joinRoom, saveSeat } from "@/lib/server";
+import { createRoom, joinRoom, saveSeat, type RoomMode } from "@/lib/server";
 
 const STACKS = [100, 250, 500, 1000, 2000, 5000] as const;
 const SMALL_BLINDS = [1, 2, 5, 10, 25, 50] as const;
 const BIG_BLINDS = [2, 5, 10, 20, 50, 100] as const;
-
-type PlayMode = "normal" | "aztec";
 
 function Scale({
   label,
@@ -53,7 +51,7 @@ function Scale({
 
 export function Lobby() {
   const router = useRouter();
-  const [mode, setMode] = useState<PlayMode>("normal");
+  const [mode, setMode] = useState<RoomMode>("single");
   const [aztec, setAztec] = useState<AztecSession>();
   const [players, setPlayers] = useState(2);
   const [stackIndex, setStackIndex] = useState(3);
@@ -74,7 +72,7 @@ export function Lobby() {
   const aztecValid = Boolean(
     aztec?.ready && aztec.balance >= BigInt(AZTEC_TABLE_STACK),
   );
-  const valid = mode === "normal" ? normalValid : aztecValid;
+  const valid = mode === "aztec" ? aztecValid : normalValid;
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -91,7 +89,7 @@ export function Lobby() {
         stack,
         small_blind: smallBlind,
         big_blind: bigBlind,
-        mode: mode === "aztec" ? "aztec" : "multiplayer",
+        mode,
       });
 
       if (mode === "aztec" && aztec) {
@@ -141,15 +139,31 @@ export function Lobby() {
             <input
               type="radio"
               name="mode"
-              value="normal"
-              checked={mode === "normal"}
+              value="single"
+              checked={mode === "single"}
               onChange={() => {
-                setMode("normal");
+                setMode("single");
                 setError(undefined);
               }}
             />
             <span>
-              <strong>Normal</strong>
+              <strong>Single Player</strong>
+              <small>You plus bots</small>
+            </span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="mode"
+              value="multiplayer"
+              checked={mode === "multiplayer"}
+              onChange={() => {
+                setMode("multiplayer");
+                setError(undefined);
+              }}
+            />
+            <span>
+              <strong>Multiplayer</strong>
               <small>No wallet</small>
             </span>
           </label>
@@ -165,7 +179,7 @@ export function Lobby() {
               }}
             />
             <span>
-              <strong>Aztec</strong>
+              <strong>Aztec Poker</strong>
               <small>Private PLAY</small>
             </span>
           </label>
@@ -177,11 +191,11 @@ export function Lobby() {
       <div className="lobby">
         <form className="lobby-create" onSubmit={create}>
           <div className="form-heading">
-            <h3>New game</h3>
+            <h3>{mode === "single" ? "Single player game" : "New game"}</h3>
           </div>
 
           <fieldset className="seat-scale">
-            <legend>Seats</legend>
+            <legend>{mode === "single" ? "Total seats" : "Seats"}</legend>
             <div>
               {[2, 3, 4, 5, 6].map((count) => (
                 <label key={count}>
@@ -197,8 +211,9 @@ export function Lobby() {
               ))}
             </div>
           </fieldset>
+          {mode === "single" && <p>One human plus {players - 1} bots.</p>}
 
-          {mode === "normal" ? (
+          {mode !== "aztec" ? (
             <>
               <Scale
                 label="Starting stack"
@@ -234,16 +249,22 @@ export function Lobby() {
             </dl>
           )}
 
-          {mode === "normal" && !normalValid && (
+          {mode !== "aztec" && !normalValid && (
             <p className="form-error">Big blind must cover the small blind and stack.</p>
           )}
           <button className="primary-action" type="submit" disabled={busy || !valid}>
-            {busy ? "Working" : mode === "aztec" ? "Create Aztec game" : "Create game"}
+            {busy
+              ? "Working"
+              : mode === "aztec"
+                ? "Create Aztec game"
+                : mode === "single"
+                  ? "Create single player game"
+                  : "Create game"}
             {!busy && <span>→</span>}
           </button>
         </form>
 
-        <form className="lobby-join" onSubmit={join}>
+        {mode !== "single" && <form className="lobby-join" onSubmit={join}>
           <div className="form-heading">
             <h3>Join game</h3>
           </div>
@@ -259,7 +280,7 @@ export function Lobby() {
               ? `${AZTEC_TABLE_STACK.toLocaleString()} private PLAY is locked before the table opens.`
               : "Your browser adds fresh randomness before the hand starts."}
           </p>
-        </form>
+        </form>}
 
         {error && (
           <p className="lobby-error" aria-live="polite">

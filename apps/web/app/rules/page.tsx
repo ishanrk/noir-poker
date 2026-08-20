@@ -77,6 +77,17 @@ export default function RulesPage() {
         </div>
       </section>
 
+      <section className="challenge-examples" aria-labelledby="bot-policy-title">
+        <div>
+          <h2 id="bot-policy-title">Single-player bots</h2>
+          <p>
+            Bots use a lightweight Monte Carlo equity and pot-odds policy inspired by Darse Billings,
+            Lourdes Peña, Jonathan Schaeffer, and Duane Szafron&apos;s <a href="https://poker.cs.ualberta.ca/publications/AAAI99.pdf" target="_blank" rel="noreferrer">Using Probabilistic Knowledge and Simulation to Play Poker</a> from AAAI 1999.
+          </p>
+          <p>They are not Poki or Loki and do not implement opponent modeling or a full strategy system.</p>
+        </div>
+      </section>
+
       <section className="challenge-ui-guide" aria-labelledby="challenge-ui-guide-title">
         <header>
           <h2 id="challenge-ui-guide-title">How one challenge works in the game</h2>

@@ -2,6 +2,7 @@ use std::error::Error;
 use std::io;
 
 use deal_core::{PROTOCOL_VERSION, commitment, seed};
+use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row, Transaction, query};
 use uuid::Uuid;
 
@@ -80,6 +81,18 @@ pub fn random_ceremony(room: Uuid, hand_no: u64, players: usize) -> FairResult<C
     })
 }
 
+// bot shares fixed by secret
+pub fn bot_share(room: Uuid, ceremony: &Ceremony, seat: usize) -> [u8; 32] {
+    let mut input = Sha256::new();
+
+    input.update(b"NPBOT03");
+    input.update(ceremony.server_secret);
+    input.update(room.as_bytes());
+    input.update(ceremony.hand_no.to_be_bytes());
+    input.update((seat as u64).to_be_bytes());
+    input.finalize().into()
+}
+
 pub async fn create_room(
     db: &Db,
     id: Uuid,
@@ -110,6 +123,81 @@ pub async fn create_room(
         .await?;
     insert_ceremony(&mut tx, id, ceremony).await?;
     insert_share(&mut tx, id, ceremony.hand_no, 0, share).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn create_pending_room(
+    db: &Db,
+    id: Uuid,
+    config: RoomConfig,
+    token_hash: &[u8; 32],
+    ceremony: &Ceremony,
+) -> FairResult<()> {
+    let mut tx = db.pool().begin().await?;
+
+    query(
+        "INSERT INTO rooms (id, mode, players, stack, small_blind, big_blind, rev) \
+         VALUES ($1, $2, $3, $4, $5, $6, 0)",
+    )
+    .bind(id)
+    .bind(RoomMode::Single.text())
+    .bind(i32::try_from(config.players)?)
+    .bind(i64::from(config.stack))
+    .bind(i64::from(config.small_blind))
+    .bind(i64::from(config.big_blind))
+    .execute(&mut *tx)
+    .await?;
+    query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, 0, $2)")
+        .bind(id)
+        .bind(token_hash.as_slice())
+        .execute(&mut *tx)
+        .await?;
+    insert_ceremony(&mut tx, id, ceremony).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn start_single(
+    db: &Db,
+    room: Uuid,
+    tokens: &[[u8; 32]],
+    share: [u8; 32],
+    rev: u64,
+    next_rev: u64,
+    ceremony: &Ceremony,
+    hand: NewHand<'_>,
+    next: &Ceremony,
+) -> FairResult<()> {
+    if tokens.len() + 1 != ceremony.shares.len() {
+        return Err(io::Error::other("single seat count mismatch").into());
+    }
+
+    let mut completed = ceremony_with_share(ceremony, 0, share)?;
+
+    for seat in 1..=tokens.len() {
+        completed.shares[seat] = Some(bot_share(room, ceremony, seat));
+    }
+    let mut tx = db.pool().begin().await?;
+
+    insert_share(&mut tx, room, ceremony.hand_no, 0, share).await?;
+    for (index, token) in tokens.iter().enumerate() {
+        let seat = index + 1;
+        let bot = bot_share(room, ceremony, seat);
+
+        query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, $2, $3)")
+            .bind(room)
+            .bind(i32::try_from(seat)?)
+            .bind(token.as_slice())
+            .execute(&mut *tx)
+            .await?;
+        insert_share(&mut tx, room, ceremony.hand_no, seat, bot).await?;
+    }
+    finalize_ceremony(&mut tx, room, &completed, hand.seed).await?;
+    insert_hand(&mut tx, room, &hand).await?;
+    insert_ceremony(&mut tx, room, next).await?;
+    update_rev(&mut tx, room, rev, next_rev).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -508,5 +596,19 @@ mod tests {
             commitment(*Uuid::from_u128(2).as_bytes(), 4, [7; 32])
         );
         assert_ne!(first.commitment, commitment(*room.as_bytes(), 5, [7; 32]));
+    }
+
+    #[test]
+    fn bot_shares_bind_ceremony() {
+        let room = Uuid::from_u128(1);
+        let ceremony = Ceremony {
+            hand_no: 4,
+            server_secret: [7; 32],
+            commitment: commitment(*room.as_bytes(), 4, [7; 32]),
+            shares: vec![None, None],
+        };
+
+        assert_eq!(bot_share(room, &ceremony, 1), bot_share(room, &ceremony, 1));
+        assert_ne!(bot_share(room, &ceremony, 1), bot_share(room, &ceremony, 0));
     }
 }

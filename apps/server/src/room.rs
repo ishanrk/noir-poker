@@ -1,13 +1,13 @@
 use challenge_core::{Facts, POINTS, facts_hash, hand_tag};
 use game_core::{Action, ActionError, Event, NextHandError, State, Street};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
 pub(super) type TokenHash = [u8; 32];
 pub(super) type Challenges = Vec<Option<Challenge>>;
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum RoomMode {
     Single,
@@ -130,6 +130,17 @@ impl Room {
         Ok(room)
     }
 
+    pub(super) fn new_pending(
+        config: RoomConfig,
+        token_hash: TokenHash,
+        ceremony: Ceremony,
+    ) -> Result<Self, &'static str> {
+        let mut room = Self::new_with_mode(config, RoomMode::Single, token_hash)?;
+
+        room.ceremony = Some(ceremony);
+        Ok(room)
+    }
+
     pub(super) fn next_seat(&self) -> Result<usize, JoinError> {
         if self.hand.is_some() || self.seats.len() >= self.config.players {
             return Err(JoinError::Full);
@@ -173,6 +184,33 @@ impl Room {
             self.ceremony = next;
         }
 
+        self.changed(rev);
+    }
+
+    pub(super) fn commit_single_start(
+        &mut self,
+        tokens: Vec<TokenHash>,
+        hand: LiveHand,
+        next: Ceremony,
+        rev: u64,
+    ) {
+        let commitment = self
+            .ceremony
+            .as_ref()
+            .expect("single deal ceremony")
+            .commitment;
+
+        for token_hash in tokens {
+            self.seats.push(Seat {
+                token_hash,
+                ready_hand: None,
+                proof_points: 0,
+            });
+        }
+
+        self.current_commitment = Some(commitment);
+        self.hand = Some(hand);
+        self.ceremony = Some(next);
         self.changed(rev);
     }
 

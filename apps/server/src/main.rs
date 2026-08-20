@@ -87,7 +87,7 @@ struct CreateRoomRequest {
     stack: u32,
     small_blind: u32,
     big_blind: u32,
-    entropy: String,
+    entropy: Option<String>,
     mode: Option<RoomMode>,
 }
 
@@ -142,6 +142,9 @@ enum ClientMessage {
     Ready {
         entropy: Option<String>,
     },
+    DealEntropy {
+        entropy: String,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -150,10 +153,12 @@ enum ServerMessage {
     Waiting {
         joined: usize,
         players: usize,
+        mode: RoomMode,
     },
     WaitingFair {
         joined: usize,
         players: usize,
+        mode: RoomMode,
         deal: DealView,
     },
     Snapshot {
@@ -167,6 +172,7 @@ enum ServerMessage {
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
 struct SeatView {
+    mode: RoomMode,
     players: Vec<PlayerView>,
     hand_no: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -524,8 +530,6 @@ async fn create_room(
     config
         .validate()
         .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
-    let share =
-        decode_hex(&request.entropy).ok_or((StatusCode::BAD_REQUEST, "invalid deal entropy"))?;
     let token = Uuid::new_v4();
     let token_hash = hash_token(token);
     let id = Uuid::new_v4();
@@ -535,38 +539,43 @@ async fn create_room(
             "cannot create deal ceremony",
         )
     })?;
-    let mut room = Room::new_fair(config, mode, token_hash, ceremony.clone(), share)
-        .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
+    let room = if mode == RoomMode::Single {
+        // commitment before player entropy
+        let room = Room::new_pending(config, token_hash, ceremony.clone())
+            .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
 
-    fairness::create_room(
-        &state.db,
-        id,
-        config,
-        room.mode,
-        &token_hash,
-        &ceremony,
-        share,
-    )
-    .await
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot create room"))?;
-
-    if mode == RoomMode::Single {
-        fill_bots(&state.db, id, &mut room)
+        fairness::create_pending_room(&state.db, id, config, &token_hash, &ceremony)
             .await
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot create bots"))?;
-    }
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot create room"))?;
+        room
+    } else {
+        let share = request
+            .entropy
+            .as_deref()
+            .and_then(decode_hex)
+            .ok_or((StatusCode::BAD_REQUEST, "invalid deal entropy"))?;
+        let room = Room::new_fair(config, mode, token_hash, ceremony.clone(), share)
+            .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
+
+        fairness::create_room(
+            &state.db,
+            id,
+            config,
+            room.mode,
+            &token_hash,
+            &ceremony,
+            share,
+        )
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot create room"))?;
+        room
+    };
 
     state
         .rooms
         .lock()
         .await
         .insert(id, Arc::new(Mutex::new(room)));
-
-    if mode == RoomMode::Single {
-        drive_bots(&state, id)
-            .await
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot start bots"))?;
-    }
 
     Ok((
         StatusCode::CREATED,
@@ -589,6 +598,9 @@ async fn join_room(
         .await
         .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
     let mut room = room.lock().await;
+    if room.mode == RoomMode::Single {
+        return Err((StatusCode::CONFLICT, "single room full"));
+    }
     let (token, token_hash) = room_token(&room);
     let seat = join_fair(&state.db, id, &mut room, token_hash, share)
         .await
@@ -602,17 +614,6 @@ async fn join_room(
         seat,
         token,
     }))
-}
-
-async fn fill_bots(db: &Db, id: Uuid, room: &mut Room) -> Result<(), &'static str> {
-    while room.seats.len() < room.config.players {
-        let (_, token_hash) = room_token(room);
-        let share = secure_nonce().map_err(|_| "cannot create bot entropy")?;
-
-        join_fair(db, id, room, token_hash, share).await?;
-    }
-
-    Ok(())
 }
 
 async fn join_fair(
@@ -681,6 +682,93 @@ async fn join_fair(
     room.commit_fair_join(token_hash, seat, share, game, next, next_rev);
 
     Ok(seat)
+}
+
+async fn single_entropy(
+    state: &AppState,
+    id: Uuid,
+    seat: usize,
+    entropy: &str,
+) -> Result<(), &'static str> {
+    let share = decode_hex(entropy).ok_or("invalid deal entropy")?;
+    let room = find_room(state, id).await.ok_or("room not found")?;
+    let mut room = room.lock().await;
+
+    if room.mode != RoomMode::Single || seat != 0 {
+        return Err("single deal unavailable");
+    }
+
+    if room.hand.is_some() || room.seats.len() != 1 {
+        return Err("single deal already started");
+    }
+
+    let ceremony = room
+        .ceremony
+        .as_ref()
+        .ok_or("deal ceremony missing")?
+        .clone();
+
+    if ceremony.shares.iter().any(Option::is_some) {
+        return Err("deal entropy already submitted");
+    }
+
+    let tokens = (1..room.config.players)
+        .map(|_| room_token(&room).1)
+        .collect::<Vec<_>>();
+    let next_rev = room
+        .rev
+        .checked_add(u64::try_from(tokens.len()).map_err(|_| "revision limit reached")?)
+        .ok_or("revision limit reached")?;
+    let mut completed = ceremony.clone();
+
+    completed.shares[0] = Some(share);
+    for seat in 1..room.config.players {
+        completed.shares[seat] = Some(fairness::bot_share(id, &ceremony, seat));
+    }
+
+    let seed = completed
+        .shares
+        .iter()
+        .copied()
+        .collect::<Option<Vec<_>>>()
+        .and_then(|shares| {
+            deal_core::seed(
+                *id.as_bytes(),
+                ceremony.hand_no,
+                ceremony.server_secret,
+                &shares,
+            )
+        })
+        .ok_or("cannot derive deal seed")?;
+    let stacks = vec![room.config.stack; room.config.players];
+    let hand = LiveHand {
+        id: Uuid::new_v4(),
+        no: 0,
+        seed,
+        starting_stacks: stacks.clone(),
+        game: start_game(room.config, seed),
+        result: None,
+        next_seq: 0,
+        actions: Vec::new(),
+    };
+    let next = fairness::random_ceremony(id, 1, room.config.players)
+        .map_err(|_| "cannot create deal ceremony")?;
+    let new_hand = NewHand {
+        id: hand.id,
+        no: hand.no,
+        seed: &hand.seed,
+        dealer: hand.game.dealer,
+        stacks: &stacks,
+    };
+
+    fairness::start_single(
+        &state.db, id, &tokens, share, room.rev, next_rev, &ceremony, new_hand, &next,
+    )
+    .await
+    .map_err(|_| "cannot start single deal")?;
+    room.commit_single_start(tokens, hand, next, next_rev);
+    drop(room);
+    drive_bots(state, id).await
 }
 
 async fn room_ws(
@@ -775,6 +863,9 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                         Some(entropy) => ready_room_entropy(&state, id, seat, &entropy).await,
                         None => Err("deal entropy required"),
                     },
+                    ClientMessage::DealEntropy { entropy } => {
+                        single_entropy(&state, id, seat, &entropy).await
+                    }
                     ClientMessage::Auth { .. } => {
                         send_error(&mut socket, "already authenticated").await;
                         continue;
@@ -1197,14 +1288,18 @@ async fn ready_room_entropy_once(
     let share = decode_hex(entropy).ok_or("invalid deal entropy")?;
     let room = find_room(state, id).await.ok_or("room not found")?;
     let mut room = room.lock().await;
+    let ceremony = room.ceremony.as_ref().ok_or("deal ceremony missing")?;
+
+    if room.mode == RoomMode::Single
+        && seat != 0
+        && share != fairness::bot_share(id, ceremony, seat)
+    {
+        return Err("invalid bot entropy");
+    }
+
     let pending = room.stage_fair_ready(seat, share)?;
     let seed = if pending.all {
-        Some(
-            room.ceremony
-                .as_ref()
-                .ok_or("deal ceremony missing")?
-                .seed_with(id, seat, share)?,
-        )
+        Some(ceremony.seed_with(id, seat, share)?)
     } else {
         None
     };
@@ -1230,8 +1325,6 @@ async fn ready_room_entropy_once(
         ),
         None => None,
     };
-    let ceremony = room.ceremony.as_ref().ok_or("deal ceremony missing")?;
-
     fairness::ready(
         &state.db,
         id,
@@ -1252,7 +1345,7 @@ async fn ready_room_entropy_once(
 
 async fn drive_bot_ready(state: &AppState, id: Uuid) -> Result<(), &'static str> {
     for _ in 0..6 {
-        let seat = {
+        let (seat, share) = {
             let room = find_room(state, id).await.ok_or("room not found")?;
             let room = room.lock().await;
             let hand = room.hand.as_ref().ok_or("game not started")?;
@@ -1271,11 +1364,14 @@ async fn drive_bot_ready(state: &AppState, id: Uuid) -> Result<(), &'static str>
                 .skip(1)
                 .find(|(_, player)| player.ready_hand != Some(hand.id))
             {
-                Some((seat, _)) => seat,
+                Some((seat, _)) => {
+                    let ceremony = room.ceremony.as_ref().ok_or("deal ceremony missing")?;
+
+                    (seat, fairness::bot_share(id, ceremony, seat))
+                }
                 None => return Ok(()),
             }
         };
-        let share = secure_nonce().map_err(|_| "cannot create bot entropy")?;
 
         ready_room_entropy_once(state, id, seat, &encode_hex(share)).await?;
     }
@@ -1300,11 +1396,13 @@ fn room_message(id: Uuid, room: &Room, seat: usize) -> ServerMessage {
             Some(ceremony) => ServerMessage::WaitingFair {
                 joined: room.seats.len(),
                 players: room.config.players,
+                mode: room.mode,
                 deal: pending_deal_view(ceremony, seat, room.config.players),
             },
             None => ServerMessage::Waiting {
                 joined: room.seats.len(),
                 players: room.config.players,
+                mode: room.mode,
             },
         },
     }
@@ -1313,6 +1411,7 @@ fn room_message(id: Uuid, room: &Room, seat: usize) -> ServerMessage {
 fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
     let mut view = seat_view(&hand.game, seat);
 
+    view.mode = room.mode;
     view.hand_no = hand.no;
     view.deal = room.current_commitment.map(|commitment| DealView {
         hand_no: hand.no,
@@ -2082,6 +2181,7 @@ fn seat_view(game: &State, seat: usize) -> SeatView {
         (!game.round_complete && game.fold_winner.is_none() && !game.settled).then_some(game.turn);
 
     SeatView {
+        mode: RoomMode::Multiplayer,
         players,
         hand_no: 0,
         deal: None,
@@ -2512,6 +2612,29 @@ mod tests {
             r#"{"players":2,"stack":100,"small_blind":5,"big_blind":10,"entropy":"00","mode":"invalid"}"#
         )
         .is_err());
+    }
+
+    #[test]
+    fn single_commitment_first() {
+        let config = config(2);
+        let ceremony = fairness::random_ceremony(TEST_ROOM, 0, config.players).unwrap();
+        let room =
+            Room::new_pending(config, hash_token(Uuid::from_u128(1)), ceremony.clone()).unwrap();
+
+        assert_eq!(room.mode, RoomMode::Single);
+        assert!(room.hand.is_none());
+        assert_eq!(
+            room.ceremony.as_ref().unwrap().commitment,
+            ceremony.commitment
+        );
+        assert!(
+            room.ceremony
+                .as_ref()
+                .unwrap()
+                .shares
+                .iter()
+                .all(Option::is_none)
+        );
     }
 
     #[test]
@@ -3465,23 +3588,23 @@ mod tests {
         let token = hash_token(Uuid::new_v4());
         let share = [0x31; 32];
         let ceremony = fairness::random_ceremony(id, 0, config.players).unwrap();
-        let mut room =
-            Room::new_fair(config, RoomMode::Single, token, ceremony.clone(), share).unwrap();
+        let room = Room::new_pending(config, token, ceremony.clone()).unwrap();
 
-        fairness::create_room(&db, id, config, RoomMode::Single, &token, &ceremony, share)
+        fairness::create_pending_room(&db, id, config, &token, &ceremony)
             .await
             .unwrap();
-        fill_bots(&db, id, &mut room).await.unwrap();
-
-        assert_eq!(room.mode, RoomMode::Single);
-        assert_eq!(room.seats.len(), config.players);
-        assert!(room.hand.is_some());
 
         let mut rooms = HashMap::new();
         rooms.insert(id, Arc::new(Mutex::new(room)));
         let state = AppState::test(db.clone(), rooms);
 
-        drive_bots(&state, id).await.unwrap();
+        single_entropy(&state, id, 0, &encode_hex(share))
+            .await
+            .unwrap();
+        let audit = fairness::audit(&db, id, 0).await.unwrap().unwrap();
+
+        assert_eq!(audit.commitment, ceremony.commitment);
+        assert_eq!(audit.shares[1], fairness::bot_share(id, &ceremony, 1));
         apply_action(&state, id, 0, Action::Call).await.unwrap();
 
         let restored = reload(&db, id).await;
@@ -3532,7 +3655,8 @@ mod tests {
             room_message(waiting_id, &waiting, 0),
             ServerMessage::Waiting {
                 joined: 2,
-                players: 3
+                players: 3,
+                mode: RoomMode::Single,
             }
         );
 
