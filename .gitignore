@@ -7,3 +7,5 @@
 !/apps/server/zk/challenge_v2.vk
 /apps/web/zk/*
 !/apps/web/zk/challenge_v2.json
+/apps/web/lib/aztec/artifacts/
+/apps/web/lib/aztec/target/

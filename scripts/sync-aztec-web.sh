@@ -30,15 +30,29 @@ if test "${1:-}" != "--force" \
   exit 0
 fi
 
-if ! command -v aztec >/dev/null 2>&1; then
-  echo "aztec 5.1.0 required to refresh play chips bindings" >&2
-  exit 1
-fi
+ensure_aztec() {
+  local aztec_bin
 
-if ! aztec --version 2>&1 | grep -q "5.1.0"; then
-  echo "aztec 5.1.0 required to refresh play chips bindings" >&2
-  exit 1
-fi
+  if command -v aztec >/dev/null 2>&1 \
+    && aztec --version 2>&1 | grep -q "5.1.0"; then
+    return
+  fi
+
+  # install pinned toolchain when missing
+  printf 'Y\n' | VERSION=5.1.0 bash -i <(curl -fsSL https://install.aztec.network/5.1.0)
+
+  if test -x "$HOME/.aztec/bin/aztec"; then
+    aztec_bin="$HOME/.aztec/bin/aztec"
+  else
+    aztec_bin="$(find -L "$HOME/.aztec" -type f -name aztec -perm -111 2>/dev/null | head -n 1)"
+  fi
+
+  test -n "$aztec_bin"
+  export PATH="$(dirname "$aztec_bin"):$PATH"
+  aztec --version 2>&1 | grep -q "5.1.0"
+}
+
+ensure_aztec
 
 (
   cd "$root/aztec"
