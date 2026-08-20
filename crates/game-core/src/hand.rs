@@ -1,6 +1,6 @@
 use crate::card::{Card, Rank};
 
-// enum order = weak to strong
+// weak to strong
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u8)]
 pub enum HandKind {
@@ -15,7 +15,7 @@ pub enum HandKind {
     StraightFlush,
 }
 
-// pair aces king queen eight = kind Pair tie Ace King Queen Eight
+// pair aces king queen eight
 // compare kind first then tie left to right
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct HandVal {
@@ -156,7 +156,7 @@ fn straight_high(cnt: &[u8; 13]) -> Option<Rank> {
         }
     }
 
-    // wheel = ace low five high
+    // wheel ace low five high
     if cnt[Rank::Ace as usize] == 1 && cnt[..4].iter().all(|&n| n == 1) {
         return Some(Rank::Five);
     }

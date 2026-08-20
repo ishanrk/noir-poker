@@ -106,7 +106,13 @@ export function Contract({ view, disabled = false, onCommit, onVerifyDraw, onPro
               ) : (
                 <>
                   {claim.objective && <p className="private-copy">Only you see: {claim.objective}</p>}
-                  {claim.completed === false && <p className="contract-note">Challenge missed. No proof can be generated.</p>}
+                  {/* miss earns no points */}
+                  {claim.completed === false && (
+                    <>
+                      <p className="contract-note">Challenge missed. No proof can be generated.</p>
+                      <strong className="contract-zero">+0 proof points</strong>
+                    </>
+                  )}
                   {claim.completed && (
                     <>
                       <ProofRail state={claim.state} />

@@ -6,7 +6,7 @@ const NOIR_JS = "https://noir-lang.org/docs/reference/NoirJS/noir_js/classes/Noi
 const NOIR_PROVING = "https://noir-lang.org/docs/getting_started_manually";
 const BARRETENBERG = "https://github.com/AztecProtocol/aztec-packages/tree/next/barretenberg";
 const HYPERPLONK = "https://doi.org/10.1007/978-3-031-30617-4_17";
-const REPO = "https://github.com/ishanrk/noir-poker/blob/agent/noir-poker-ui-zk-redesign";
+const REPO = "https://github.com/ishanrk/noir-poker/blob/main";
 
 const FACTS = [
   "saw the flop",

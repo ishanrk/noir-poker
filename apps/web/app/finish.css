@@ -290,7 +290,7 @@
 }
 .challenge-demo-stage p { color: var(--muted); font-size: 12px; line-height: 1.6; }
 
-/* replace the last player-facing use of the implementation term */
+/* player facing term */
 .waiting-room > p:not(.protocol-label):not(.form-error) { font-size: 0; }
 .waiting-room > p:not(.protocol-label):not(.form-error)::after {
   content: "The server commitment is already fixed. Each joining browser adds fresh randomness.";

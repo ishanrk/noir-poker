@@ -1,17 +1,79 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { SiteHeader } from "@/components/site-header";
 import { verifyReceipt, type ReceiptProof } from "@/lib/receipt";
 import { loadProofReceipt, type ProofReceipt } from "@/lib/server";
 
 type State = "waiting" | "verifying" | "verified" | "failed";
+
 const status = (state: State) =>
   ({ waiting: "queued", verifying: "checking locally", verified: "verified", failed: "invalid" })[
     state
   ];
+
+function ReceiptSeal({ verified, points = 20 }: { verified: boolean; points?: number }) {
+  return (
+    <div className="receipt-seal" data-verified={verified}>
+      <span>Hidden challenge</span>
+      <strong>{verified ? "✓" : "?"}</strong>
+      <small>{verified ? `+${points} proof points` : "still private"}</small>
+      <i aria-hidden="true" />
+    </div>
+  );
+}
+
+function VerificationTimeline({
+  receipt,
+  draw,
+  completion,
+}: {
+  receipt: boolean;
+  draw: State;
+  completion: State;
+}) {
+  const verified = draw === "verified" && completion === "verified";
+
+  return (
+    <section className="verification-timeline" aria-live="polite">
+      <div data-state={receipt ? "verified" : "verifying"}>
+        <span>01</span>
+        <p>Receipt context</p>
+        <strong>{receipt ? "room + hand bound" : "loading"}</strong>
+      </div>
+      <div data-state={draw}>
+        <span>02</span>
+        <p>Private selection proof</p>
+        <strong>{status(draw)}</strong>
+      </div>
+      <div data-state={completion}>
+        <span>03</span>
+        <p>Completion proof</p>
+        <strong>{status(completion)}</strong>
+      </div>
+      <div data-state={verified ? "verified" : "waiting"}>
+        <span>04</span>
+        <p>One-time award</p>
+        <strong>{verified ? "accepted once" : "waiting"}</strong>
+      </div>
+    </section>
+  );
+}
+
+export function ProofReceiptPreview() {
+  return (
+    <div className="proof-receipt-preview" aria-label="Accepted public challenge receipt">
+      <ReceiptSeal verified />
+      <VerificationTimeline receipt draw="verified" completion="verified" />
+      <div className="receipt-actions proof-receipt-preview-actions">
+        <button type="button" disabled>Run again</button>
+        <button type="button" disabled>Export JSON</button>
+      </div>
+    </div>
+  );
+}
 
 export function ProofReceiptView({ nullifier }: { nullifier: string }) {
   const [receipt, setReceipt] = useState<ProofReceipt>();
@@ -24,7 +86,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  async function verify(loaded?: ProofReceipt) {
+  const verify = useCallback(async (loaded?: ProofReceipt) => {
     if (running.current) return;
     running.current = true;
     setBusy(true);
@@ -58,7 +120,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
       running.current = false;
       if (mounted.current) setBusy(false);
     }
-  }
+  }, [nullifier]);
 
   useEffect(() => {
     mounted.current = true;
@@ -81,9 +143,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
       live = false;
       mounted.current = false;
     };
-    // verify is intentionally scoped to the receipt loaded for this nullifier
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nullifier]);
+  }, [nullifier, verify]);
 
   async function copyLink() {
     await navigator.clipboard.writeText(window.location.href);
@@ -104,6 +164,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
   }
 
   const verified = draw === "verified" && completion === "verified";
+
   return (
     <main className="site-shell proof-page">
       <SiteHeader compact />
@@ -116,36 +177,10 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
             appear in the receipt.
           </p>
         </div>
-        <div className="receipt-seal" data-verified={verified}>
-          <span>Hidden challenge</span>
-          <strong>{verified ? "✓" : "?"}</strong>
-          <small>{verified ? `+${receipt?.points ?? 20} proof points` : "still private"}</small>
-          <i aria-hidden="true" />
-        </div>
+        <ReceiptSeal verified={verified} points={receipt?.points} />
       </header>
 
-      <section className="verification-timeline" aria-live="polite">
-        <div data-state={receipt ? "verified" : "verifying"}>
-          <span>01</span>
-          <p>Receipt context</p>
-          <strong>{receipt ? "room + hand bound" : "loading"}</strong>
-        </div>
-        <div data-state={draw}>
-          <span>02</span>
-          <p>Private selection proof</p>
-          <strong>{status(draw)}</strong>
-        </div>
-        <div data-state={completion}>
-          <span>03</span>
-          <p>Completion proof</p>
-          <strong>{status(completion)}</strong>
-        </div>
-        <div data-state={verified ? "verified" : "waiting"}>
-          <span>04</span>
-          <p>One-time award</p>
-          <strong>{verified ? "accepted once" : "waiting"}</strong>
-        </div>
-      </section>
+      <VerificationTimeline receipt={Boolean(receipt)} draw={draw} completion={completion} />
 
       {error && <p className="proof-error">{error}</p>}
 

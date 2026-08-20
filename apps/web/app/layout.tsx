@@ -11,6 +11,8 @@ import "./protocol-v2.css";
 import "./semantic.css";
 import "./visual-cleanup.css";
 import "./clarity.css";
+import "./chips.css";
+import "./repair.css";
 
 export const metadata: Metadata = {
   title: "Noir Poker",

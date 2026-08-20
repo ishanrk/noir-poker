@@ -1,6 +1,8 @@
 .local/
 /target/
 /circuits/challenge-v2/target/
+/aztec/target/
+/aztec/artifacts/
 /apps/server/zk/*
 !/apps/server/zk/challenge_v2.vk
 /apps/web/zk/*

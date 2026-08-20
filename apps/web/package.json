@@ -2,24 +2,42 @@
   "name": "noir-poker-web",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "runtime": "../../scripts/web-runtime.sh update",
     "runtime:check": "../../scripts/web-runtime.sh check",
+    "aztec:sync": "bash ../../scripts/sync-aztec-web.sh",
+    "predev": "npm run aztec:sync",
     "dev": "next dev",
+    "prebuild": "npm run aztec:sync",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "challenge:test": "node --experimental-strip-types lib/challenge.test.ts",
     "deal:test": "node --experimental-strip-types lib/deal.test.ts",
     "receipt:test": "node --experimental-strip-types lib/receipt.test.ts",
+    "aztec:test": "node --experimental-strip-types lib/aztec/ids.test.ts",
+    "proof:smoke": "node --experimental-strip-types scripts/proof-smoke.mts",
+    "browser:smoke": "node scripts/browser-smoke.mjs",
     "deal:verify": "node --experimental-strip-types scripts/verify-deal.mjs",
     "proof:verify": "node scripts/verify-receipt.mjs"
   },
   "dependencies": {
+    "@aztec/aztec.js": "5.1.0",
     "@aztec/bb.js": "5.2.0",
+    "@aztec/constants": "5.1.0",
+    "@aztec/foundation": "5.1.0",
+    "@aztec/noir-contracts.js": "5.1.0",
+    "@aztec/stdlib": "5.1.0",
+    "@aztec/wallet-sdk": "5.1.0",
     "@noble/hashes": "2.2.0",
     "@noir-lang/noir_js": "1.0.0-beta.26",
+    "buffer": "6.0.3",
     "next": "16.3.1",
+    "process": "0.11.10",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
@@ -29,6 +47,7 @@
     "@types/react-dom": "19.2.4",
     "eslint": "9.39.5",
     "eslint-config-next": "16.3.1",
+    "playwright": "1.55.0",
     "typescript": "5.9.3"
   }
 }

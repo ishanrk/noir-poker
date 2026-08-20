@@ -1,0 +1,397 @@
+.mode-switch {
+  margin: 42px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.mode-switch legend {
+  margin-bottom: 9px;
+  color: #535a63;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mode-switch > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--line-strong);
+}
+
+.mode-switch label {
+  position: relative;
+}
+
+.mode-switch label + label {
+  border-left: 1px solid var(--line-strong);
+}
+
+.mode-switch input {
+  position: absolute;
+  opacity: 0;
+}
+
+.mode-switch label > span {
+  display: grid;
+  min-height: 62px;
+  align-content: center;
+  gap: 3px;
+  padding: 0 18px;
+  cursor: pointer;
+}
+
+.mode-switch strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.mode-switch small {
+  color: var(--muted);
+  font-family: "Courier New", monospace;
+  font-size: 9px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.mode-switch input:checked + span {
+  color: white;
+  background: var(--blue);
+}
+
+.mode-switch input:checked + span small {
+  color: var(--lime);
+}
+
+.mode-switch input:focus-visible + span {
+  outline: 3px solid var(--lime);
+  outline-offset: -3px;
+}
+
+.aztec-connect {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 26px;
+  align-items: center;
+  padding: 26px 0;
+  border-top: 4px solid var(--blue);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.aztec-connect-compact {
+  margin-top: 18px;
+}
+
+.aztec-connect-label {
+  display: grid;
+  gap: 4px;
+  align-self: start;
+}
+
+.aztec-connect-label span {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 24px;
+}
+
+.aztec-connect-label small,
+.aztec-connect-status {
+  color: var(--blue);
+  font-family: "Courier New", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.aztec-connect-action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+}
+
+.aztec-connect-action p,
+.aztec-connect-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.aztec-verify {
+  display: grid;
+  gap: 15px;
+  padding: 18px 20px;
+  border-left: 5px solid var(--lime);
+  background: var(--paper);
+}
+
+.aztec-verify p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.aztec-verify > strong {
+  font-size: clamp(21px, 4vw, 34px);
+  letter-spacing: .12em;
+  overflow-wrap: anywhere;
+}
+
+.aztec-verify > div,
+.aztec-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+}
+
+.aztec-account {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 22px;
+  align-items: center;
+}
+
+.aztec-account > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.aztec-account > div:first-child span {
+  color: var(--muted);
+  font-family: "Courier New", monospace;
+  font-size: 10px;
+}
+
+.aztec-account > div:first-child strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 27px;
+  font-weight: 500;
+}
+
+.aztec-account-actions a {
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--blue);
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.aztec-ready {
+  padding: 7px 10px;
+  color: var(--blue);
+  background: var(--lime);
+  font-family: "Courier New", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.aztec-connect-status,
+.aztec-connect-error {
+  grid-column: 2;
+}
+
+.aztec-connect-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.aztec-stakes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.aztec-stakes > div {
+  display: grid;
+  gap: 8px;
+  padding: 17px 0;
+}
+
+.aztec-stakes > div + div {
+  padding-left: 22px;
+  border-left: 1px solid var(--line);
+}
+
+.aztec-stakes dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.aztec-stakes dd {
+  margin: 0;
+  color: var(--blue);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 21px;
+}
+
+.chips-page {
+  padding-top: 32px;
+}
+
+.chips-console {
+  width: min(100% - 40px, 900px);
+  margin: 0 auto;
+}
+
+.chips-intro {
+  padding: 38px 0 42px;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.chips-intro h1 {
+  margin: 8px 0 12px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(56px, 9vw, 94px);
+  font-weight: 500;
+  line-height: .9;
+  letter-spacing: -.055em;
+}
+
+.chips-intro > p:last-child {
+  margin: 0;
+  color: var(--muted);
+  font-size: 17px;
+}
+
+.chips-buy-in {
+  display: grid;
+  gap: 26px;
+  padding: 44px 0;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.chips-buy-in header h2,
+.chips-receipt h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(30px, 4vw, 42px);
+  font-weight: 500;
+  letter-spacing: -.03em;
+}
+
+.chips-buy-in header p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chips-buy-in .line-input,
+.chips-buy-in .scale-control {
+  max-width: 620px;
+}
+
+.chips-seats {
+  max-width: 620px;
+}
+
+.chips-seats > div {
+  grid-template-columns: repeat(6, 1fr);
+}
+
+.chips-receipt {
+  padding: 38px 0;
+  border-top: 5px solid var(--blue);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.chips-receipt > .eyebrow {
+  margin-bottom: 8px;
+}
+
+.chips-receipt dl {
+  margin: 26px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.chips-receipt dl > div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 18px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.chips-receipt dt {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.chips-receipt dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.chips-receipt code {
+  font-size: 10px;
+}
+
+.chips-network {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 20px;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.chips-network span {
+  color: var(--blue);
+  font-family: "Courier New", monospace;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.chips-network code {
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 700px) {
+  .mode-switch > div,
+  .aztec-stakes {
+    grid-template-columns: 1fr;
+  }
+
+  .mode-switch label + label,
+  .aztec-stakes > div + div {
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .aztec-connect {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .aztec-account {
+    grid-template-columns: 1fr;
+  }
+
+  .aztec-connect-status,
+  .aztec-connect-error {
+    grid-column: 1;
+  }
+
+  .chips-page {
+    padding-top: 12px;
+  }
+
+  .chips-receipt dl > div,
+  .chips-network {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}

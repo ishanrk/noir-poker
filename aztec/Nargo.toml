@@ -1,0 +1,2 @@
+[workspace]
+members = ["play_chips_contract"]

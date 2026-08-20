@@ -1,0 +1,27 @@
+{
+  "name": "noir-poker-aztec",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "compile": "aztec compile --force",
+    "codegen": "rm -rf artifacts && mkdir -p artifacts && aztec codegen ./target -o ./artifacts",
+    "build": "npm run compile && npm run codegen",
+    "test:protocol": "node --import tsx --test test/protocol.test.ts",
+    "test:local": "tsx test/play-chips.local.ts",
+    "deploy:testnet": "bash scripts/deploy-testnet.sh"
+  },
+  "dependencies": {
+    "@aztec/accounts": "5.1.0",
+    "@aztec/aztec.js": "5.1.0",
+    "@aztec/wallets": "5.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}
