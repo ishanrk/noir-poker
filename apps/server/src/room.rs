@@ -188,11 +188,13 @@ impl Room {
             return Err("already ready");
         }
 
-        if !self
-            .next_challenges
-            .get(seat)
-            .and_then(Option::as_ref)
-            .is_some_and(|challenge| challenge.draw_verified)
+        // human proof still required
+        if (self.mode != RoomMode::Single || seat == 0)
+            && !self
+                .next_challenges
+                .get(seat)
+                .and_then(Option::as_ref)
+                .is_some_and(|challenge| challenge.draw_verified)
         {
             return Err("draw proof required");
         }
@@ -316,6 +318,10 @@ impl Room {
         hand_no: u64,
         commitment: [u8; 32],
     ) -> Result<PendingChallenge, &'static str> {
+        if self.mode == RoomMode::Single && seat != 0 {
+            return Err("bot challenge unavailable");
+        }
+
         let hand = self.hand.as_ref().ok_or("game not started")?;
 
         if !hand.game.settled {
@@ -521,8 +527,9 @@ impl Room {
         hand.actions = action.actions;
 
         if let (Some(facts), Some(commits)) = (action.facts, action.fact_commitments) {
-            for ((seat, facts), commit) in facts.into_iter().enumerate().zip(commits) {
-                let challenge = self.current_challenges[seat]
+            for commit in commits {
+                let facts = *facts.get(commit.seat).expect("staged facts");
+                let challenge = self.current_challenges[commit.seat]
                     .as_mut()
                     .expect("staged challenge");
 
@@ -826,34 +833,43 @@ pub(super) fn bind_facts(
     action: &mut PendingAction,
     challenges: &[Option<Challenge>],
     salts: Vec<[u8; 32]>,
+    mode: RoomMode,
 ) -> Result<(), &'static str> {
     let facts = action.facts.as_ref().ok_or("challenge facts missing")?;
 
-    if salts.len() != facts.len() {
+    let count = if mode == RoomMode::Single {
+        1
+    } else {
+        facts.len()
+    };
+
+    if salts.len() != count {
         return Err("challenge facts mismatch");
     }
 
-    action.fact_commitments = Some(
-        challenges
-            .iter()
-            .zip(facts)
-            .zip(salts)
-            .enumerate()
-            .map(|(seat, ((challenge, facts), salt))| {
-                let challenge = challenge.as_ref().ok_or("challenge missing")?;
+    let mut salts = salts.into_iter();
+    let mut commits = Vec::with_capacity(count);
 
-                if !challenge.draw_verified {
-                    return Err("draw proof missing");
-                }
+    for (seat, (challenge, facts)) in challenges.iter().zip(facts).enumerate() {
+        if mode == RoomMode::Single && seat != 0 {
+            continue;
+        }
 
-                Ok(FactCommitment {
-                    seat,
-                    salt,
-                    value: facts_hash(challenge.hand_tag, seat as u8, salt, *facts),
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-    );
+        let challenge = challenge.as_ref().ok_or("challenge missing")?;
+
+        if !challenge.draw_verified {
+            return Err("draw proof missing");
+        }
+
+        let salt = salts.next().expect("fact salt");
+        commits.push(FactCommitment {
+            seat,
+            salt,
+            value: facts_hash(challenge.hand_tag, seat as u8, salt, *facts),
+        });
+    }
+
+    action.fact_commitments = Some(commits);
     Ok(())
 }
 

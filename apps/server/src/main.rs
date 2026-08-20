@@ -1,3 +1,4 @@
+mod bot;
 mod db;
 mod fairness;
 mod proof;
@@ -38,7 +39,7 @@ use crate::proof::{
     decode_bytes, decode_proof,
 };
 use crate::room::{
-    Ceremony, Challenge, Challenges, HandResult, HandResultKind, JoinError, LiveHand, PendingClaim,
+    Ceremony, Challenge, Challenges, HandResult, HandResultKind, LiveHand, PendingClaim,
     PendingDraw, PlayedAction, Room, RoomConfig, RoomMode, Seat, TokenHash, bind_facts,
     replay_hand, start_game,
 };
@@ -534,7 +535,7 @@ async fn create_room(
             "cannot create deal ceremony",
         )
     })?;
-    let room = Room::new_fair(config, mode, token_hash, ceremony.clone(), share)
+    let mut room = Room::new_fair(config, mode, token_hash, ceremony.clone(), share)
         .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
 
     fairness::create_room(
@@ -548,11 +549,24 @@ async fn create_room(
     )
     .await
     .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot create room"))?;
+
+    if mode == RoomMode::Single {
+        fill_bots(&state.db, id, &mut room)
+            .await
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot create bots"))?;
+    }
+
     state
         .rooms
         .lock()
         .await
         .insert(id, Arc::new(Mutex::new(room)));
+
+    if mode == RoomMode::Single {
+        drive_bots(&state, id)
+            .await
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot start bots"))?;
+    }
 
     Ok((
         StatusCode::CREATED,
@@ -575,22 +589,48 @@ async fn join_room(
         .await
         .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
     let mut room = room.lock().await;
-    let seat = room.next_seat().map_err(|err| match err {
-        JoinError::Full => (StatusCode::CONFLICT, "room full"),
-    })?;
     let (token, token_hash) = room_token(&room);
-    let next_rev = room
-        .rev
-        .checked_add(1)
-        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "revision limit reached"))?;
+    let seat = join_fair(&state.db, id, &mut room, token_hash, share)
+        .await
+        .map_err(|err| match err {
+            "room full" => (StatusCode::CONFLICT, err),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, err),
+        })?;
+
+    Ok(Json(SeatResponse {
+        room: id,
+        seat,
+        token,
+    }))
+}
+
+async fn fill_bots(db: &Db, id: Uuid, room: &mut Room) -> Result<(), &'static str> {
+    while room.seats.len() < room.config.players {
+        let (_, token_hash) = room_token(room);
+        let share = secure_nonce().map_err(|_| "cannot create bot entropy")?;
+
+        join_fair(db, id, room, token_hash, share).await?;
+    }
+
+    Ok(())
+}
+
+async fn join_fair(
+    db: &Db,
+    id: Uuid,
+    room: &mut Room,
+    token_hash: TokenHash,
+    share: [u8; 32],
+) -> Result<usize, &'static str> {
+    let seat = room.next_seat().map_err(|_| "room full")?;
+    let next_rev = room.rev.checked_add(1).ok_or("revision limit reached")?;
     let final_join = seat + 1 == room.config.players;
     let seed = if final_join {
         Some(
             room.ceremony
                 .as_ref()
-                .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "deal ceremony missing"))?
-                .seed_with(id, seat, share)
-                .map_err(|err| (StatusCode::BAD_REQUEST, err))?,
+                .ok_or("deal ceremony missing")?
+                .seed_with(id, seat, share)?,
         )
     } else {
         None
@@ -616,23 +656,16 @@ async fn join_room(
     });
     let next = if final_join {
         Some(
-            fairness::random_ceremony(id, 1, room.config.players).map_err(|_| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "cannot create deal ceremony",
-                )
-            })?,
+            fairness::random_ceremony(id, 1, room.config.players)
+                .map_err(|_| "cannot create deal ceremony")?,
         )
     } else {
         None
     };
-    let ceremony = room
-        .ceremony
-        .as_ref()
-        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "deal ceremony missing"))?;
+    let ceremony = room.ceremony.as_ref().ok_or("deal ceremony missing")?;
 
     fairness::join_room(
-        &state.db,
+        db,
         id,
         seat,
         &token_hash,
@@ -644,14 +677,10 @@ async fn join_room(
         next.as_ref(),
     )
     .await
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot join room"))?;
+    .map_err(|_| "cannot join room")?;
     room.commit_fair_join(token_hash, seat, share, game, next, next_rev);
 
-    Ok(Json(SeatResponse {
-        room: id,
-        seat,
-        token,
-    }))
+    Ok(seat)
 }
 
 async fn room_ws(
@@ -808,16 +837,31 @@ async fn apply_action(
     seat: usize,
     action: Action,
 ) -> Result<(), &'static str> {
+    apply_action_once(state, id, seat, action).await?;
+    drive_bots(state, id).await
+}
+
+async fn apply_action_once(
+    state: &AppState,
+    id: Uuid,
+    seat: usize,
+    action: Action,
+) -> Result<(), &'static str> {
     let room = find_room(state, id).await.ok_or("room not found")?;
     let mut room = room.lock().await;
     let mut next = room.stage_action(seat, action)?;
 
     if next.facts.is_some() {
-        let salts = (0..room.config.players)
+        let count = if room.mode == RoomMode::Single {
+            1
+        } else {
+            room.config.players
+        };
+        let salts = (0..count)
             .map(|_| secure_nonce().map_err(|_| "cannot commit challenge facts"))
             .collect::<Result<Vec<_>, _>>()?;
 
-        bind_facts(&mut next, &room.current_challenges, salts)?;
+        bind_facts(&mut next, &room.current_challenges, salts, room.mode)?;
     }
 
     // command commit before state swap
@@ -838,6 +882,80 @@ async fn apply_action(
         .map_err(|_| "cannot persist action")?;
     room.commit_action(next);
     Ok(())
+}
+
+async fn drive_bots(state: &AppState, id: Uuid) -> Result<(), &'static str> {
+    // bot loop bound
+    for _ in 0..128 {
+        let next = {
+            let room = find_room(state, id).await.ok_or("room not found")?;
+            let room = room.lock().await;
+
+            next_bot_action(id, &room)?
+        };
+
+        let Some((seat, action)) = next else {
+            return Ok(());
+        };
+
+        apply_action_once(state, id, seat, action).await?;
+    }
+
+    Err("bot action limit")
+}
+
+fn next_bot_action(room: Uuid, state: &Room) -> Result<Option<(usize, Action)>, &'static str> {
+    if state.mode != RoomMode::Single {
+        return Ok(None);
+    }
+
+    let hand = state.hand.as_ref().ok_or("game not started")?;
+
+    if hand.game.settled || hand.game.turn == 0 {
+        return Ok(None);
+    }
+
+    let seat = hand.game.turn;
+    let action = bot_action(room, hand.no, hand.next_seq, &hand.game, seat)?;
+
+    Ok(Some((seat, action)))
+}
+
+fn bot_action(
+    room: Uuid,
+    hand_no: u64,
+    seq: u64,
+    game: &State,
+    seat: usize,
+) -> Result<Action, &'static str> {
+    let legal = game.legal_actions(seat).ok_or("bot action unavailable")?;
+    let opponents = game
+        .players
+        .iter()
+        .enumerate()
+        .filter(|(index, player)| *index != seat && !player.folded)
+        .count();
+    let seed = bot_seed(room, hand_no, seq, seat);
+
+    Ok(bot::action(bot::View {
+        hole: game.hole[seat],
+        board: &game.board,
+        pot: game.pot,
+        legal,
+        opponents,
+        seed,
+    }))
+}
+
+fn bot_seed(room: Uuid, hand_no: u64, seq: u64, seat: usize) -> [u8; 32] {
+    let mut input = Sha256::new();
+
+    input.update(b"NPBOT02");
+    input.update(room.as_bytes());
+    input.update(hand_no.to_be_bytes());
+    input.update(seq.to_be_bytes());
+    input.update((seat as u64).to_be_bytes());
+    input.finalize().into()
 }
 
 async fn challenge_room(
@@ -1065,6 +1183,17 @@ async fn ready_room_entropy(
     seat: usize,
     entropy: &str,
 ) -> Result<(), &'static str> {
+    ready_room_entropy_once(state, id, seat, entropy).await?;
+    drive_bot_ready(state, id).await?;
+    drive_bots(state, id).await
+}
+
+async fn ready_room_entropy_once(
+    state: &AppState,
+    id: Uuid,
+    seat: usize,
+    entropy: &str,
+) -> Result<(), &'static str> {
     let share = decode_hex(entropy).ok_or("invalid deal entropy")?;
     let room = find_room(state, id).await.ok_or("room not found")?;
     let mut room = room.lock().await;
@@ -1119,6 +1248,39 @@ async fn ready_room_entropy(
     .map_err(|_| "cannot persist deal contribution")?;
     room.commit_fair_ready(seat, pending, next_hand, next);
     Ok(())
+}
+
+async fn drive_bot_ready(state: &AppState, id: Uuid) -> Result<(), &'static str> {
+    for _ in 0..6 {
+        let seat = {
+            let room = find_room(state, id).await.ok_or("room not found")?;
+            let room = room.lock().await;
+            let hand = room.hand.as_ref().ok_or("game not started")?;
+
+            if room.mode != RoomMode::Single
+                || !hand.game.settled
+                || room.seats[0].ready_hand != Some(hand.id)
+            {
+                return Ok(());
+            }
+
+            match room
+                .seats
+                .iter()
+                .enumerate()
+                .skip(1)
+                .find(|(_, player)| player.ready_hand != Some(hand.id))
+            {
+                Some((seat, _)) => seat,
+                None => return Ok(()),
+            }
+        };
+        let share = secure_nonce().map_err(|_| "cannot create bot entropy")?;
+
+        ready_room_entropy_once(state, id, seat, &encode_hex(share)).await?;
+    }
+
+    Err("bot ready limit")
 }
 
 async fn current_message(state: &AppState, id: Uuid, seat: usize) -> Option<ServerMessage> {
@@ -1471,6 +1633,7 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
             facts.as_deref(),
             stored.challenges,
             config.players,
+            mode,
         )?,
         None if stored.challenges.is_empty() => (
             vec![None; config.players],
@@ -1647,6 +1810,7 @@ fn restore_challenges(
     facts: Option<&[Facts]>,
     stored: Vec<StoredChallenge>,
     players: usize,
+    mode: RoomMode,
 ) -> Result<(Challenges, Challenges, Vec<u64>), io::Error> {
     let mut current = vec![None; players];
     let mut next = vec![None; players];
@@ -1667,7 +1831,10 @@ fn restore_challenges(
         let seat = usize::try_from(stored.seat)
             .map_err(|_| recovery_error(id, "invalid challenge seat"))?;
 
-        if seat >= players || stored.version != i32::from(PROTOCOL_VERSION) {
+        if seat >= players
+            || stored.version != i32::from(PROTOCOL_VERSION)
+            || mode == RoomMode::Single && seat != 0
+        {
             return Err(recovery_error(id, "invalid challenge assignment"));
         }
 
@@ -1839,7 +2006,13 @@ fn restore_challenges(
         }
     }
 
-    if hand.no > 0 && current.iter().any(Option::is_none) {
+    let missing = if mode == RoomMode::Single {
+        current[0].is_none()
+    } else {
+        current.iter().any(Option::is_none)
+    };
+
+    if hand.no > 0 && missing {
         return Err(recovery_error(id, "current challenge missing"));
     }
 
@@ -1981,6 +2154,7 @@ fn street_view(street: Street) -> &'static str {
 #[cfg(test)]
 mod tests {
     use crate::db::StoredSeat;
+    use crate::room::JoinError;
     use game_core::NextHandError;
     use sqlx::Row;
 
@@ -2007,6 +2181,34 @@ mod tests {
         let mut room = Room::new(config, hash_token(Uuid::new_v4())).unwrap();
 
         join(&mut room, Uuid::new_v4(), Some(SEED)).unwrap();
+        room
+    }
+
+    fn single_room() -> Room {
+        let config = config(2);
+        let first = hash_token(Uuid::from_u128(1));
+        let share = [0x11; 32];
+        let ceremony = fairness::random_ceremony(TEST_ROOM, 0, config.players).unwrap();
+        let mut room = Room::new_fair(config, RoomMode::Single, first, ceremony, share).unwrap();
+        let ceremony = room.ceremony.as_ref().unwrap().clone();
+        let seed = ceremony.seed_with(TEST_ROOM, 1, [0x22; 32]).unwrap();
+        let hand = live_hand(
+            Uuid::from_u128(2),
+            0,
+            seed,
+            0,
+            vec![config.stack; config.players],
+            config,
+        );
+
+        room.commit_fair_join(
+            hash_token(Uuid::from_u128(3)),
+            1,
+            [0x22; 32],
+            Some(hand),
+            None,
+            1,
+        );
         room
     }
 
@@ -2110,6 +2312,7 @@ mod tests {
                 &mut next,
                 &room.current_challenges,
                 vec![[0x55; 32]; room.config.players],
+                room.mode,
             )?;
         }
 
@@ -2249,6 +2452,7 @@ mod tests {
                 &mut next,
                 &room.current_challenges,
                 vec![[0x55; 32]; room.config.players],
+                room.mode,
             )
             .unwrap();
         }
@@ -2308,6 +2512,41 @@ mod tests {
             r#"{"players":2,"stack":100,"small_blind":5,"big_blind":10,"entropy":"00","mode":"invalid"}"#
         )
         .is_err());
+    }
+
+    #[test]
+    fn bot_hidden_cards() {
+        let mut first = State::new([1; 32], 0, &[100, 100], 5, 10);
+        let mut second = State::new([2; 32], 0, &[100, 100], 5, 10);
+
+        first.turn = 1;
+        second.players = first.players.clone();
+        second.hole[1] = first.hole[1];
+        second.turn = first.turn;
+        second.hole[0] = [Card::from_id(50).unwrap(), Card::from_id(51).unwrap()];
+
+        assert_ne!(first.hole[0], second.hole[0]);
+        assert_eq!(
+            bot_action(TEST_ROOM, 0, 0, &first, 1).unwrap(),
+            bot_action(TEST_ROOM, 0, 0, &second, 1).unwrap(),
+        );
+    }
+
+    #[test]
+    fn bots_stop_for_human() {
+        let room = single_room();
+
+        assert!(next_bot_action(TEST_ROOM, &room).unwrap().is_none());
+    }
+
+    #[test]
+    fn bot_ready_skips_proof() {
+        let mut room = single_room();
+
+        room.hand.as_mut().unwrap().game.settled = true;
+
+        assert_eq!(room.stage_ready(0).err(), Some("draw proof required"));
+        assert!(room.stage_ready(1).is_ok());
     }
 
     #[test]
@@ -3208,6 +3447,48 @@ mod tests {
         assert_eq!(hand.no, 0);
         assert!(view.complete);
         assert_eq!(view.count, 2);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL"]
+    async fn single_persistence() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
+        let db = Db::connect(&url).await.unwrap();
+
+        sqlx::query("TRUNCATE hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+            .execute(db.pool())
+            .await
+            .unwrap();
+
+        let config = config(2);
+        let id = Uuid::new_v4();
+        let token = hash_token(Uuid::new_v4());
+        let share = [0x31; 32];
+        let ceremony = fairness::random_ceremony(id, 0, config.players).unwrap();
+        let mut room =
+            Room::new_fair(config, RoomMode::Single, token, ceremony.clone(), share).unwrap();
+
+        fairness::create_room(&db, id, config, RoomMode::Single, &token, &ceremony, share)
+            .await
+            .unwrap();
+        fill_bots(&db, id, &mut room).await.unwrap();
+
+        assert_eq!(room.mode, RoomMode::Single);
+        assert_eq!(room.seats.len(), config.players);
+        assert!(room.hand.is_some());
+
+        let mut rooms = HashMap::new();
+        rooms.insert(id, Arc::new(Mutex::new(room)));
+        let state = AppState::test(db.clone(), rooms);
+
+        drive_bots(&state, id).await.unwrap();
+        apply_action(&state, id, 0, Action::Call).await.unwrap();
+
+        let restored = reload(&db, id).await;
+        let hand = restored.hand.as_ref().unwrap();
+
+        assert!(hand.actions.iter().any(|action| action.player == 1));
+        assert_eq!(restored.mode, RoomMode::Single);
     }
 
     #[tokio::test]
