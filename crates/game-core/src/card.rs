@@ -1,4 +1,5 @@
 const RANK_COUNT: u8 = 13;
+const CARD_COUNT: u8 = 52;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[repr(u8)]
@@ -49,12 +50,6 @@ impl Suit {
     pub(crate) const ALL: [Self; 4] = [Self::Clubs, Self::Diamonds, Self::Hearts, Self::Spades];
 }
 
-// rank = two 0 through ace 12
-// suit = clubs 0 diamonds 1 hearts 2 spades 3
-// card = suit * 13 + rank
-// two clubs = 0 * 13 + 0 = 0
-// ace spades = 3 * 13 + 12 = 51
-// one byte instead of rank and suit fields
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[repr(transparent)]
 pub struct Card(u8);
@@ -62,6 +57,18 @@ pub struct Card(u8);
 impl Card {
     pub(crate) const fn new(rank: Rank, suit: Suit) -> Self {
         Self(rank as u8 + RANK_COUNT * suit as u8)
+    }
+
+    pub const fn from_id(id: u8) -> Option<Self> {
+        if id < CARD_COUNT {
+            Some(Self(id))
+        } else {
+            None
+        }
+    }
+
+    pub const fn id(self) -> u8 {
+        self.0
     }
 
     pub const fn rank(self) -> Rank {

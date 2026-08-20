@@ -1,28 +1,74 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 
 import { createRoom, joinRoom, saveSeat } from "@/lib/server";
 
+const STACKS = [100, 250, 500, 1000, 2000, 5000] as const;
+const SMALL_BLINDS = [1, 2, 5, 10, 25, 50] as const;
+const BIG_BLINDS = [2, 5, 10, 20, 50, 100] as const;
+
+function Scale({
+  label,
+  values,
+  index,
+  setIndex,
+}: {
+  label: string;
+  values: readonly number[];
+  index: number;
+  setIndex: (index: number) => void;
+}) {
+  return (
+    <label className="scale-control">
+      <span>
+        {label}
+        <output>{values[index].toLocaleString("en-US")}</output>
+      </span>
+      <input
+        type="range"
+        min="0"
+        max={values.length - 1}
+        value={index}
+        onChange={(event) => setIndex(Number(event.target.value))}
+      />
+      <span className="scale-ticks" aria-hidden="true">
+        {values.map((value) => (
+          <i key={value}>{value >= 1000 ? `${value / 1000}k` : value}</i>
+        ))}
+      </span>
+    </label>
+  );
+}
+
 export function Lobby() {
   const router = useRouter();
+  const [players, setPlayers] = useState(2);
+  const [stackIndex, setStackIndex] = useState(3);
+  const [smallIndex, setSmallIndex] = useState(2);
+  const [bigIndex, setBigIndex] = useState(2);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const stack = STACKS[stackIndex];
+  const smallBlind = SMALL_BLINDS[smallIndex];
+  const bigBlind = BIG_BLINDS[bigIndex];
+  const valid = useMemo(
+    () => bigBlind >= smallBlind && stack >= bigBlind,
+    [bigBlind, smallBlind, stack],
+  );
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setError(undefined);
 
-    const data = new FormData(event.currentTarget);
-
     try {
       const result = await createRoom({
-        players: Number(data.get("players")),
-        stack: Number(data.get("stack")),
-        small_blind: Number(data.get("small_blind")),
-        big_blind: Number(data.get("big_blind")),
+        players,
+        stack,
+        small_blind: smallBlind,
+        big_blind: bigBlind,
       });
 
       saveSeat(result.room, result);
@@ -38,8 +84,7 @@ export function Lobby() {
     setBusy(true);
     setError(undefined);
 
-    const data = new FormData(event.currentTarget);
-    const room = String(data.get("room")).trim();
+    const room = String(new FormData(event.currentTarget).get("room")).trim();
 
     try {
       const result = await joinRoom(room);
@@ -53,52 +98,67 @@ export function Lobby() {
   }
 
   return (
-    <section className="lobby" aria-label="Poker lobby">
-      <form className="lobby-section" onSubmit={create}>
-        <div className="lobby-copy">
-          <span>Create</span>
-          <h2>New table</h2>
+    <div className="lobby">
+      <form className="lobby-create" onSubmit={create}>
+        <div className="form-heading">
+          <h3>New game</h3>
         </div>
 
-        <label>
-          Players
-          <input name="players" type="number" min="2" max="6" defaultValue="2" required />
-        </label>
-        <label>
-          Stack
-          <input name="stack" type="number" min="1" defaultValue="1000" required />
-        </label>
-        <div className="lobby-row">
-          <label>
-            Small blind
-            <input name="small_blind" type="number" min="1" defaultValue="5" required />
-          </label>
-          <label>
-            Big blind
-            <input name="big_blind" type="number" min="1" defaultValue="10" required />
-          </label>
+        <fieldset className="seat-scale">
+          <legend>Seats</legend>
+          <div>
+            {[2, 3, 4, 5, 6].map((count) => (
+              <label key={count}>
+                <input
+                  type="radio"
+                  name="players"
+                  value={count}
+                  checked={players === count}
+                  onChange={() => setPlayers(count)}
+                />
+                <span>{count}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
+        <Scale label="Starting stack" values={STACKS} index={stackIndex} setIndex={setStackIndex} />
+        <div className="blind-scales">
+          <Scale
+            label="Small blind"
+            values={SMALL_BLINDS}
+            index={smallIndex}
+            setIndex={setSmallIndex}
+          />
+          <Scale
+            label="Big blind"
+            values={BIG_BLINDS}
+            index={bigIndex}
+            setIndex={setBigIndex}
+          />
         </div>
-        <button className="lobby-submit" type="submit" disabled={busy}>
-          Create table
+
+        {!valid && <p className="form-error">Big blind must cover the small blind and stack.</p>}
+        <button className="primary-action" type="submit" disabled={busy || !valid}>
+          Create game <span>→</span>
         </button>
       </form>
 
-      <form className="lobby-section" onSubmit={join}>
-        <div className="lobby-copy">
-          <span>Join</span>
-          <h2>Existing table</h2>
+      <form className="lobby-join" onSubmit={join}>
+        <div className="form-heading">
+          <h3>Join game</h3>
         </div>
-
-        <label>
+        <label className="line-input">
           Room id
-          <input name="room" type="text" autoComplete="off" required />
+          <input name="room" type="text" autoComplete="off" spellCheck="false" required />
         </label>
-        <button className="lobby-submit" type="submit" disabled={busy}>
-          Join table
+        <button className="text-action" type="submit" disabled={busy}>
+          Join game →
         </button>
+        <p>Your browser adds fresh randomness before the hand starts.</p>
       </form>
 
       {error && <p className="lobby-error">{error}</p>}
-    </section>
+    </div>
   );
 }

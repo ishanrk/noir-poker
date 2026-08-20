@@ -1,0 +1,412 @@
+.hero-title-noir {
+  display: inline-flex;
+  gap: 0.01em;
+  perspective: 420px;
+}
+
+.hero-title-noir::after { display: none; }
+
+.noir-letter {
+  display: inline-block;
+  transform-origin: 50% 55%;
+  animation: noir-letter-flip 9.4s ease-in-out infinite;
+}
+
+.noir-letter-o { animation-delay: -5.7s; animation-duration: 10.8s; }
+.noir-letter-i { animation-delay: -2.9s; animation-duration: 8.7s; }
+.noir-letter-r { animation-delay: -7.1s; animation-duration: 11.6s; }
+
+@keyframes noir-letter-flip {
+  0%, 66%, 75%, 100% { opacity: 1; transform: rotateY(0deg); }
+  69% { opacity: 0.22; transform: rotateY(88deg); }
+  72% { opacity: 0.78; transform: rotateY(-12deg); }
+}
+
+.home-page .hero-tagline {
+  max-width: 540px;
+  color: #4d535b !important;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: clamp(15px, 1.6vw, 18px) !important;
+  line-height: 1.55 !important;
+}
+
+.home-rule-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 30px;
+  align-items: center;
+  padding: 22px 0;
+  border-top: 1px solid var(--line-strong);
+}
+
+.home-rule-row:last-child { border-bottom: 1px solid var(--line-strong); }
+.home-rule-row h3 {
+  margin: 0 0 7px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 21px;
+  font-weight: 500;
+}
+.home-rule-row p {
+  max-width: 690px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.home-rule-row a {
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+.site-footer p {
+  margin: 5px 0 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.rules-hero .rules-poker-link {
+  display: inline-block;
+  margin-top: 19px;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 700;
+  text-underline-offset: 4px;
+}
+
+.rules-list .rule-row {
+  grid-template-columns: minmax(0, 1fr) 260px;
+}
+
+.rules-list .rule-copy { grid-column: 1; }
+.rules-list .rule-visual { grid-column: 2; }
+
+.motivation-hero-new {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 8px 34px;
+  width: min(100% - 40px, 1040px);
+  padding: 68px 0 58px;
+}
+
+.motivation-hero-new .motivation-kicker {
+  grid-row: 1 / span 2;
+  padding-top: 12px;
+  color: var(--blue);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.motivation-hero-new h1 {
+  max-width: 760px;
+  margin: 0 0 12px;
+  font-size: clamp(43px, 5.4vw, 64px);
+  line-height: 1.02;
+}
+
+.motivation-hero-new > p:last-child {
+  grid-column: 2;
+  max-width: 730px;
+  font-size: 17px;
+  line-height: 1.65;
+}
+
+.motivation-cases {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100% - 40px, 1040px);
+  margin: 0 auto;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.case-card {
+  position: relative;
+  min-height: 300px;
+  padding: 30px 34px 30px 0;
+  transition: padding 180ms ease, background 180ms ease;
+}
+.case-card + .case-card {
+  padding-left: 34px;
+  border-left: 1px solid var(--line);
+}
+.case-card:hover { padding-top: 24px; background: var(--paper); }
+.case-card > span,
+.motivation-kicker,
+.verify-board article > span,
+.protocol-kicker {
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.case-card strong {
+  display: block;
+  max-width: 430px;
+  margin: 35px 0 14px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 27px;
+  font-weight: 500;
+  line-height: 1.15;
+}
+.case-card p {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+}
+.case-card a {
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 700;
+}
+.case-card-blue::before {
+  position: absolute;
+  top: -1px;
+  right: 34px;
+  width: 48px;
+  height: 5px;
+  background: var(--lime);
+  content: "";
+}
+
+.motivation-story {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+  gap: 70px;
+  width: min(100% - 40px, 1040px);
+  margin: 0 auto;
+  padding: 76px 0;
+  border-bottom: 1px solid var(--line-strong);
+}
+.motivation-story h2,
+.motivation-boundary h2 {
+  margin: 9px 0 20px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(31px, 4vw, 45px);
+  font-weight: 500;
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+}
+.motivation-story-copy > p:not(.motivation-kicker),
+.motivation-boundary p {
+  color: #505760;
+  font-size: 15px;
+  line-height: 1.72;
+}
+
+.motivation-flow {
+  display: grid;
+  align-content: center;
+  gap: 0;
+  padding: 20px 0;
+}
+.motivation-flow span {
+  position: relative;
+  padding: 15px 18px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  font-size: 13px;
+  transition: transform 180ms ease, border-color 180ms ease;
+}
+.motivation-flow span:hover { transform: translateX(8px); border-color: var(--blue); }
+.motivation-flow i {
+  width: 1px;
+  height: 22px;
+  margin-left: 28px;
+  background: var(--blue);
+}
+
+.challenge-proof-scene {
+  position: relative;
+  min-height: 280px;
+  align-self: center;
+  perspective: 700px;
+}
+.challenge-scene-card {
+  position: absolute;
+  top: 42px;
+  left: 47%;
+  display: grid;
+  width: 118px;
+  aspect-ratio: 5 / 7;
+  place-items: center;
+  border: 1.5px solid var(--ink);
+  background: var(--paper);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 31px;
+  font-weight: 700;
+  transition: transform 340ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 220ms ease;
+}
+.challenge-scene-secret { z-index: 2; color: var(--lime); background: var(--blue); transform: translateX(-60%) rotate(-8deg); }
+.challenge-scene-hole { z-index: 1; color: var(--card-red); transform: translateX(-20%) rotate(8deg); }
+.challenge-scene-proof {
+  position: absolute;
+  right: 18px;
+  bottom: 38px;
+  padding: 8px 12px;
+  border-bottom: 2px solid var(--blue);
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 700;
+  transition: transform 260ms ease;
+}
+.motivation-story-challenge:hover .challenge-scene-secret { transform: translateX(-92%) rotate(-16deg); }
+.motivation-story-challenge:hover .challenge-scene-hole { transform: translateX(10%) rotate(14deg); opacity: 0.18; }
+.motivation-story-challenge:hover .challenge-scene-proof { transform: translateX(-22px); }
+
+.motivation-boundary {
+  width: min(100% - 40px, 840px);
+  margin: 0 auto;
+  padding: 58px 0 74px;
+}
+.motivation-boundary a { color: var(--blue); font-size: 13px; font-weight: 700; }
+
+.protocol-hero-new {
+  width: min(100% - 40px, 1040px);
+  margin: 0 auto;
+  padding: 68px 0 54px;
+  border-bottom: 4px solid var(--blue);
+}
+.protocol-hero-new h1 {
+  max-width: 780px;
+  margin: 9px 0 15px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(46px, 6vw, 68px);
+  font-weight: 500;
+  line-height: 1.02;
+  letter-spacing: -0.04em;
+}
+.protocol-hero-new > p:last-child {
+  max-width: 720px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.verify-board {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100% - 40px, 1040px);
+  margin: 0 auto;
+  border-bottom: 1px solid var(--line-strong);
+}
+.verify-board article {
+  min-height: 270px;
+  padding: 30px 34px 30px 0;
+  transition: background 180ms ease, padding 180ms ease;
+}
+.verify-board article + article { padding-left: 34px; border-left: 1px solid var(--line); }
+.verify-board article:hover { padding-top: 24px; background: var(--paper); }
+.verify-board h2 {
+  margin: 38px 0 12px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 28px;
+  font-weight: 500;
+}
+.verify-board p { color: var(--muted); font-size: 13px; line-height: 1.65; }
+.verify-board code { overflow-wrap: anywhere; font-size: 10px; }
+
+.protocol-demo-wrap {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 44px;
+  width: min(100% - 40px, 1040px);
+  margin: 0 auto;
+  padding: 66px 0;
+  border-bottom: 1px solid var(--line-strong);
+}
+.protocol-demo-intro h2 {
+  margin: 0 0 10px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 31px;
+  font-weight: 500;
+}
+.protocol-demo-intro p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
+
+.protocol-details-list { width: min(100% - 40px, 1040px); margin: 0 auto; padding-bottom: 70px; }
+.protocol-detail { border-bottom: 1px solid var(--line-strong); }
+.protocol-detail summary {
+  position: relative;
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr) 28px;
+  gap: 30px;
+  align-items: center;
+  padding: 24px 0;
+  cursor: pointer;
+  list-style: none;
+}
+.protocol-detail summary::-webkit-details-marker { display: none; }
+.protocol-detail summary > span {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 23px;
+  font-weight: 500;
+}
+.protocol-detail summary > strong {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.protocol-detail summary::after {
+  content: "+";
+  color: var(--blue);
+  font-size: 24px;
+  transition: transform 180ms ease;
+}
+.protocol-detail[open] summary::after { transform: rotate(45deg); }
+.protocol-detail[open] { background: rgba(255, 255, 255, 0.52); }
+.protocol-detail-body {
+  max-width: 790px;
+  padding: 0 0 38px 260px;
+}
+.protocol-detail-body h3 {
+  margin: 26px 0 9px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 20px;
+  font-weight: 500;
+}
+.protocol-detail-body p,
+.protocol-detail-body li { color: #505760; font-size: 14px; line-height: 1.7; }
+
+@media (max-width: 760px) {
+  .home-rule-row,
+  .motivation-hero-new,
+  .motivation-story,
+  .verify-board,
+  .protocol-demo-wrap,
+  .protocol-detail summary {
+    grid-template-columns: 1fr;
+  }
+  .home-rule-row { gap: 12px; }
+  .motivation-hero-new .motivation-kicker,
+  .motivation-hero-new > p:last-child { grid-row: auto; grid-column: 1; }
+  .motivation-cases { grid-template-columns: 1fr; }
+  .case-card,
+  .case-card + .case-card { padding: 26px 0; border-left: 0; }
+  .case-card + .case-card { border-top: 1px solid var(--line); }
+  .motivation-story { gap: 28px; }
+  .verify-board article,
+  .verify-board article + article { padding: 26px 0; border-left: 0; }
+  .verify-board article + article { border-top: 1px solid var(--line); }
+  .protocol-detail summary { gap: 7px; }
+  .protocol-detail summary::after { position: absolute; right: 0; top: 24px; }
+  .protocol-detail-body { padding-left: 0; }
+  .rules-list .rule-row { grid-template-columns: 1fr; }
+  .rules-list .rule-copy,
+  .rules-list .rule-visual { grid-column: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .noir-letter,
+  .motivation-flow span,
+  .challenge-scene-card,
+  .challenge-scene-proof { animation: none; transition: none; }
+}

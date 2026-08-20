@@ -8,6 +8,7 @@ axum = { version = "=0.8.8", default-features = false, features = ["http1", "jso
 barretenberg-rs = { version = "=5.2.0", default-features = false, features = ["native"] }
 base64 = "=0.22.1"
 challenge-core = { path = "../../crates/challenge-core" }
+deal-core = { path = "../../crates/deal-core" }
 game-core = { path = "../../crates/game-core" }
 getrandom = "0.4.3"
 serde = { version = "1.0.229", features = ["derive"] }

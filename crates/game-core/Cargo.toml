@@ -4,5 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rand = { version = "0.10", default-features = false }
-rand_chacha = { version = "0.10", default-features = false }
+deal-core = { path = "../deal-core" }

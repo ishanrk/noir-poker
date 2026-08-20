@@ -2,9 +2,17 @@ import {
   decodePublicInputs,
   verifyChallengeProofs,
   type ChallengePublicInputs,
-} from "@/lib/challenge-proof";
-import { CHALLENGE_POINTS, CHALLENGE_VERSION, catalogRoot, decodeHex, encodeHex } from "@/lib/challenge";
-import type { ProofReceipt } from "@/lib/server";
+} from "./challenge-proof.ts";
+import {
+  CHALLENGE_POINTS,
+  CHALLENGE_VERSION,
+  catalogRoot,
+  decodeHex,
+  encodeHex,
+  handTag,
+} from "./challenge.ts";
+import { uuidBytes } from "./deal.ts";
+import type { ProofReceipt } from "./server.ts";
 
 const PROOF_SYSTEM = "ultra_honk";
 const CIRCUIT_ID = "challenge_v2";
@@ -20,7 +28,6 @@ export async function verifyReceipt(
   onVerified?: (proof: ReceiptProof) => void,
 ) {
   validateReceipt(receipt);
-
   const verified = await verifyChallengeProofs(
     [
       { proof: receipt.draw_proof, publicInputs: receipt.draw_public_inputs },
@@ -29,12 +36,12 @@ export async function verifyReceipt(
     (index) => onVerified?.(index === 0 ? "draw" : "completion"),
   );
 
-  if (!verified) {
-    throw new Error("proof verification failed");
-  }
+  if (!verified) throw new Error("proof verification failed");
 }
 
 export function validateReceipt(receipt: ProofReceipt) {
+  const expectedTag = encodeHex(handTag(uuidBytes(receipt.room), BigInt(receipt.hand_no)));
+
   if (
     receipt.protocol_version !== CHALLENGE_VERSION ||
     receipt.proof_system !== PROOF_SYSTEM ||
@@ -46,6 +53,9 @@ export function validateReceipt(receipt: ProofReceipt) {
     receipt.seat < 0 ||
     receipt.seat > 5 ||
     !Number.isInteger(receipt.seat) ||
+    !Number.isInteger(receipt.hand_no) ||
+    receipt.hand_no < 0 ||
+    receipt.hand_tag !== expectedTag ||
     receipt.catalog_root !== encodeHex(catalogRoot())
   ) {
     throw new Error("invalid proof receipt");
@@ -58,9 +68,7 @@ export function validateReceipt(receipt: ProofReceipt) {
     receipt.facts_hash,
     receipt.nullifier,
     receipt.catalog_root,
-  ]) {
-    decodeHex(value);
-  }
+  ]) decodeHex(value);
 
   const draw = decodePublicInputs(receipt.draw_public_inputs);
   const completion = decodePublicInputs(receipt.completion_public_inputs);

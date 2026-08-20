@@ -20,10 +20,7 @@ const source = await readFile(artifactPath);
 const artifact = JSON.parse(source);
 const input = process.argv[2];
 
-if (!input) {
-  throw new Error("usage npm run proof:verify -- receipt.json");
-}
-
+if (!input) throw new Error("usage npm run proof:verify -- receipt.json");
 if (createHash("sha256").update(source).digest("hex") !== ARTIFACT_SHA256) {
   throw new Error("challenge artifact mismatch");
 }
@@ -31,6 +28,9 @@ if (createHash("sha256").update(source).digest("hex") !== ARTIFACT_SHA256) {
 const receipt = await loadReceipt(input);
 const draw = decodePublic(receipt.draw_public_inputs);
 const completion = decodePublic(receipt.completion_public_inputs);
+const expectedTag = createHash("blake2s256")
+  .update(Buffer.concat([Buffer.from("NPHAND02"), uuid(receipt.room), u64(BigInt(receipt.hand_no))]))
+  .digest("hex");
 
 if (
   receipt.protocol_version !== 2 ||
@@ -41,6 +41,8 @@ if (
   receipt.vk_sha256 !== VK_SHA256 ||
   receipt.catalog_root !== ROOT ||
   receipt.points !== 20 ||
+  receipt.hand_tag !== expectedTag ||
+  !Number.isInteger(receipt.hand_no) ||
   !Number.isInteger(receipt.seat) ||
   receipt.seat < 0 ||
   receipt.seat > 5 ||
@@ -52,15 +54,11 @@ if (
   completion.mode !== 1 ||
   completion.factsHash !== receipt.facts_hash ||
   completion.nullifier !== receipt.nullifier
-) {
-  throw new Error("proof receipt mismatch");
-}
+) throw new Error("proof receipt mismatch");
 
 const api = await Barretenberg.new({ backend: BackendType.Wasm });
-
 try {
   const backend = new UltraHonkBackend(artifact.bytecode, api);
-
   for (const [proof, publicInputs] of [
     [receipt.draw_proof, receipt.draw_public_inputs],
     [receipt.completion_proof, receipt.completion_public_inputs],
@@ -72,53 +70,39 @@ try {
       },
       { verifierTarget: "noir-recursive" },
     );
-
-    if (!verified) {
-      throw new Error("proof verification failed");
-    }
+    if (!verified) throw new Error("proof verification failed");
   }
 } finally {
   await api.destroy();
 }
 
-process.stdout.write(`verified ${receipt.nullifier}\n`);
+process.stdout.write(`verified room=${receipt.room} hand=${receipt.hand_no} nullifier=${receipt.nullifier}\n`);
 
 async function loadReceipt(value) {
   if (value === "-") {
     let source = "";
-
     for await (const chunk of process.stdin) source += chunk;
     return JSON.parse(source);
   }
-
   if (/^https?:\/\//.test(value)) {
     const response = await fetch(value);
-
     if (!response.ok) throw new Error(`receipt request failed ${response.status}`);
     return response.json();
   }
-
   return JSON.parse(await readFile(value, "utf8"));
 }
 
 function decodePublic(value) {
   const bytes = Buffer.from(value, "base64");
-
   if (bytes.length !== 194 * 32) throw new Error("invalid public inputs");
-
   const fields = Array.from({ length: 194 }, (_, i) => {
     const field = bytes.subarray(i * 32, i * 32 + 32);
-
-    if (field.subarray(0, 31).some((byte) => byte !== 0)) {
-      throw new Error("invalid public inputs");
-    }
-
+    if (field.subarray(0, 31).some((byte) => byte !== 0)) throw new Error("invalid public inputs");
     return field[31];
   });
   let offset = 0;
   const take = () => fields[offset++];
   const hex = () => Buffer.from(Array.from({ length: 32 }, take)).toString("hex");
-
   return {
     mode: take(),
     handTag: hex(),
@@ -139,4 +123,16 @@ function common(inputs, receipt) {
     inputs.nonce === receipt.nonce &&
     inputs.catalogRoot === receipt.catalog_root
   );
+}
+
+function uuid(value) {
+  const hex = value.replaceAll("-", "");
+  if (!/^[0-9a-f]{32}$/.test(hex)) throw new Error("invalid room id");
+  return Buffer.from(hex, "hex");
+}
+
+function u64(value) {
+  const bytes = Buffer.alloc(8);
+  bytes.writeBigUInt64BE(value);
+  return bytes;
 }

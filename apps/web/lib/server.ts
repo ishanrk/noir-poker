@@ -1,7 +1,18 @@
-const SERVER_URL = (process.env.NEXT_PUBLIC_SERVER_URL ?? "http://localhost:3001").replace(
-  /\/+$/,
-  "",
-);
+const CONFIGURED_SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL?.trim().replace(/\/+$/, "");
+const LOCAL_SERVER_URL = "http://localhost:3001";
+
+function serverUrl() {
+  if (CONFIGURED_SERVER_URL) return CONFIGURED_SERVER_URL;
+
+  if (
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+  ) {
+    return LOCAL_SERVER_URL;
+  }
+
+  throw new Error("server url missing for this deployment");
+}
 
 export type RoomConfig = {
   players: number;
@@ -15,12 +26,12 @@ export type RoomSeat = {
   token: string;
 };
 
-type SeatResponse = RoomSeat & {
-  room: string;
-};
+type SeatResponse = RoomSeat & { room: string };
 
 export type ProofReceipt = {
   protocol_version: number;
+  room: string;
+  hand_no: number;
   proof_system: string;
   circuit_id: string;
   bb_version: string;
@@ -40,43 +51,65 @@ export type ProofReceipt = {
   completion_public_inputs: string;
 };
 
+export type DealAudit = {
+  protocol_version: number;
+  algorithm: string;
+  room: string;
+  hand_no: number;
+  players: number;
+  dealer: number;
+  commitment: string;
+  server_secret: string;
+  contributions: Array<{ seat: number; share: string }>;
+  seed: string;
+  deck: Array<{ value: string }>;
+};
+
 async function responseError(response: Response) {
   return (await response.text()).trim() || "request failed";
 }
 
+function entropy() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
 export async function createRoom(config: RoomConfig): Promise<SeatResponse> {
-  const response = await fetch(`${SERVER_URL}/rooms`, {
+  const response = await fetch(`${serverUrl()}/rooms`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(config),
+    body: JSON.stringify({ ...config, entropy: entropy() }),
   });
 
-  if (!response.ok) {
-    throw new Error(await responseError(response));
-  }
-
+  if (!response.ok) throw new Error(await responseError(response));
   return response.json();
 }
 
 export async function joinRoom(room: string): Promise<SeatResponse> {
-  const response = await fetch(`${SERVER_URL}/rooms/${encodeURIComponent(room)}/join`, {
+  const response = await fetch(`${serverUrl()}/rooms/${encodeURIComponent(room)}/join`, {
     method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ entropy: entropy() }),
   });
 
-  if (!response.ok) {
-    throw new Error(await responseError(response));
-  }
-
+  if (!response.ok) throw new Error(await responseError(response));
   return response.json();
 }
 
 export async function loadProofReceipt(nullifier: string): Promise<ProofReceipt> {
-  const response = await fetch(`${SERVER_URL}/proofs/${encodeURIComponent(nullifier)}`);
+  const response = await fetch(`${serverUrl()}/proofs/${encodeURIComponent(nullifier)}`);
 
-  if (!response.ok) {
-    throw new Error(await responseError(response));
-  }
+  if (!response.ok) throw new Error(await responseError(response));
+  return response.json();
+}
 
+export async function loadDealAudit(room: string, hand: number): Promise<DealAudit> {
+  const response = await fetch(
+    `${serverUrl()}/audits/${encodeURIComponent(room)}/${encodeURIComponent(hand)}`,
+  );
+
+  if (!response.ok) throw new Error(await responseError(response));
   return response.json();
 }
 
@@ -91,9 +124,7 @@ export function saveSeat(room: string, seat: RoomSeat) {
 export function loadSeat(room: string): RoomSeat | undefined {
   const stored = sessionStorage.getItem(seatKey(room));
 
-  if (!stored) {
-    return undefined;
-  }
+  if (!stored) return undefined;
 
   try {
     const seat = JSON.parse(stored) as Partial<RoomSeat>;
@@ -114,12 +145,15 @@ export function loadSeat(room: string): RoomSeat | undefined {
 }
 
 export function roomSocket(room: string) {
-  const url = new URL(SERVER_URL);
+  const url = new URL(serverUrl());
 
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = `/rooms/${encodeURIComponent(room)}/ws`;
   url.search = "";
   url.hash = "";
-
   return url.toString();
+}
+
+export function freshEntropy() {
+  return entropy();
 }

@@ -1,48 +1,28 @@
 import { Card } from "@/components/card";
 import { Contract, type ContractView } from "@/components/contract";
+import { DealIntegrity, type DealView } from "@/components/deal-integrity";
 import { Seat } from "@/components/seat";
 
-type CardView = {
-  value: string;
-};
-
-export type AwardView = {
-  player: number;
-  amount: number;
-};
-
+type CardView = { value: string };
+export type AwardView = { player: number; amount: number };
 export type HandResultView = {
   kind: "fold" | "showdown";
   awards: AwardView[];
   revealed: Array<[CardView, CardView] | null | undefined>;
 };
-
 type PlayerView = {
   stack: number;
   bet: number;
   folded: boolean;
   proof_points?: number;
 };
-
 type ActionView = {
   fold: boolean;
   check: boolean;
   call: number | undefined;
-  raise:
-    | {
-        min_to: number;
-        max_to: number;
-      }
-    | undefined;
+  raise: { min_to: number; max_to: number } | undefined;
 };
-
-type ReadyView = {
-  mine: boolean;
-  count: number;
-  players: number;
-  complete: boolean;
-};
-
+type ReadyView = { mine: boolean; count: number; players: number; complete: boolean };
 export type ChallengeView = {
   hand_no: number;
   assigned: boolean;
@@ -52,7 +32,6 @@ export type ChallengeView = {
   nonce?: string;
   catalog_root?: string;
 };
-
 export type ClaimView = {
   hand_no: number;
   hand_tag: string;
@@ -66,9 +45,11 @@ export type ClaimView = {
   points?: number;
   nullifier?: string;
 };
-
 export type View = {
   players: PlayerView[];
+  hand_no: number;
+  deal?: DealView;
+  next_deal?: DealView;
   hole: [CardView, CardView];
   board: CardView[];
   pot: number;
@@ -87,6 +68,7 @@ export type View = {
 type TableProps = {
   view: View;
   viewer: number;
+  room: string;
   error?: string;
   disabled?: boolean;
   raiseTo: number;
@@ -103,14 +85,13 @@ type TableProps = {
 };
 
 const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
-
-function playerName(player: number, viewer: number) {
-  return player === viewer ? "You" : `Player ${player + 1}`;
-}
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const playerName = (player: number, viewer: number) => (player === viewer ? "You" : `Player ${player + 1}`);
 
 export function Table({
   view,
   viewer,
+  room,
   error,
   disabled = false,
   raiseTo,
@@ -129,67 +110,45 @@ export function Table({
   const actions = view.actions;
   const range = actions?.raise;
   const result = view.result;
+  const myBet = view.players[viewer]?.bet ?? 0;
+  const currentBet = myBet + (actions?.call ?? 0);
+  const potTarget = range
+    ? clamp(currentBet + view.pot + (actions?.call ?? 0), range.min_to, range.max_to)
+    : 0;
+  const halfPotTarget = range
+    ? clamp(currentBet + Math.round((view.pot + (actions?.call ?? 0)) / 2), range.min_to, range.max_to)
+    : 0;
   const payouts = result?.awards
-    .map(
-      (award) =>
-        `${playerName(award.player, viewer)} ${result.kind === "fold" ? "won " : ""}${award.amount.toLocaleString("en-US")}`,
-    )
-    .join(" · ");
-  let status = "Table";
-  let message = "Waiting for player";
+    .map((award) => `${playerName(award.player, viewer)} +${award.amount.toLocaleString("en-US")}`)
+    .join(", ");
+  let status = actions ? "Your action" : "Waiting for player";
+  let message = actions ? "Choose the line" : "The table is moving";
 
-  if (actions) {
-    status = "Your action";
-    message = "Choose an action";
-  }
-
-  if (disabled) {
-    status = "Waiting";
-    message = "Waiting for server";
-  }
-
-  if (view.settled) {
-    status = "Complete";
-    message = view.ready?.complete ? "Table complete" : "Hand complete";
-  }
-
-  if (result?.kind === "fold") {
-    status = "Hand ended";
-    message = payouts ?? "Payout complete";
-  }
-
-  if (result?.kind === "showdown") {
-    status = "Showdown";
-    message = payouts ? `Payouts ${payouts}` : "Payout complete";
-  }
-
-  if (error) {
-    status = "Error";
-    message = error;
-  }
+  if (disabled) [status, message] = ["Waiting", "Server confirmation pending"];
+  if (view.settled) [status, message] = ["Hand complete", payouts ?? "Payout settled"];
+  if (result?.kind === "showdown") status = "Showdown";
+  if (error) [status, message] = ["Error", error];
 
   return (
     <section className="table-shell" aria-label="Six-max poker table">
+      {view.deal && <DealIntegrity deal={view.deal} room={room} compact />}
+
       <div className="table-stage">
         <div className="table-surface">
-          <div className="table-label">
-            <span>Live game</span>
-            <strong>{view.street}</strong>
+          <div className="table-watermark" aria-hidden="true">
+            NP
           </div>
-
           <div className="board-area">
             <div className="pot">
               <span>Pot</span>
               <strong>{view.pot.toLocaleString("en-US")}</strong>
             </div>
-
             <div className="board" aria-label="Community cards">
-              <Card value={view.board[0]?.value} />
-              <Card value={view.board[1]?.value} />
-              <Card value={view.board[2]?.value} />
-              <Card value={view.board[3]?.value} />
-              <Card value={view.board[4]?.value} />
+              {[0, 1, 2, 3, 4].map((index) => (
+                <Card key={index} value={view.board[index]?.value} delay={index * 120} />
+              ))}
             </div>
+            <span className="street-label">{view.street}</span>
           </div>
         </div>
 
@@ -229,60 +188,58 @@ export function Table({
           <span>{status}</span>
           <strong>{message}</strong>
         </div>
+        <div className="action-controls">
+          <div className="plain-actions">
+            <button type="button" onClick={onFold} disabled={disabled || !actions?.fold}>Fold</button>
+            <button type="button" onClick={onCheck} disabled={disabled || !actions?.check}>Check</button>
+            <button type="button" onClick={onCall} disabled={disabled || actions?.call === undefined}>
+              {actions?.call === undefined ? "Call" : `Call ${actions.call.toLocaleString("en-US")}`}
+            </button>
+          </div>
 
-        <div className="actions">
-          <button type="button" onClick={onFold} disabled={disabled || !actions?.fold}>
-            Fold
-          </button>
-          <button type="button" onClick={onCheck} disabled={disabled || !actions?.check}>
-            Check
-          </button>
-          <button
-            type="button"
-            onClick={onCall}
-            disabled={disabled || actions?.call === undefined}
-          >
-            {actions?.call === undefined
-              ? "Call"
-              : `Call ${actions.call.toLocaleString("en-US")}`}
-          </button>
-          <input
-            aria-label="Raise to"
-            type="number"
-            min={range?.min_to}
-            max={range?.max_to}
-            value={range ? raiseTo : ""}
-            onChange={(event) => setRaiseTo(Number(event.target.value))}
-            disabled={disabled || !range}
-          />
-          <button
-            className="raise-button"
-            type="button"
-            onClick={onRaise}
-            disabled={disabled || !range}
-          >
-            Raise
-          </button>
+          <div className="raise-control" data-disabled={!range || disabled}>
+            <div className="raise-heading">
+              <span>Raise to</span>
+              <output>{range ? raiseTo.toLocaleString("en-US") : "—"}</output>
+            </div>
+            <input
+              aria-label="Raise target"
+              type="range"
+              min={range?.min_to ?? 0}
+              max={range?.max_to ?? 1}
+              value={range ? raiseTo : 0}
+              onChange={(event) => setRaiseTo(Number(event.target.value))}
+              disabled={disabled || !range}
+            />
+            <div className="raise-presets">
+              <button type="button" onClick={() => range && setRaiseTo(range.min_to)} disabled={disabled || !range}>Min</button>
+              <button type="button" onClick={() => setRaiseTo(halfPotTarget)} disabled={disabled || !range}>½ pot</button>
+              <button type="button" onClick={() => setRaiseTo(potTarget)} disabled={disabled || !range}>Pot</button>
+              <button type="button" onClick={() => range && setRaiseTo(range.max_to)} disabled={disabled || !range}>All in</button>
+            </div>
+            <button className="raise-submit" type="button" onClick={onRaise} disabled={disabled || !range}>
+              Raise →
+            </button>
+          </div>
+
           {view.settled && view.ready && (
             <button
-              className="ready-button"
+              className="next-hand-action"
               type="button"
               onClick={onReady}
-              disabled={
-                disabled ||
-                view.ready.mine ||
-                view.ready.complete ||
-                !view.challenge?.draw_verified
-              }
+              disabled={disabled || view.ready.mine || view.ready.complete || !view.challenge?.draw_verified}
             >
               {view.ready.complete
                 ? "Table complete"
-                : `Ready ${view.ready.count}/${view.ready.players}`}
+                : view.ready.mine
+                  ? `Entropy added ${view.ready.count}/${view.ready.players}`
+                  : "Add entropy & ready →"}
             </button>
           )}
         </div>
       </div>
 
+      {view.next_deal && <DealIntegrity deal={view.next_deal} room={room} />}
       <Contract
         view={contract}
         disabled={disabled}
