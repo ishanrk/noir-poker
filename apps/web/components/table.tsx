@@ -134,16 +134,11 @@ export function Table({
   const halfPotTarget = range
     ? clamp(currentBet + Math.round((view.pot + (actions?.call ?? 0)) / 2), range.min_to, range.max_to)
     : 0;
-  const payouts = result?.awards
-    .map((award) => `${playerName(award.player, viewer, view.mode)} +${award.amount.toLocaleString("en-US")}`)
-    .join(", ");
   let status = actions ? "Your action" : "Waiting for player";
   let message = actions ? "Choose the line" : "The table is moving";
 
-  if (disabled) [status, message] = ["Waiting", "Server confirmation pending"];
-  if (view.settled) [status, message] = ["Hand complete", payouts ?? "Payout settled"];
+  if (view.settled) [status, message] = ["Hand complete", "Pot settled"];
   if (result?.kind === "showdown") status = "Showdown";
-  if (error) [status, message] = ["Error", error];
 
   return (
     <section className="table-shell" aria-label="Six-max poker table">
@@ -188,6 +183,7 @@ export function Table({
           const awards = result?.awards
             .filter((award) => award.player === position)
             .map((award) => award.amount);
+          const total = awards?.length ? awards.reduce((sum, amount) => sum + amount, 0) : undefined;
 
           return (
             <Seat
@@ -198,7 +194,7 @@ export function Table({
               bet={player?.bet}
               proofPoints={player?.proof_points}
               cards={player ? cards : undefined}
-              awards={awards}
+              awards={total === undefined ? undefined : [total]}
               acting={view.turn === position}
               dealer={view.dealer === position}
               empty={!player}
@@ -245,6 +241,8 @@ export function Table({
               Raise →
             </button>
           </div>
+
+          {error && <p className="form-error" role="alert">{error}</p>}
 
           {view.settled && view.ready && (
             <button
