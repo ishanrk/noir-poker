@@ -169,7 +169,7 @@ export function Table({
             </div>
             <div className="board" aria-label="Community cards">
               {[0, 1, 2, 3, 4].map((index) => (
-                <Card key={index} value={view.board[index]?.value} delay={index * 120} />
+                <Card key={index} value={view.board[index]?.value} delay={index * 180} />
               ))}
             </div>
             <span className="street-label">{view.street}</span>
@@ -207,21 +207,21 @@ export function Table({
         })}
       </div>
 
-      <div className="action-bar" aria-label="Player actions">
+      <div className="action-bar" aria-label="Player actions" aria-busy={disabled}>
         <div className="action-copy" aria-live="polite">
           <span>{status}</span>
           <strong>{message}</strong>
         </div>
         <div className="action-controls">
           <div className="plain-actions">
-            <button type="button" onClick={onFold} disabled={disabled || !actions?.fold}>Fold</button>
-            <button type="button" onClick={onCheck} disabled={disabled || !actions?.check}>Check</button>
-            <button type="button" onClick={onCall} disabled={disabled || actions?.call === undefined}>
+            <button type="button" onClick={onFold} disabled={!actions?.fold}>Fold</button>
+            <button type="button" onClick={onCheck} disabled={!actions?.check}>Check</button>
+            <button type="button" onClick={onCall} disabled={actions?.call === undefined}>
               {actions?.call === undefined ? "Call" : `Call ${actions.call.toLocaleString("en-US")}`}
             </button>
           </div>
 
-          <div className="raise-control" data-disabled={!range || disabled}>
+          <div className="raise-control" data-disabled={!range}>
             <div className="raise-heading">
               <span>Raise to</span>
               <output>{range ? raiseTo.toLocaleString("en-US") : "—"}</output>
@@ -233,15 +233,15 @@ export function Table({
               max={range?.max_to ?? 1}
               value={range ? raiseTo : 0}
               onChange={(event) => setRaiseTo(Number(event.target.value))}
-              disabled={disabled || !range}
+              disabled={!range}
             />
             <div className="raise-presets">
-              <button type="button" onClick={() => range && setRaiseTo(range.min_to)} disabled={disabled || !range}>Min</button>
-              <button type="button" onClick={() => setRaiseTo(halfPotTarget)} disabled={disabled || !range}>½ pot</button>
-              <button type="button" onClick={() => setRaiseTo(potTarget)} disabled={disabled || !range}>Pot</button>
-              <button type="button" onClick={() => range && setRaiseTo(range.max_to)} disabled={disabled || !range}>All in</button>
+              <button type="button" onClick={() => range && setRaiseTo(range.min_to)} disabled={!range}>Min</button>
+              <button type="button" onClick={() => setRaiseTo(halfPotTarget)} disabled={!range}>½ pot</button>
+              <button type="button" onClick={() => setRaiseTo(potTarget)} disabled={!range}>Pot</button>
+              <button type="button" onClick={() => range && setRaiseTo(range.max_to)} disabled={!range}>All in</button>
             </div>
-            <button className="raise-submit" type="button" onClick={onRaise} disabled={disabled || !range}>
+            <button className="raise-submit" type="button" onClick={onRaise} disabled={!range}>
               Raise →
             </button>
           </div>

@@ -32,8 +32,8 @@ export function Seat({
     <section className={className} aria-label={empty ? `Seat ${position + 1} open` : name}>
       {!empty && (
         <div className="seat-cards">
-          <Card value={cards?.[0]} hidden={!cards} delay={position * 65} />
-          <Card value={cards?.[1]} hidden={!cards} delay={position * 65 + 90} />
+          <Card value={cards?.[0]} hidden={!cards} delay={position * 100} />
+          <Card value={cards?.[1]} hidden={!cards} delay={position * 100 + 150} />
         </div>
       )}
       <div className="seat-panel">

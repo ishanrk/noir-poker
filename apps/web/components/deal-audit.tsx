@@ -104,12 +104,12 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
             </header>
             <div className="audit-table">
               <div className="audit-board">
-                {layout.board.map((card, index) => <Card key={card} value={cardValue(card)} delay={900 + index * 150} />)}
+                {layout.board.map((card, index) => <Card key={card} value={cardValue(card)} delay={1200 + index * 210} />)}
               </div>
               {layout.hole.map((cards, seat) => (
                 <div className={`audit-seat audit-seat-${seat}`} key={seat}>
                   <span>Seat {seat + 1}{audit.dealer === seat ? " (dealer)" : ""}</span>
-                  <div><Card value={cardValue(cards[0])} delay={seat * 120} /><Card value={cardValue(cards[1])} delay={seat * 120 + 300} /></div>
+                  <div><Card value={cardValue(cards[0])} delay={seat * 170} /><Card value={cardValue(cards[1])} delay={seat * 170 + 420} /></div>
                 </div>
               ))}
               <div className="burn-cards"><span>burns</span>{layout.burns.map(cardValue).join(", ")}</div>
