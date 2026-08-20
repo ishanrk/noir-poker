@@ -491,3 +491,223 @@ code {
     animation: none;
   }
 }
+
+/* real keycaps */
+.action-copy span,
+.action-copy strong {
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.action-copy span {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.action-copy strong {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.plain-actions {
+  gap: 16px;
+  padding-bottom: 8px;
+}
+
+.raise-presets {
+  gap: 10px;
+  padding-bottom: 7px;
+}
+
+.plain-actions button,
+.raise-presets button,
+.raise-submit,
+.next-hand-action,
+.primary-action,
+.text-action,
+.private-challenge button,
+.player-proof-line button,
+.waiting-room button,
+.room-status button,
+.seat-scale label span,
+.mode-switch label > span {
+  min-height: 48px;
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+  clip-path: none;
+  background: linear-gradient(180deg, var(--paper) 0 76%, #edf0f2 76% 100%);
+  color: var(--ink);
+  box-shadow:
+    inset 2px 0 0 rgb(255 255 255 / 90%),
+    inset -2px 0 0 var(--line),
+    inset 0 -3px 0 var(--line),
+    0 2px 0 var(--paper),
+    0 5px 0 var(--line-strong),
+    0 7px 0 var(--ink);
+  transform: translateY(0);
+  transition: transform 90ms ease, box-shadow 90ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.plain-actions button,
+.raise-submit,
+.next-hand-action,
+.primary-action,
+.text-action {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.raise-presets button {
+  min-height: 38px;
+  padding: 0 12px;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.plain-actions button:not(:disabled):hover,
+.raise-presets button:not(:disabled):hover,
+.text-action:not(:disabled):hover,
+.private-challenge button:not(:disabled):hover,
+.player-proof-line button:not(:disabled):hover,
+.waiting-room button:not(:disabled):hover,
+.room-status button:not(:disabled):hover,
+.seat-scale label:hover span,
+.mode-switch label:hover > span {
+  border-color: var(--blue);
+  color: var(--blue);
+  transform: translateY(-1px);
+  box-shadow:
+    inset 2px 0 0 rgb(255 255 255 / 90%),
+    inset -2px 0 0 var(--line),
+    inset 0 -3px 0 var(--line),
+    0 2px 0 var(--paper),
+    0 5px 0 var(--lime),
+    0 7px 0 var(--blue-dark);
+}
+
+.plain-actions button:not(:disabled):active,
+.raise-presets button:not(:disabled):active,
+.text-action:not(:disabled):active,
+.private-challenge button:not(:disabled):active,
+.player-proof-line button:not(:disabled):active,
+.waiting-room button:not(:disabled):active,
+.room-status button:not(:disabled):active,
+.seat-scale label:active span,
+.mode-switch label:active > span {
+  transform: translateY(5px);
+  box-shadow:
+    inset 1px 0 0 rgb(255 255 255 / 70%),
+    inset -1px 0 0 var(--line),
+    inset 0 -1px 0 var(--line),
+    0 1px 0 var(--line-strong),
+    0 2px 0 var(--ink);
+}
+
+.raise-submit,
+.next-hand-action,
+.primary-action,
+.mode-switch input:checked + span,
+.seat-scale input:checked + span {
+  border-color: var(--ink);
+  background: linear-gradient(180deg, var(--blue) 0 76%, var(--blue-dark) 76% 100%);
+  color: white;
+  box-shadow:
+    inset 2px 0 0 rgb(255 255 255 / 16%),
+    inset -2px 0 0 var(--blue-dark),
+    inset 0 -3px 0 var(--blue-dark),
+    0 2px 0 var(--blue),
+    0 5px 0 var(--blue-dark),
+    0 7px 0 var(--ink),
+    4px 9px 0 var(--lime);
+}
+
+.raise-submit:not(:disabled):hover,
+.next-hand-action:not(:disabled):hover,
+.primary-action:not(:disabled):hover,
+.mode-switch label:hover input:checked + span,
+.seat-scale label:hover input:checked + span {
+  border-color: var(--ink);
+  background: linear-gradient(180deg, var(--blue-dark) 0 76%, var(--blue) 76% 100%);
+  color: white;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 2px 0 0 rgb(255 255 255 / 12%),
+    inset -2px 0 0 var(--blue-dark),
+    inset 0 -3px 0 var(--blue-dark),
+    0 2px 0 var(--blue),
+    0 6px 0 var(--blue-dark),
+    0 8px 0 var(--ink),
+    4px 10px 0 var(--lime);
+}
+
+.raise-submit:not(:disabled):active,
+.next-hand-action:not(:disabled):active,
+.primary-action:not(:disabled):active,
+.mode-switch label:active input:checked + span,
+.seat-scale label:active input:checked + span {
+  transform: translateY(6px);
+  box-shadow:
+    inset 1px 0 0 rgb(255 255 255 / 10%),
+    inset -1px 0 0 var(--blue-dark),
+    inset 0 -1px 0 var(--blue-dark),
+    0 1px 0 var(--blue-dark),
+    2px 3px 0 var(--lime);
+}
+
+.plain-actions button:disabled,
+.raise-presets button:disabled {
+  border-color: var(--line-strong);
+  background: linear-gradient(180deg, #f6f7f8 0 76%, var(--line) 76% 100%);
+  color: #9aa0a8;
+  transform: translateY(3px);
+  box-shadow:
+    inset 0 -2px 0 var(--line),
+    0 2px 0 var(--line-strong),
+    0 3px 0 #8f959d;
+}
+
+.raise-submit {
+  min-width: 160px;
+}
+
+.next-hand-action {
+  min-width: 280px;
+  min-height: 50px;
+  padding: 0 36px;
+  margin-bottom: 9px;
+}
+
+.mode-switch label > span {
+  min-height: 76px;
+}
+
+@media (max-width: 700px) {
+  .plain-actions {
+    gap: 12px;
+  }
+
+  .next-hand-action {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plain-actions button,
+  .raise-presets button,
+  .raise-submit,
+  .next-hand-action,
+  .primary-action,
+  .text-action,
+  .private-challenge button,
+  .player-proof-line button,
+  .waiting-room button,
+  .room-status button,
+  .seat-scale label span,
+  .mode-switch label > span {
+    transition: none;
+  }
+}
