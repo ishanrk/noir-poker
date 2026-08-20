@@ -1,5 +1,9 @@
 import { Card } from "@/components/card";
-import { Contract, type ContractView } from "@/components/contract";
+import {
+  ChallengeProofs,
+  PrivateChallenge,
+  type ContractView,
+} from "@/components/contract";
 import { DealIntegrity, type DealView } from "@/components/deal-integrity";
 import { Seat } from "@/components/seat";
 import type { RoomMode } from "@/lib/server";
@@ -46,6 +50,12 @@ export type ClaimView = {
   points?: number;
   nullifier?: string;
 };
+export type ProofMetaView = { hand_no: number; published: boolean; nullifier?: string };
+export type PlayerProofView = {
+  seat: number;
+  draw?: ProofMetaView;
+  completion?: ProofMetaView;
+};
 export type View = {
   mode: RoomMode;
   players: PlayerView[];
@@ -65,6 +75,7 @@ export type View = {
   ready?: ReadyView;
   challenge?: ChallengeView;
   claim?: ClaimView;
+  proofs: PlayerProofView[];
 };
 
 type TableProps = {
@@ -84,6 +95,7 @@ type TableProps = {
   onCommitContract: () => void;
   onVerifyDraw: () => void;
   onGenerateProof: () => void;
+  onVerifyProof: (seat: number, hand: number, kind: "draw" | "completion") => void;
 };
 
 const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
@@ -108,6 +120,7 @@ export function Table({
   onCommitContract,
   onVerifyDraw,
   onGenerateProof,
+  onVerifyProof,
 }: TableProps) {
   const hole = [view.hole[0].value, view.hole[1].value] as const;
   const actions = view.actions;
@@ -135,6 +148,14 @@ export function Table({
   return (
     <section className="table-shell" aria-label="Six-max poker table">
       {view.deal && <DealIntegrity deal={view.deal} room={room} compact />}
+
+      <PrivateChallenge
+        view={contract}
+        disabled={disabled}
+        onCommit={onCommitContract}
+        onDraw={onVerifyDraw}
+        onClaim={onGenerateProof}
+      />
 
       <div className="table-stage">
         <div className="table-surface">
@@ -230,25 +251,23 @@ export function Table({
               className="next-hand-action"
               type="button"
               onClick={onReady}
-              disabled={disabled || view.ready.mine || view.ready.complete || !view.challenge?.draw_verified}
+              disabled={disabled || view.ready.mine || view.ready.complete || !view.challenge?.assigned}
             >
               {view.ready.complete
                 ? "Table complete"
                 : view.ready.mine
-                  ? `Entropy added ${view.ready.count}/${view.ready.players}`
-                  : "Add entropy & ready →"}
+                  ? `Ready ${view.ready.count}/${view.ready.players}`
+                  : "Ready for next hand"}
             </button>
           )}
         </div>
       </div>
 
       {view.next_deal && <DealIntegrity deal={view.next_deal} room={room} />}
-      <Contract
-        view={contract}
+      <ChallengeProofs
+        proofs={contract.proofs}
         disabled={disabled}
-        onCommit={onCommitContract}
-        onVerifyDraw={onVerifyDraw}
-        onProve={onGenerateProof}
+        onVerify={onVerifyProof}
       />
     </section>
   );

@@ -12,7 +12,7 @@ import {
   handTag,
 } from "./challenge.ts";
 import { uuidBytes } from "./deal.ts";
-import type { ProofReceipt } from "./server.ts";
+import type { ProofReceipt, PublishedProof } from "./server.ts";
 
 const PROOF_SYSTEM = "ultra_honk";
 const CIRCUIT_ID = "challenge_v2";
@@ -28,13 +28,17 @@ export async function verifyReceipt(
   onVerified?: (proof: ReceiptProof) => void,
 ) {
   validateReceipt(receipt);
-  const verified = await verifyChallengeProofs(
-    [
-      { proof: receipt.draw_proof, publicInputs: receipt.draw_public_inputs },
-      { proof: receipt.completion_proof, publicInputs: receipt.completion_public_inputs },
-    ],
-    (index) => onVerified?.(index === 0 ? "draw" : "completion"),
-  );
+  const proofs = [];
+  const kinds: ReceiptProof[] = [];
+
+  if (receipt.draw_proof && receipt.draw_public_inputs) {
+    proofs.push({ proof: receipt.draw_proof, publicInputs: receipt.draw_public_inputs });
+    kinds.push("draw");
+  }
+  proofs.push({ proof: receipt.completion_proof, publicInputs: receipt.completion_public_inputs });
+  kinds.push("completion");
+
+  const verified = await verifyChallengeProofs(proofs, (index) => onVerified?.(kinds[index]));
 
   if (!verified) throw new Error("proof verification failed");
 }
@@ -70,20 +74,69 @@ export function validateReceipt(receipt: ProofReceipt) {
     receipt.catalog_root,
   ]) decodeHex(value);
 
-  const draw = decodePublicInputs(receipt.draw_public_inputs);
   const completion = decodePublicInputs(receipt.completion_public_inputs);
+  const hasDraw = receipt.draw_proof !== undefined || receipt.draw_public_inputs !== undefined;
 
   if (
-    !commonMatches(draw, receipt) ||
     !commonMatches(completion, receipt) ||
-    draw.mode !== 0 ||
-    encodeHex(draw.factsHash) !== ZERO ||
-    encodeHex(draw.nullifier) !== ZERO ||
     completion.mode !== 1 ||
     encodeHex(completion.factsHash) !== receipt.facts_hash ||
-    encodeHex(completion.nullifier) !== receipt.nullifier
+    encodeHex(completion.nullifier) !== receipt.nullifier ||
+    (hasDraw && (!receipt.draw_proof || !receipt.draw_public_inputs))
   ) {
     throw new Error("proof receipt mismatch");
+  }
+
+  if (receipt.draw_public_inputs) {
+    const draw = decodePublicInputs(receipt.draw_public_inputs);
+
+    if (
+      !commonMatches(draw, receipt) ||
+      draw.mode !== 0 ||
+      encodeHex(draw.factsHash) !== ZERO ||
+      encodeHex(draw.nullifier) !== ZERO
+    ) {
+      throw new Error("proof receipt mismatch");
+    }
+  }
+}
+
+export async function verifyPublishedProof(proof: PublishedProof) {
+  const expectedTag = encodeHex(handTag(uuidBytes(proof.room), BigInt(proof.hand_no)));
+  const inputs = decodePublicInputs(proof.public_inputs);
+  if (proof.kind !== "draw" && proof.kind !== "completion") {
+    throw new Error("published proof mismatch");
+  }
+  const mode = proof.kind === "draw" ? 0 : 1;
+
+  if (
+    proof.protocol_version !== CHALLENGE_VERSION ||
+    proof.proof_system !== PROOF_SYSTEM ||
+    proof.circuit_id !== CIRCUIT_ID ||
+    proof.bb_version !== BB_VERSION ||
+    proof.artifact_sha256 !== ARTIFACT_SHA256 ||
+    proof.vk_sha256 !== VK_SHA256 ||
+    proof.seat < 0 ||
+    proof.seat > 5 ||
+    !Number.isInteger(proof.seat) ||
+    !Number.isInteger(proof.hand_no) ||
+    proof.hand_no < 0 ||
+    proof.hand_tag !== expectedTag ||
+    proof.catalog_root !== encodeHex(catalogRoot()) ||
+    inputs.mode !== mode ||
+    encodeHex(inputs.handTag) !== proof.hand_tag ||
+    inputs.seat !== proof.seat ||
+    encodeHex(inputs.commitment) !== proof.commitment ||
+    encodeHex(inputs.nonce) !== proof.nonce ||
+    encodeHex(inputs.catalogRoot) !== proof.catalog_root ||
+    (mode === 0 && (encodeHex(inputs.factsHash) !== ZERO || encodeHex(inputs.nullifier) !== ZERO))
+  ) {
+    throw new Error("published proof mismatch");
+  }
+
+  // same verifier for both modes
+  if (!(await verifyChallengeProofs([{ proof: proof.proof, publicInputs: proof.public_inputs }]))) {
+    throw new Error("proof verification failed");
   }
 }
 

@@ -128,7 +128,7 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
   await waitForEnabled(fold, "bot did not return action");
   await fold.click();
   await page.getByText("Hand complete", { exact: true }).waitFor({ state: "visible", timeout: 15_000 });
-  await page.getByRole("button", { name: "Commit & draw →" }).waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByRole("button", { name: "Draw challenge" }).waitFor({ state: "visible", timeout: 15_000 });
   await visit("/", "home-after-single", ["Create a game"]);
 }
 
@@ -148,8 +148,8 @@ assert.equal(
 await visit("/rules", "rules", [
   "Bluff and win with seven-deuce",
   "These are the same challenge controls shown at the poker table.",
-  "Challenge missed. No proof can be generated.",
-  "+0 proof points",
+  "Challenge missed",
+  "No completion proof +0",
   "+20 proof points",
   "Export JSON",
 ]);

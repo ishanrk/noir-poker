@@ -26,7 +26,11 @@ if (createHash("sha256").update(source).digest("hex") !== ARTIFACT_SHA256) {
 }
 
 const receipt = await loadReceipt(input);
-const draw = decodePublic(receipt.draw_public_inputs);
+const hasDraw = Boolean(receipt.draw_proof && receipt.draw_public_inputs);
+if (Boolean(receipt.draw_proof) !== Boolean(receipt.draw_public_inputs)) {
+  throw new Error("proof receipt mismatch");
+}
+const draw = hasDraw ? decodePublic(receipt.draw_public_inputs) : undefined;
 const completion = decodePublic(receipt.completion_public_inputs);
 const expectedTag = createHash("blake2s256")
   .update(Buffer.concat([Buffer.from("NPHAND02"), uuid(receipt.room), u64(BigInt(receipt.hand_no))]))
@@ -46,23 +50,24 @@ if (
   !Number.isInteger(receipt.seat) ||
   receipt.seat < 0 ||
   receipt.seat > 5 ||
-  !common(draw, receipt) ||
   !common(completion, receipt) ||
-  draw.mode !== 0 ||
-  draw.factsHash !== ZERO ||
-  draw.nullifier !== ZERO ||
   completion.mode !== 1 ||
   completion.factsHash !== receipt.facts_hash ||
-  completion.nullifier !== receipt.nullifier
+  completion.nullifier !== receipt.nullifier ||
+  (draw &&
+    (!common(draw, receipt) ||
+      draw.mode !== 0 ||
+      draw.factsHash !== ZERO ||
+      draw.nullifier !== ZERO))
 ) throw new Error("proof receipt mismatch");
 
 const api = await Barretenberg.new({ backend: BackendType.Wasm });
 try {
   const backend = new UltraHonkBackend(artifact.bytecode, api);
-  for (const [proof, publicInputs] of [
-    [receipt.draw_proof, receipt.draw_public_inputs],
-    [receipt.completion_proof, receipt.completion_public_inputs],
-  ]) {
+  const proofs = [[receipt.completion_proof, receipt.completion_public_inputs]];
+  if (hasDraw) proofs.unshift([receipt.draw_proof, receipt.draw_public_inputs]);
+
+  for (const [proof, publicInputs] of proofs) {
     const verified = await backend.verifyProof(
       {
         proof: Buffer.from(proof, "base64"),

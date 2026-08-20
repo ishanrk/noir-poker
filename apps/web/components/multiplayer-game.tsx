@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { ContractView, ProofState } from "@/components/contract";
+import type { ContractView, LocalProofState, ProofState } from "@/components/contract";
 import { DealIntegrity, type DealView } from "@/components/deal-integrity";
 import { Table, type ChallengeView, type ClaimView, type View } from "@/components/table";
 import {
@@ -26,7 +26,16 @@ import {
   saveChallengeSecret,
 } from "@/lib/challenge";
 import { proveChallenge, type ProofStatus } from "@/lib/challenge-proof";
-import { freshEntropy, loadSeat, type RoomMode, type RoomSeat, roomSocket } from "@/lib/server";
+import { verifyPublishedProof } from "@/lib/receipt";
+import {
+  freshEntropy,
+  loadPublishedProof,
+  loadSeat,
+  type ProofKind,
+  type RoomMode,
+  type RoomSeat,
+  roomSocket,
+} from "@/lib/server";
 
 type Waiting = { joined: number; players: number; mode: RoomMode; deal?: DealView };
 type ServerMessage =
@@ -54,6 +63,8 @@ type Assignment = {
 };
 type PrivateObjective = { objective?: string; index?: number; error?: string };
 type ContractCompletion = { completed?: boolean; error?: string };
+
+const proofKey = (seat: number, hand: number, kind: ProofKind) => `${seat}:${hand}:${kind}`;
 
 function challengeAssignment(challenge: ChallengeView | undefined): Assignment | undefined {
   if (
@@ -150,6 +161,7 @@ export function MultiplayerGame({ room }: { room: string }) {
   const [challengeError, setChallengeError] = useState<string>();
   const [drawState, setDrawState] = useState<ProofState>("idle");
   const [claimState, setClaimState] = useState<ProofState>("idle");
+  const [localProofs, setLocalProofs] = useState<Record<string, LocalProofState>>({});
 
   const connect = useCallback(() => {
     const current = auth.current;
@@ -429,6 +441,21 @@ export function MultiplayerGame({ room }: { room: string }) {
     }
   }
 
+  async function verifyProof(owner: number, hand: number, kind: ProofKind) {
+    const key = proofKey(owner, hand, kind);
+    if (localProofs[key] === "verifying") return;
+    setLocalProofs((current) => ({ ...current, [key]: "verifying" }));
+
+    try {
+      // exact accepted proof
+      const proof = await loadPublishedProof(room, hand, owner, kind);
+      await verifyPublishedProof(proof);
+      setLocalProofs((current) => ({ ...current, [key]: "verified" }));
+    } catch {
+      setLocalProofs((current) => ({ ...current, [key]: "failed" }));
+    }
+  }
+
   if (seat === undefined) return <p className="table-status">Loading room…</p>;
   if (seat === null) return <div className="room-status"><strong>No seat for this room</strong><Link href="/">Back to lobby</Link></div>;
   if (waiting) {
@@ -470,9 +497,31 @@ export function MultiplayerGame({ room }: { room: string }) {
           reward: view.claim.points ?? CHALLENGE_POINTS,
           completed: claimCompleted,
           state: claimState,
-          receipt: view.claim.nullifier ? `/proof/${view.claim.nullifier}` : undefined,
         }
       : undefined,
+    proofs: view.proofs.map((proof) => ({
+      seat: proof.seat,
+      name: proof.seat === seat ? "You" : `Player ${proof.seat + 1}`,
+      points: view.players[proof.seat]?.proof_points ?? 0,
+      draw: proof.draw
+        ? {
+            handNo: proof.draw.hand_no,
+            published: proof.draw.published,
+            local: localProofs[proofKey(proof.seat, proof.draw.hand_no, "draw")] ?? "idle",
+          }
+        : undefined,
+      completion: proof.completion
+        ? {
+            handNo: proof.completion.hand_no,
+            published: proof.completion.published,
+            local:
+              localProofs[proofKey(proof.seat, proof.completion.hand_no, "completion")] ?? "idle",
+            receipt: proof.completion.nullifier
+              ? `/proof/${proof.completion.nullifier}`
+              : undefined,
+          }
+        : undefined,
+    })),
     error: challengeError,
   };
 
@@ -496,6 +545,7 @@ export function MultiplayerGame({ room }: { room: string }) {
         onCommitContract={commitChallenge}
         onVerifyDraw={() => void drawChallenge()}
         onGenerateProof={() => void claimChallenge()}
+        onVerifyProof={(owner, hand, kind) => void verifyProof(owner, hand, kind)}
       />
     </>
   );

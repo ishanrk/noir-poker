@@ -7,12 +7,16 @@ import { SiteHeader } from "@/components/site-header";
 import { verifyReceipt, type ReceiptProof } from "@/lib/receipt";
 import { loadProofReceipt, type ProofReceipt } from "@/lib/server";
 
-type State = "waiting" | "verifying" | "verified" | "failed";
+type State = "waiting" | "verifying" | "verified" | "skipped" | "failed";
 
 const status = (state: State) =>
-  ({ waiting: "queued", verifying: "checking locally", verified: "verified", failed: "invalid" })[
-    state
-  ];
+  ({
+    waiting: "queued",
+    verifying: "checking locally",
+    verified: "verified",
+    skipped: "not published",
+    failed: "invalid",
+  })[state];
 
 function ReceiptSeal({ verified, points = 20 }: { verified: boolean; points?: number }) {
   return (
@@ -34,7 +38,7 @@ function VerificationTimeline({
   draw: State;
   completion: State;
 }) {
-  const verified = draw === "verified" && completion === "verified";
+  const verified = (draw === "verified" || draw === "skipped") && completion === "verified";
 
   return (
     <section className="verification-timeline" aria-live="polite">
@@ -100,7 +104,10 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
       if (!mounted.current) return;
       receiptRef.current = value;
       setReceipt(value);
-      setDraw("verifying");
+      const hasDraw = Boolean(value.draw_proof && value.draw_public_inputs);
+      step = hasDraw ? "draw" : "completion";
+      setDraw(hasDraw ? "verifying" : "skipped");
+      if (!hasDraw) setCompletion("verifying");
       await verifyReceipt(value, (proof) => {
         if (!mounted.current) return;
         if (proof === "draw") {
@@ -163,7 +170,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
     URL.revokeObjectURL(url);
   }
 
-  const verified = draw === "verified" && completion === "verified";
+  const verified = (draw === "verified" || draw === "skipped") && completion === "verified";
 
   return (
     <main className="site-shell proof-page">
@@ -173,8 +180,8 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
           <p className="eyebrow">Public challenge verifier</p>
           <h1>{verified ? "The challenge was completed." : "Verifying a private challenge."}</h1>
           <p>
-            This browser checks both UltraHonk proofs. The challenge and private fact vector never
-            appear in the receipt.
+            This browser checks every published UltraHonk proof. The challenge and private fact
+            vector never appear in the receipt.
           </p>
         </div>
         <ReceiptSeal verified={verified} points={receipt?.points} />

@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 export type ProofState = "idle" | "preparing" | "proving" | "verifying" | "verified" | "failed";
+export type LocalProofState = "idle" | "verifying" | "verified" | "failed";
 export type ContractAssignment =
   | { kind: "available" }
   | { kind: "draw"; handNo: number }
@@ -22,162 +23,214 @@ export type ContractClaim = {
   reward: number;
   completed?: boolean;
   state: ProofState;
+};
+export type ProofMeta = {
+  handNo: number;
+  published: boolean;
+  local: LocalProofState;
   receipt?: string;
 };
-export type ContractView = { assignment: ContractAssignment; claim?: ContractClaim; error?: string };
+export type PlayerProof = {
+  seat: number;
+  name: string;
+  points: number;
+  draw?: ProofMeta;
+  completion?: ProofMeta;
+};
+export type ContractView = {
+  assignment: ContractAssignment;
+  claim?: ContractClaim;
+  proofs: PlayerProof[];
+  error?: string;
+};
 
-type ContractProps = {
+type PrivateProps = {
   view: ContractView;
   disabled?: boolean;
   onCommit: () => void;
-  onVerifyDraw: () => void;
-  onProve: () => void;
+  onDraw: () => void;
+  onClaim: () => void;
+};
+
+type ProofProps = {
+  proofs: PlayerProof[];
+  disabled?: boolean;
+  onVerify: (seat: number, hand: number, kind: "draw" | "completion") => void;
 };
 
 const busy = (state: ProofState) => ["preparing", "proving", "verifying"].includes(state);
-const label = (state: ProofState) =>
-  ({
-    idle: "ready",
-    preparing: "building witness",
-    proving: "proving in browser",
-    verifying: "server verification",
-    verified: "verified",
-    failed: "failed",
-  })[state];
+const proofLabel = (state: ProofState) => {
+  if (state === "preparing" || state === "proving") return "generating";
+  if (state === "verifying") return "server checking";
+  if (state === "verified") return "published";
+  if (state === "failed") return "failed";
+  return "not published";
+};
 
-function ProofRail({ state }: { state: ProofState }) {
-  const active = state === "preparing" ? 0 : state === "proving" ? 1 : state === "verifying" ? 2 : -1;
-  const complete = state === "verified";
+const localLabel = (proof: ProofMeta | undefined) => {
+  if (!proof?.published) return "not published";
+  if (proof.local === "verifying") return "verifying";
+  if (proof.local === "verified") return "valid proof";
+  if (proof.local === "failed") return "invalid proof";
+  return "published";
+};
+
+export function PrivateChallenge({
+  view,
+  disabled = false,
+  onCommit,
+  onDraw,
+  onClaim,
+}: PrivateProps) {
+  const { assignment, claim } = view;
 
   return (
-    <ol className="proof-rail" aria-label="Proof progress">
-      {["witness", "proof", "verify"].map((step, index) => (
-        <li key={step} data-active={index === active} data-complete={complete || (active >= 0 && index < active)}>
-          <i />
-          <span>{step}</span>
-        </li>
-      ))}
-    </ol>
+    <section className="private-challenge" aria-label="Your private challenge">
+      <header>
+        <div>
+          <span>Private challenge</span>
+          <strong>
+            {assignment.kind === "assigned"
+              ? assignment.objective
+              : assignment.kind === "draw"
+                ? "Draw your next challenge"
+                : "Available after this hand"}
+          </strong>
+        </div>
+        {assignment.kind === "assigned" && <b>+{assignment.reward}</b>}
+      </header>
+
+      {assignment.kind === "draw" && (
+        <button type="button" onClick={onCommit} disabled={disabled}>
+          Draw challenge
+        </button>
+      )}
+
+      {assignment.kind === "assigned" && (
+        <div className="private-proof">
+          <span>Fair draw proof</span>
+          <strong>{assignment.drawVerified ? "published" : proofLabel(assignment.drawState)}</strong>
+          {!assignment.drawVerified && !busy(assignment.drawState) && (
+            <button type="button" onClick={onDraw} disabled={disabled}>
+              {assignment.drawState === "failed" ? "Retry proof" : "Generate fair draw proof"}
+            </button>
+          )}
+          <small>{assignment.active ? "current hand" : "next hand"}</small>
+        </div>
+      )}
+
+      {claim && (
+        <div className="private-proof">
+          <span>Completion</span>
+          {claim.state === "verified" ? (
+            <>
+              <strong>published</strong>
+              <small>+{claim.reward} proof points</small>
+            </>
+          ) : claim.completed === false ? (
+            <>
+              <strong>Challenge missed</strong>
+              <small>No completion proof +0</small>
+            </>
+          ) : claim.completed ? (
+            <>
+              <strong>{proofLabel(claim.state)}</strong>
+              {!busy(claim.state) && (
+                <button type="button" onClick={onClaim} disabled={disabled}>
+                  {claim.state === "failed" ? "Retry proof" : "Generate completion proof"}
+                </button>
+              )}
+            </>
+          ) : (
+            <strong>hand active</strong>
+          )}
+        </div>
+      )}
+
+      {assignment.kind === "assigned" && (
+        <details>
+          <summary>Public bindings</summary>
+          <dl>
+            <div><dt>commitment</dt><dd>{assignment.commitment}</dd></div>
+            <div><dt>server nonce</dt><dd>{assignment.nonce}</dd></div>
+            <div><dt>catalog root</dt><dd>{assignment.catalogRoot}</dd></div>
+          </dl>
+        </details>
+      )}
+
+      {view.error && <p className="form-error">{view.error}</p>}
+    </section>
   );
 }
 
-function SealedChallenge({ verified = false }: { verified?: boolean }) {
+function ProofLine({
+  label,
+  kind,
+  seat,
+  proof,
+  disabled,
+  onVerify,
+}: {
+  label: string;
+  kind: "draw" | "completion";
+  seat: number;
+  proof?: ProofMeta;
+  disabled: boolean;
+  onVerify: ProofProps["onVerify"];
+}) {
   return (
-    <div className="sealed-bounty" data-verified={verified} aria-label="Hidden challenge remains sealed">
-      <div className="sealed-bounty-face">
-        <span>Private challenge</span>
-        <strong>?</strong>
-        <small>{verified ? "proof accepted" : "objective concealed"}</small>
+    <div className="player-proof-line">
+      <span>{label}</span>
+      <strong data-state={proof?.local}>{localLabel(proof)}</strong>
+      <div>
+        {proof?.published && proof.local !== "verifying" && (
+          <button type="button" onClick={() => onVerify(seat, proof.handNo, kind)} disabled={disabled}>
+            Verify
+          </button>
+        )}
+        {proof?.receipt && <Link href={proof.receipt}>Public receipt</Link>}
       </div>
-      <i aria-hidden="true" />
     </div>
   );
 }
 
-export function Contract({ view, disabled = false, onCommit, onVerifyDraw, onProve }: ContractProps) {
-  const { assignment, claim } = view;
+export function ChallengeProofs({ proofs, disabled = false, onVerify }: ProofProps) {
+  if (proofs.length === 0) return null;
 
   return (
-    <section className="contract-panel" aria-label="Private challenge protocol">
-      <header className="contract-header">
+    <section className="challenge-proofs" aria-label="Challenge proofs">
+      <header>
         <div>
-          <p className="protocol-label">ZK challenge</p>
-          <h2>Prove the private challenge.</h2>
+          <p className="protocol-label">Challenge proofs</p>
+          <h2>Public proof status</h2>
         </div>
-        <Link href="/protocol#challenge">Verifier details →</Link>
+        <Link href="/protocol#challenge">Verifier details</Link>
       </header>
-
-      <div className="contract-layout">
-        <SealedChallenge verified={claim?.state === "verified"} />
-
-        <div className="contract-work">
-          {claim && (
-            <section className="contract-phase">
-              <div className="contract-line">
-                <span>Completion / hand {claim.handNo}</span>
-                <strong data-state={claim.state}>{label(claim.state)}</strong>
-              </div>
-              {claim.state === "verified" ? (
-                <div className="proof-award">
-                  <strong>+{claim.reward} proof points</strong>
-                  <span>challenge still hidden</span>
-                  {claim.receipt && <Link href={claim.receipt}>Open public verifier →</Link>}
-                </div>
-              ) : (
-                <>
-                  {claim.objective && <p className="private-copy">Only you see: {claim.objective}</p>}
-                  {/* miss earns no points */}
-                  {claim.completed === false && (
-                    <>
-                      <p className="contract-note">Challenge missed. No proof can be generated.</p>
-                      <strong className="contract-zero">+0 proof points</strong>
-                    </>
-                  )}
-                  {claim.completed && (
-                    <>
-                      <ProofRail state={claim.state} />
-                      {!busy(claim.state) && (
-                        <button type="button" onClick={onProve} disabled={disabled}>
-                          {claim.state === "failed" ? "Retry completion proof" : "Prove completion"} →
-                        </button>
-                      )}
-                    </>
-                  )}
-                </>
-              )}
-            </section>
-          )}
-
-          {assignment.kind === "available" && (
-            <p className="contract-empty">The next private challenge appears when this hand settles.</p>
-          )}
-
-          {assignment.kind === "draw" && (
-            <section className="contract-phase">
-              <div className="contract-line">
-                <span>Selection / hand {assignment.handNo}</span>
-                <strong>not drawn</strong>
-              </div>
-              <p>
-                Lock a browser secret first. The server then adds fresh randomness. Neither side can
-                choose the challenge after seeing the other side&apos;s value.
-              </p>
-              <button type="button" onClick={onCommit} disabled={disabled}>Commit & draw →</button>
-            </section>
-          )}
-
-          {assignment.kind === "assigned" && (
-            <section className="contract-phase">
-              <div className="contract-line">
-                <span>Selection / hand {assignment.handNo}</span>
-                <strong data-state={assignment.drawVerified ? "verified" : assignment.drawState}>
-                  {assignment.drawVerified ? "verified" : label(assignment.drawState)}
-                </strong>
-              </div>
-              {!assignment.drawVerified && <ProofRail state={assignment.drawState} />}
-              {!assignment.drawVerified && !busy(assignment.drawState) && (
-                <button type="button" onClick={onVerifyDraw} disabled={disabled}>
-                  {assignment.drawState === "failed" ? "Retry selection proof" : "Prove fair selection"} →
-                </button>
-              )}
-              <div className="private-copy">
-                <span>Only this browser knows</span>
-                <strong>{assignment.objective}</strong>
-                <small>{assignment.reward} points, {assignment.active ? "in play" : "ready for next hand"}</small>
-              </div>
-              <details className="protocol-details">
-                <summary>Inspect public bindings</summary>
-                <dl>
-                  <div><dt>commitment</dt><dd>{assignment.commitment}</dd></div>
-                  <div><dt>server nonce</dt><dd>{assignment.nonce}</dd></div>
-                  <div><dt>catalog root</dt><dd>{assignment.catalogRoot}</dd></div>
-                </dl>
-              </details>
-            </section>
-          )}
-
-          {view.error && <p className="form-error">{view.error}</p>}
-        </div>
+      <div className="player-proofs">
+        {proofs.map((player) => (
+          <article key={player.seat}>
+            <header>
+              <strong>{player.name}</strong>
+              <span>{player.points} proof points</span>
+            </header>
+            <ProofLine
+              label="Fair draw"
+              kind="draw"
+              seat={player.seat}
+              proof={player.draw}
+              disabled={disabled}
+              onVerify={onVerify}
+            />
+            <ProofLine
+              label="Completion"
+              kind="completion"
+              seat={player.seat}
+              proof={player.completion}
+              disabled={disabled}
+              onVerify={onVerify}
+            />
+          </article>
+        ))}
       </div>
     </section>
   );

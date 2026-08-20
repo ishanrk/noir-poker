@@ -44,6 +44,10 @@ const receipt = {
 };
 
 assert.doesNotThrow(() => validateReceipt(receipt));
+assert.doesNotThrow(() =>
+  validateReceipt({ ...receipt, draw_proof: undefined, draw_public_inputs: undefined }),
+);
+assert.throws(() => validateReceipt({ ...receipt, draw_proof: undefined }));
 assert.throws(() => validateReceipt({ ...receipt, room: "10112233-4455-6677-8899-aabbccddeeff" }));
 assert.throws(() => validateReceipt({ ...receipt, hand_no: handNo + 1 }));
 assert.throws(() => validateReceipt({ ...receipt, points: 40 }));

@@ -48,10 +48,31 @@ export type ProofReceipt = {
   nullifier: string;
   catalog_root: string;
   points: number;
-  draw_proof: string;
-  draw_public_inputs: string;
+  draw_proof?: string;
+  draw_public_inputs?: string;
   completion_proof: string;
   completion_public_inputs: string;
+};
+
+export type ProofKind = "draw" | "completion";
+
+export type PublishedProof = {
+  protocol_version: number;
+  room: string;
+  hand_no: number;
+  seat: number;
+  kind: ProofKind;
+  proof_system: string;
+  circuit_id: string;
+  bb_version: string;
+  artifact_sha256: string;
+  vk_sha256: string;
+  hand_tag: string;
+  commitment: string;
+  nonce: string;
+  catalog_root: string;
+  proof: string;
+  public_inputs: string;
 };
 
 export type DealAudit = {
@@ -103,6 +124,20 @@ export async function joinRoom(room: string): Promise<SeatResponse> {
 
 export async function loadProofReceipt(nullifier: string): Promise<ProofReceipt> {
   const response = await fetch(`${serverUrl()}/proofs/${encodeURIComponent(nullifier)}`);
+
+  if (!response.ok) throw new Error(await responseError(response));
+  return response.json();
+}
+
+export async function loadPublishedProof(
+  room: string,
+  hand: number,
+  seat: number,
+  kind: ProofKind,
+): Promise<PublishedProof> {
+  const response = await fetch(
+    `${serverUrl()}/proofs/${encodeURIComponent(room)}/${encodeURIComponent(hand)}/${encodeURIComponent(seat)}/${kind}`,
+  );
 
   if (!response.ok) throw new Error(await responseError(response));
   return response.json();

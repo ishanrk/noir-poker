@@ -23,7 +23,7 @@ const STEPS = [
   },
   {
     label: "Verify",
-    title: "Anyone can verify both UltraHonk proofs.",
+    title: "Anyone can verify each published UltraHonk proof.",
     copy: "The receipt contains public bindings and proof bytes. The challenge definition, browser secret and private fact vector are not disclosed.",
     code: "UltraHonkBackend.verifyProof(proof, publicInputs)",
   },

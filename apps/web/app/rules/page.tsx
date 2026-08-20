@@ -123,9 +123,9 @@ export default function RulesPage() {
             that one-time claim.
           </p>
           <p>
-            Share that URL. Opening it downloads the receipt and verifies both UltraHonk proofs in the
-            visitor&apos;s browser. The challenge and the player&apos;s hole cards are not included in the
-            receipt.
+            Share that URL. Opening it downloads the receipt and verifies every published UltraHonk
+            proof in the visitor&apos;s browser. The challenge and the player&apos;s hole cards are not
+            included in the receipt.
           </p>
           <p>
             For an independent command-line check, choose <strong>Export JSON</strong> on the receipt

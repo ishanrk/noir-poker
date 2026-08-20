@@ -53,8 +53,8 @@ export default function ProtocolPage() {
             <em>Available after the server accepts a completion proof</em>
             <code>/proof/&lt;nullifier&gt;</code>
             <p>
-              Verifies two UltraHonk proofs: the private challenge was assigned from the fixed
-              catalog, and the same hidden challenge was completed.
+              Verifies the completion proof and any optional fair draw proof. The completion proof
+              independently binds selection from the fixed catalog and proves the hidden challenge.
             </p>
             <p><b>Download:</b> choose Export JSON on that page.</p>
             <code>npm --prefix apps/web run proof:verify -- receipt.json</code>

@@ -226,15 +226,15 @@ impl Room {
             return Err("already ready");
         }
 
-        // human proof still required
+        // human challenge required
         if (self.mode != RoomMode::Single || seat == 0)
-            && !self
+            && self
                 .next_challenges
                 .get(seat)
                 .and_then(Option::as_ref)
-                .is_some_and(|challenge| challenge.draw_verified)
+                .is_none()
         {
-            return Err("draw proof required");
+            return Err("challenge required");
         }
 
         let all = self
@@ -403,17 +403,23 @@ impl Room {
         hand_no: u64,
     ) -> Result<PendingDraw, &'static str> {
         let hand = self.hand.as_ref().ok_or("game not started")?;
+        let next = hand.game.settled;
+        let expected = if next {
+            hand.no.checked_add(1).ok_or("hand limit reached")?
+        } else {
+            hand.no
+        };
 
-        if !hand.game.settled {
-            return Err("hand not settled");
-        }
-
-        if hand.no.checked_add(1).ok_or("hand limit reached")? != hand_no {
+        if expected != hand_no {
             return Err("wrong challenge hand");
         }
 
-        let challenge = self
-            .next_challenges
+        let challenges = if next {
+            &self.next_challenges
+        } else {
+            &self.current_challenges
+        };
+        let challenge = challenges
             .get(seat)
             .and_then(Option::as_ref)
             .ok_or("challenge missing")?;
@@ -430,13 +436,17 @@ impl Room {
             nonce: challenge.nonce,
             catalog_root: challenge.catalog_root,
             rev: self.rev.checked_add(1).ok_or("revision limit reached")?,
+            next,
         })
     }
 
     pub(super) fn commit_draw(&mut self, draw: PendingDraw) {
-        let challenge = self.next_challenges[draw.seat]
-            .as_mut()
-            .expect("staged challenge");
+        let challenges = if draw.next {
+            &mut self.next_challenges
+        } else {
+            &mut self.current_challenges
+        };
+        let challenge = challenges[draw.seat].as_mut().expect("staged challenge");
 
         challenge.draw_verified = true;
         self.changed(draw.rev);
@@ -464,10 +474,6 @@ impl Room {
             .ok_or("challenge missing")?;
         let facts_salt = challenge.facts_salt.ok_or("challenge facts missing")?;
         let facts_hash = challenge.facts_hash.ok_or("challenge facts missing")?;
-
-        if !challenge.draw_verified {
-            return Err("draw proof missing");
-        }
 
         if challenge.nullifier.is_some() {
             return Err("challenge already claimed");
@@ -681,6 +687,7 @@ pub(super) struct PendingDraw {
     pub(super) nonce: [u8; 32],
     pub(super) catalog_root: [u8; 32],
     pub(super) rev: u64,
+    pub(super) next: bool,
 }
 
 pub(super) struct PendingFairReady {
@@ -894,10 +901,6 @@ pub(super) fn bind_facts(
         }
 
         let challenge = challenge.as_ref().ok_or("challenge missing")?;
-
-        if !challenge.draw_verified {
-            return Err("draw proof missing");
-        }
 
         let salt = salts.next().expect("fact salt");
         commits.push(FactCommitment {

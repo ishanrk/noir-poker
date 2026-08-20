@@ -349,6 +349,35 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .raise-submit, .next-hand-action { min-height: 40px; padding: 0 14px; border: 1px solid var(--blue); border-radius: 0; background: var(--blue); color: white; cursor: pointer; font-size: 11px; font-weight: 700; }
 .next-hand-action { width: 100%; box-shadow: inset 5px 0 0 var(--lime); }
 
+.private-challenge { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 28px; align-items: center; width: min(900px, 100%); margin: 0 auto 22px; padding: 16px 18px; border: 1px solid var(--line-strong); border-left: 4px solid var(--lime); background: #f0f1ff; }
+.private-challenge > header { display: flex; gap: 16px; align-items: center; justify-content: space-between; }
+.private-challenge > header div { display: grid; gap: 4px; }
+.private-challenge > header span, .private-proof > span { color: var(--blue); font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
+.private-challenge > header strong { font-family: Georgia, "Times New Roman", serif; font-size: 20px; font-weight: 500; }
+.private-challenge > header b { color: var(--success); font-size: 14px; }
+.private-challenge button, .player-proof-line button { min-height: 30px; padding: 0 10px; border: 1px solid var(--blue); background: white; color: var(--blue); cursor: pointer; font-size: 10px; font-weight: 700; }
+.private-proof { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 6px 12px; align-items: center; }
+.private-proof small { grid-column: 1 / -1; color: var(--muted); font-size: 10px; }
+.private-challenge details { grid-column: 1 / -1; font-size: 10px; }
+.private-challenge details dl { display: grid; gap: 5px; margin: 10px 0 0; }
+.private-challenge details dl div { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; }
+.private-challenge details dd { overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; }
+.private-challenge .form-error { grid-column: 1 / -1; }
+
+.challenge-proofs { width: min(900px, 100%); margin: 30px auto 0; padding: 24px 0; border-top: 4px solid var(--blue); border-bottom: 1px solid var(--line-strong); }
+.challenge-proofs > header { display: flex; align-items: end; justify-content: space-between; }
+.challenge-proofs h2 { margin: 3px 0 0; font-family: Georgia, "Times New Roman", serif; font-size: 26px; font-weight: 500; }
+.challenge-proofs a { color: var(--blue); font-size: 10px; font-weight: 700; }
+.player-proofs { display: grid; gap: 12px; margin-top: 18px; }
+.player-proofs > article { border: 1px solid var(--line); }
+.player-proofs > article > header { display: flex; justify-content: space-between; padding: 11px 13px; background: #f3f4f6; }
+.player-proofs > article > header span { color: var(--muted); font-size: 10px; }
+.player-proof-line { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(110px, 1fr) auto; gap: 12px; align-items: center; padding: 9px 13px; border-top: 1px solid var(--line); font-size: 11px; }
+.player-proof-line > strong { color: var(--muted); font-size: 10px; }
+.player-proof-line > strong[data-state="verified"] { color: var(--success); }
+.player-proof-line > strong[data-state="failed"] { color: var(--danger); }
+.player-proof-line > div { display: flex; gap: 10px; align-items: center; }
+
 .contract-panel { width: min(900px, 100%); margin: 0 auto; padding: 38px 0 28px; border-top: 4px solid var(--blue); border-bottom: 1px solid var(--line-strong); }
 .contract-header { display: flex; justify-content: space-between; align-items: end; gap: 24px; }
 .contract-header h2 { margin-top: 7px; font-size: clamp(30px, 4vw, 44px); }
@@ -586,6 +615,11 @@ code { font-family: "Courier New", ui-monospace, monospace; }
   .action-bar { margin-top: -10px; }
   .plain-actions { grid-template-columns: 1fr; }
   .plain-actions button + button { border-top: 1px solid var(--line); border-left: 0; }
+  .private-challenge { grid-template-columns: 1fr; }
+  .private-proof { grid-template-columns: 1fr; }
+  .private-proof small { grid-column: auto; }
+  .challenge-proofs > header { align-items: start; }
+  .player-proof-line { grid-template-columns: 1fr; }
   .contract-layout { grid-template-columns: 1fr; }
   .sealed-bounty { width: 190px; }
   .contract-header { display: block; }

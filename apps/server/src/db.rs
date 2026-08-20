@@ -170,10 +170,22 @@ pub struct ProofReceipt {
     pub nullifier: Vec<u8>,
     pub catalog_root: Vec<u8>,
     pub points: i64,
-    pub draw_proof: Vec<u8>,
-    pub draw_public_inputs: Vec<u8>,
+    pub draw_proof: Option<Vec<u8>>,
+    pub draw_public_inputs: Option<Vec<u8>>,
     pub completion_proof: Vec<u8>,
     pub completion_public_inputs: Vec<u8>,
+}
+
+pub struct PublishedProof {
+    pub room: Uuid,
+    pub hand_no: i64,
+    pub seat: i32,
+    pub hand_tag: Vec<u8>,
+    pub commitment: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub catalog_root: Vec<u8>,
+    pub proof: Vec<u8>,
+    pub public_inputs: Vec<u8>,
 }
 
 #[derive(Clone)]
@@ -423,7 +435,6 @@ impl Db {
         let mut tx = self.pool.begin().await?;
         let row = query(
             "SELECT version, hand_tag, commitment, nonce, catalog_root, \
-             draw_verified_at IS NOT NULL AS draw_verified, \
              facts_salt, facts_hash, nullifier \
              FROM challenge_assignments \
              WHERE room_id = $1 AND hand_no = $2 AND seat = $3 FOR UPDATE",
@@ -439,7 +450,6 @@ impl Db {
             || row.try_get::<Vec<u8>, _>("commitment")? != claim.commitment
             || row.try_get::<Vec<u8>, _>("nonce")? != claim.nonce
             || row.try_get::<Vec<u8>, _>("catalog_root")? != claim.catalog_root
-            || !row.try_get::<bool, _>("draw_verified")?
             || row.try_get::<Option<Vec<u8>>, _>("facts_salt")? != Some(claim.facts_salt.to_vec())
             || row.try_get::<Option<Vec<u8>>, _>("facts_hash")? != Some(claim.facts_hash.to_vec())
             || row.try_get::<Option<Vec<u8>>, _>("nullifier")?.is_some()
@@ -697,6 +707,48 @@ impl Db {
                 draw_public_inputs: row.try_get("draw_public_inputs")?,
                 completion_proof: row.try_get("completion_proof")?,
                 completion_public_inputs: row.try_get("completion_public_inputs")?,
+            })
+        })
+        .transpose()
+    }
+
+    pub async fn challenge_proof(
+        &self,
+        room: Uuid,
+        hand_no: u64,
+        seat: usize,
+        completion: bool,
+    ) -> DbResult<Option<PublishedProof>> {
+        let (proof, public, published) = if completion {
+            ("completion_proof", "completion_public_inputs", "claimed_at")
+        } else {
+            ("draw_proof", "draw_public_inputs", "draw_verified_at")
+        };
+        let sql = format!(
+            "SELECT room_id, hand_no, seat, hand_tag, commitment, nonce, catalog_root, \
+             {proof} AS proof, {public} AS public_inputs \
+             FROM challenge_assignments WHERE room_id = $1 AND hand_no = $2 AND seat = $3 \
+             AND {published} IS NOT NULL"
+        );
+        // accepted proof only
+        let row = query(&sql)
+            .bind(room)
+            .bind(i64::try_from(hand_no)?)
+            .bind(i32::try_from(seat)?)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        row.map(|row| {
+            Ok(PublishedProof {
+                room: row.try_get("room_id")?,
+                hand_no: row.try_get("hand_no")?,
+                seat: row.try_get("seat")?,
+                hand_tag: row.try_get("hand_tag")?,
+                commitment: row.try_get("commitment")?,
+                nonce: row.try_get("nonce")?,
+                catalog_root: row.try_get("catalog_root")?,
+                proof: row.try_get("proof")?,
+                public_inputs: row.try_get("public_inputs")?,
             })
         })
         .transpose()
