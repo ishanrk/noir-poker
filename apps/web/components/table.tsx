@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 import { Card } from "@/components/card";
 import {
   ChallengeProofs,
@@ -6,6 +8,7 @@ import {
 } from "@/components/contract";
 import { DealIntegrity, type DealView } from "@/components/deal-integrity";
 import { Seat } from "@/components/seat";
+import { bestHand } from "@/lib/poker-hand";
 import type { RoomMode } from "@/lib/server";
 
 type CardView = { value: string };
@@ -103,6 +106,90 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 const playerName = (player: number, viewer: number, mode: RoomMode) =>
   player === viewer ? "You" : mode === "single" ? `Bot ${player}` : `Player ${player + 1}`;
 
+function Showdown({
+  result,
+  board,
+  viewer,
+  mode,
+}: {
+  result: HandResultView;
+  board: CardView[];
+  viewer: number;
+  mode: RoomMode;
+}) {
+  const boardCards = board.map((card) => card.value);
+  const hands = result.revealed.map((cards) =>
+    cards ? bestHand([cards[0].value, cards[1].value, ...boardCards]) : undefined,
+  );
+  const winners = [...new Set(result.awards.map((award) => award.player))];
+  const mine = hands[viewer];
+
+  return (
+    <div className="showdown-stage" aria-label="Showdown result">
+      <div className="showdown-winners">
+        {winners.map((seat, index) => {
+          const cards = result.revealed[seat];
+          const hand = hands[seat];
+          const won = result.awards
+            .filter((award) => award.player === seat)
+            .reduce((sum, award) => sum + award.amount, 0);
+
+          if (!cards) return null;
+
+          return (
+            <article
+              className="showdown-winner"
+              key={seat}
+              style={{ "--show-delay": `${index * 120}ms` } as CSSProperties}
+            >
+              <div className="showdown-winner-copy">
+                <span>{playerName(seat, viewer, mode)}</span>
+                <strong>{hand?.name ?? "Best hand"}</strong>
+                <b>+{won.toLocaleString("en-US")}</b>
+              </div>
+              <div className="showdown-hole" aria-label={`${playerName(seat, viewer, mode)} cards`}>
+                <Card value={cards[0].value} delay={index * 120} />
+                <Card value={cards[1].value} delay={index * 120 + 80} />
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="board showdown-board" aria-label="Community cards">
+        {[0, 1, 2, 3, 4].map((index) => (
+          <Card key={index} value={board[index]?.value} delay={index * 90} />
+        ))}
+      </div>
+
+      <div className="showdown-best">
+        {winners.map((seat) => {
+          const hand = hands[seat];
+          if (!hand) return null;
+
+          return (
+            <div key={seat}>
+              <span>{playerName(seat, viewer, mode)} · {hand.name}</span>
+              <div aria-label={`${playerName(seat, viewer, mode)} best five`}>
+                {hand.cards.map((value, index) => (
+                  <Card key={`${seat}-${value}-${index}`} value={value} delay={320 + index * 70} />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {mine && (
+        <div className="showdown-you">
+          <span>Your hand</span>
+          <strong>{mine.name}</strong>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Table({
   view,
   viewer,
@@ -134,6 +221,9 @@ export function Table({
   const halfPotTarget = range
     ? clamp(currentBet + Math.round((view.pot + (actions?.call ?? 0)) / 2), range.min_to, range.max_to)
     : 0;
+  const rangePos = range && range.max_to > range.min_to
+    ? ((raiseTo - range.min_to) / (range.max_to - range.min_to)) * 100
+    : 0;
   let status = actions ? "Your action" : "Waiting for player";
   let message = actions ? "Choose the line" : "The table is moving";
 
@@ -157,16 +247,20 @@ export function Table({
           <div className="table-watermark" aria-hidden="true">
             NP
           </div>
-          <div className="board-area">
+          <div className={`board-area${result?.kind === "showdown" ? " board-area-showdown" : ""}`}>
             <div className="pot">
               <span>Pot</span>
               <strong>{view.pot.toLocaleString("en-US")}</strong>
             </div>
-            <div className="board" aria-label="Community cards">
-              {[0, 1, 2, 3, 4].map((index) => (
-                <Card key={index} value={view.board[index]?.value} delay={index * 180} />
-              ))}
-            </div>
+            {result?.kind === "showdown" ? (
+              <Showdown result={result} board={view.board} viewer={viewer} mode={view.mode} />
+            ) : (
+              <div className="board" aria-label="Community cards">
+                {[0, 1, 2, 3, 4].map((index) => (
+                  <Card key={index} value={view.board[index]?.value} delay={index * 180} />
+                ))}
+              </div>
+            )}
             <span className="street-label">{view.street}</span>
           </div>
         </div>
@@ -230,6 +324,7 @@ export function Table({
               value={range ? raiseTo : 0}
               onChange={(event) => setRaiseTo(Number(event.target.value))}
               disabled={!range}
+              style={{ "--range-pos": `${rangePos}%` } as CSSProperties}
             />
             <div className="raise-presets">
               <button type="button" onClick={() => range && setRaiseTo(range.min_to)} disabled={!range}>Min</button>
