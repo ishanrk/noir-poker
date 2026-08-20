@@ -224,8 +224,12 @@ export function Table({
   const rangePos = range && range.max_to > range.min_to
     ? ((raiseTo - range.min_to) / (range.max_to - range.min_to)) * 100
     : 0;
-  let status = actions ? "Your action" : "Waiting for player";
-  let message = actions ? "Choose the line" : "The table is moving";
+  let status = actions ? "Your turn" : "Waiting";
+  let message = actions
+    ? "Choose an action"
+    : view.turn === undefined
+      ? "Table moving"
+      : `${playerName(view.turn, viewer, view.mode)} to act`;
 
   if (view.settled) [status, message] = ["Hand complete", "Pot settled"];
   if (result?.kind === "showdown") status = "Showdown";
