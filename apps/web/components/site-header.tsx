@@ -1,5 +1,13 @@
 import Link from "next/link";
 
+const LINKS = [
+  ["/", "Play"],
+  ["/rules", "Rules"],
+  ["/motivation", "Motivation"],
+  ["/protocol", "Protocol"],
+  ["/chips", "Chips"],
+] as const;
+
 export function SiteHeader({ compact = false }: { compact?: boolean }) {
   return (
     <header className={`site-header${compact ? " site-header-compact" : ""}`}>
@@ -10,7 +18,11 @@ export function SiteHeader({ compact = false }: { compact?: boolean }) {
         <span>Noir Poker</span>
       </Link>
       <nav aria-label="Primary navigation">
-        <Link href="/">Play</Link>
+        {LINKS.map(([href, label]) => (
+          <Link href={href} key={href}>
+            {label}
+          </Link>
+        ))}
       </nav>
     </header>
   );

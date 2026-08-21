@@ -5,26 +5,26 @@ import { useState } from "react";
 const STEPS = [
   {
     label: "Commit",
-    title: "The browser commits to a private secret.",
-    copy: "The server sees only a BLAKE2s commitment. After storing it, the server returns fresh public randomness.",
-    code: "commitment = BLAKE2s(hand, seat, secret)",
+    title: "The browser fixes one private secret.",
+    copy: "Only its BLAKE2s commitment is sent. The server stores that value before returning a fresh public nonce.",
+    code: 'commitment = BLAKE2s("NPCOMM02" || hand || seat || secret)',
   },
   {
     label: "Assign",
-    title: "Secret plus server randomness selects one challenge.",
-    copy: "The Noir circuit proves the hidden challenge is one of the eight fixed catalog definitions without revealing which definition was selected.",
-    code: "index = BLAKE2s(hand, seat, nonce, secret)[0] & 7",
+    title: "Secret and nonce select one catalog rule.",
+    copy: "The browser learns the objective. Other players see only that a challenge exists.",
+    code: 'index = BLAKE2s("NPSELE02" || hand || seat || nonce || secret)[0] & 7',
   },
   {
-    label: "Complete",
-    title: "The same hidden challenge is checked against the hand.",
-    copy: "The circuit receives six private hand facts and proves that every required condition of the hidden challenge is satisfied.",
-    code: "objective_met(hidden challenge, private facts) = true",
+    label: "Prove",
+    title: "Proof generation stays optional.",
+    copy: "A fair-draw proof may be published at any time. A completion proof is generated only when the player claims points.",
+    code: "UltraHonkBackend.generateProof(witness)",
   },
   {
     label: "Verify",
-    title: "Anyone can verify each published UltraHonk proof.",
-    copy: "The receipt contains public bindings and proof bytes. The challenge definition, browser secret and private fact vector are not disclosed.",
+    title: "Accepted proof bytes become public.",
+    copy: "The server checks them before publication. Any browser can fetch the accepted bytes and verify them again.",
     code: "UltraHonkBackend.verifyProof(proof, publicInputs)",
   },
 ] as const;

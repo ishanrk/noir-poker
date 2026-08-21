@@ -13,6 +13,7 @@ import "./visual-cleanup.css";
 import "./clarity.css";
 import "./chips.css";
 import "./repair.css";
+import "./story.css";
 
 export const metadata: Metadata = {
   title: "Noir Poker",

@@ -19,16 +19,13 @@ export function AztecPlayChips() {
   const [error, setError] = useState<string>();
 
   async function enter() {
-    if (!session) {
-      return;
-    }
+    if (!session) return;
 
     setBusy(true);
     setError(undefined);
 
     try {
       const { enterAztecRoom } = await import("@/lib/aztec/entry");
-
       setReceipt(await enterAztecRoom(session, room, seat, buyIn));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Aztec entry failed");
@@ -40,9 +37,9 @@ export function AztecPlayChips() {
   return (
     <section className="chips-console">
       <header className="chips-intro">
-        <p className="eyebrow">Aztec testnet</p>
-        <h1>PLAY</h1>
-        <p>Private chips for Aztec tables.</p>
+        <p className="eyebrow">PLAY contract</p>
+        <h1>Wallet and table entry</h1>
+        <p>Connect a testnet wallet, claim chips and lock one table buy-in.</p>
       </header>
 
       <AztecConnect onSession={setSession} />
@@ -55,7 +52,7 @@ export function AztecPlayChips() {
           </header>
 
           <label className="line-input">
-            Room id
+            Room ID
             <input
               type="text"
               value={room}
@@ -106,11 +103,7 @@ export function AztecPlayChips() {
             className="primary-action"
             type="button"
             onClick={() => void enter()}
-            disabled={
-              busy ||
-              room.length !== 36 ||
-              session.balance < BigInt(buyIn)
-            }
+            disabled={busy || room.length !== 36 || session.balance < BigInt(buyIn)}
           >
             {busy ? "Working" : "Lock buy-in"}
           </button>
