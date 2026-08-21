@@ -4,6 +4,7 @@ import { Card } from "@/components/card";
 import { Keycap } from "@/components/keycap";
 import { SiteHeader } from "@/components/site-header";
 
+import challengeStyles from "./challenge.module.css";
 import styles from "./rules.module.css";
 
 const WSOP_RULES =
@@ -24,7 +25,7 @@ function ExampleTable({ state }: { state: ExampleState }) {
   return (
     <div className={styles.tableWrap} data-state={state}>
       <div className={`${styles.seat} ${styles.topSeat}`}>
-        <span>{opponent ? "You" : "Opponent"}</span>
+        <span>{opponent ? "Player 1" : "Opponent"}</span>
         <strong>{state === "complete" ? "folded" : "1,000"}</strong>
         <div className={styles.hole}>
           <Card hidden />
@@ -59,7 +60,7 @@ function ExampleTable({ state }: { state: ExampleState }) {
             </>
           )}
         </div>
-        <span>{opponent ? "Player 1" : "You"}</span>
+        <span>{opponent ? "You · Player 2" : "You"}</span>
         <strong>{state === "complete" ? "1,180" : "1,000"}</strong>
       </div>
     </div>
@@ -90,7 +91,7 @@ function ChallengeExample() {
 
       <div className={styles.panels}>
         <section className={`${styles.walkPanel} ${styles.panelOne}`}>
-          <div className={styles.pov}>
+          <div className={`${styles.pov} ${challengeStyles.pov}`}>
             <span>Player POV</span>
             <strong>The challenge appears before the next hand</strong>
           </div>
@@ -110,7 +111,7 @@ function ChallengeExample() {
         </section>
 
         <section className={`${styles.walkPanel} ${styles.panelTwo}`}>
-          <div className={styles.pov}>
+          <div className={`${styles.pov} ${challengeStyles.pov}`}>
             <span>Player POV</span>
             <strong>Seven-deuce gets through and the bluff wins</strong>
           </div>
@@ -134,40 +135,50 @@ function ChallengeExample() {
         </section>
 
         <section className={`${styles.walkPanel} ${styles.panelThree}`}>
-          <div className={styles.pov}>
+          <div className={`${styles.pov} ${challengeStyles.pov}`}>
             <span>Opponent POV</span>
-            <strong>The opponent sees the proof, not the challenge</strong>
+            <strong>You are Player 2. Player 1 published a completion proof.</strong>
           </div>
           <ExampleTable state="verify" />
-          <div className={styles.publicProof}>
-            <input className={styles.verifyInput} id="challenge-proof-check" type="checkbox" />
-            <header>
+          <div className={challengeStyles.publicProof}>
+            <input className={challengeStyles.verifyInput} id="challenge-proof-check" type="checkbox" />
+            <div className={challengeStyles.verifierIntro}>
+              <div className={challengeStyles.playerBadge}>P1</div>
               <div>
-                <span>Published completion proof</span>
-                <strong>Player 1</strong>
+                <strong>Player 1 published a completion proof</strong>
+                <p>
+                  Your browser can independently verify it. You never receive Player 1&apos;s
+                  challenge.
+                </p>
               </div>
-              <b>20 proof points</b>
-            </header>
-            <div className={styles.proofLine}>
-              <span>Completion</span>
-              <strong className={styles.proofState}>published</strong>
-              <label className="key-choice" htmlFor="challenge-proof-check">
-                <Keycap>Verify</Keycap>
-              </label>
+              <span className={challengeStyles.publishedBadge}>Published</span>
             </div>
-            <div className={styles.proofMeaning}>
+            <div className={challengeStyles.verifyAction}>
               <div>
-                <span>Random challenge</span>
-                <strong>verified</strong>
+                <strong>Verify Player 1&apos;s proof</strong>
+                <p>Check that the challenge was random and that Player 1 completed it.</p>
               </div>
-              <div>
-                <span>Challenge completed</span>
-                <strong>verified</strong>
-              </div>
-              <div>
-                <span>Challenge itself</span>
-                <strong>private</strong>
-              </div>
+              <label className={`key-choice ${challengeStyles.verifyKey}`} htmlFor="challenge-proof-check">
+                <Keycap wide>Verify Player 1</Keycap>
+              </label>
+              <strong className={challengeStyles.verifyDone}>✓ Proof verified in your browser</strong>
+            </div>
+            <div className={challengeStyles.proofMeaning}>
+              <article>
+                <span>✓</span>
+                <strong>Random challenge</strong>
+                <b>Verified</b>
+              </article>
+              <article>
+                <span>✓</span>
+                <strong>Challenge completed</strong>
+                <b>Verified</b>
+              </article>
+              <article>
+                <span>?</span>
+                <strong>Challenge itself</strong>
+                <b>Still private</b>
+              </article>
             </div>
           </div>
         </section>
@@ -254,21 +265,84 @@ export default function RulesPage() {
         </div>
       </section>
 
-      <section className={`${styles.section} ${styles.challengeIntro}`} aria-labelledby="challenge-title">
-        <div className={styles.challengeCopy}>
-          <h2 id="challenge-title">What is a challenge</h2>
-          <p>
-            A challenge shows up before the next hand starts. Some challenges are easy and some are
-            hard.
-          </p>
-          <p>You need to complete the challenge before the next hand to get a reward.</p>
-          <p>
-            Your challenge is private to you. When you complete a challenge, a cryptographic proof
-            of completion can be generated and verified by others. They can see that you had a
-            random challenge and that you completed it without ever seeing what the challenge was,
-            when you completed it, or how you completed it.
-          </p>
-          <strong className={styles.noCheating}>No server side cheating</strong>
+      <section className={`${styles.section} ${challengeStyles.challengeIntro}`} aria-labelledby="challenge-title">
+        <div className={challengeStyles.challengeLayout}>
+          <div className={challengeStyles.challengeCopy}>
+            <h2 id="challenge-title">What is a challenge</h2>
+            <div className={challengeStyles.challengePoints}>
+              <article>
+                <span className={challengeStyles.challengeNumber}>1</span>
+                <div>
+                  <strong>A challenge shows up before the next hand starts.</strong>
+                  <p>Some challenges are easy and some are hard.</p>
+                </div>
+                <div className={`${challengeStyles.pointVisual} ${challengeStyles.drawVisual}`} aria-hidden="true">
+                  <span>?</span>
+                  <i />
+                </div>
+              </article>
+              <article>
+                <span className={challengeStyles.challengeNumber}>2</span>
+                <div>
+                  <strong>You need to complete the challenge before the next hand to get a reward.</strong>
+                </div>
+                <div className={`${challengeStyles.pointVisual} ${challengeStyles.rewardVisual}`} aria-hidden="true">
+                  <span>+20</span>
+                  <i>✓</i>
+                </div>
+              </article>
+              <article>
+                <span className={challengeStyles.challengeNumber}>3</span>
+                <div>
+                  <strong>Your challenge is private to you.</strong>
+                  <p>
+                    When you complete a challenge, a cryptographic proof of completion can be
+                    generated and verified by other players. They can see that you had a random
+                    challenge and that you completed it without ever seeing what the challenge was,
+                    when you completed it, or how you completed it.
+                  </p>
+                </div>
+                <div className={`${challengeStyles.pointVisual} ${challengeStyles.proofVisual}`} aria-hidden="true">
+                  <span>✓</span>
+                  <i>?</i>
+                </div>
+              </article>
+            </div>
+            <strong className={styles.noCheating}>No server side cheating</strong>
+          </div>
+
+          <aside className={challengeStyles.challengeExamples} aria-label="Challenge examples">
+            <h3>Challenge examples</h3>
+            <div className={challengeStyles.examplePyramid}>
+              <article className={`${challengeStyles.challengeExample} ${challengeStyles.exampleTop}`}>
+                <div className={challengeStyles.exampleCards} aria-hidden="true">
+                  <Card value="A♠" />
+                  <Card value="K♦" />
+                  <Card value="9♣" />
+                </div>
+                <strong>See the flop</strong>
+              </article>
+              <article className={`${challengeStyles.challengeExample} ${challengeStyles.exampleLeft}`}>
+                <div className={challengeStyles.exampleCards} aria-hidden="true">
+                  <Card value="Q♠" />
+                  <Card value="J♥" />
+                </div>
+                <strong>Reach showdown</strong>
+              </article>
+              <article className={`${challengeStyles.challengeExample} ${challengeStyles.exampleRight}`}>
+                <div className={challengeStyles.exampleCards} aria-hidden="true">
+                  <Card value="A♥" />
+                  <Card value="5♣" />
+                </div>
+                <div className={challengeStyles.exampleChips} aria-hidden="true">
+                  <i />
+                  <i />
+                  <i />
+                </div>
+                <strong>Raise before the flop and finish ahead</strong>
+              </article>
+            </div>
+          </aside>
         </div>
       </section>
 
