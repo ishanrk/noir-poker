@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { Keycap } from "@/components/keycap";
+
 export type ProofState = "idle" | "preparing" | "proving" | "verifying" | "verified" | "failed";
 export type LocalProofState = "idle" | "verifying" | "verified" | "failed";
 export type ContractAssignment =
@@ -102,7 +104,7 @@ export function PrivateChallenge({
 
       {assignment.kind === "draw" && (
         <button className="key-action key-compact" type="button" onClick={onCommit} disabled={disabled}>
-          <span className="key-face">Draw challenge</span>
+          <Keycap>Draw Challenge</Keycap>
         </button>
       )}
 
@@ -112,9 +114,9 @@ export function PrivateChallenge({
           <strong>{assignment.drawVerified ? "published" : proofLabel(assignment.drawState)}</strong>
           {!assignment.drawVerified && !busy(assignment.drawState) && (
             <button className="key-action key-compact" type="button" onClick={onDraw} disabled={disabled}>
-              <span className="key-face">
-                {assignment.drawState === "failed" ? "Retry proof" : "Generate fair draw proof"}
-              </span>
+              <Keycap>
+                {assignment.drawState === "failed" ? "Retry Proof" : "Generate Fair Draw Proof"}
+              </Keycap>
             </button>
           )}
           <small>{assignment.active ? "current hand" : "next hand"}</small>
@@ -139,9 +141,9 @@ export function PrivateChallenge({
               <strong>{proofLabel(claim.state)}</strong>
               {!busy(claim.state) && (
                 <button className="key-action key-compact" type="button" onClick={onClaim} disabled={disabled}>
-                  <span className="key-face">
-                    {claim.state === "failed" ? "Retry proof" : "Generate completion proof"}
-                  </span>
+                  <Keycap>
+                    {claim.state === "failed" ? "Retry Proof" : "Generate Completion Proof"}
+                  </Keycap>
                 </button>
               )}
             </>
@@ -189,7 +191,7 @@ function ProofLine({
       <div>
         {proof?.published && proof.local !== "verifying" && (
           <button className="key-action key-verify" type="button" onClick={() => onVerify(seat, proof.handNo, kind)} disabled={disabled}>
-            <span className="key-face">Verify</span>
+            <Keycap>Verify</Keycap>
           </button>
         )}
         {proof?.receipt && <Link href={proof.receipt}>Public receipt</Link>}

@@ -7,6 +7,7 @@ import {
   type ContractView,
 } from "@/components/contract";
 import { DealIntegrity, type DealView } from "@/components/deal-integrity";
+import { Keycap } from "@/components/keycap";
 import { Seat } from "@/components/seat";
 import { bestHand } from "@/lib/poker-hand";
 import type { RoomMode } from "@/lib/server";
@@ -309,15 +310,15 @@ export function Table({
         <div className="action-controls">
           <div className="plain-actions">
             <button className="key-action key-fold" type="button" onClick={onFold} disabled={!actions?.fold}>
-              <span className="key-face">Fold</span>
+              <Keycap>Fold</Keycap>
             </button>
             <button className="key-action key-check" type="button" onClick={onCheck} disabled={!actions?.check}>
-              <span className="key-face">Check</span>
+              <Keycap>Check</Keycap>
             </button>
             <button className="key-action key-call" type="button" onClick={onCall} disabled={actions?.call === undefined}>
-              <span className="key-face">
+              <Keycap>
                 {actions?.call === undefined ? "Call" : `Call ${actions.call.toLocaleString("en-US")}`}
-              </span>
+              </Keycap>
             </button>
           </div>
 
@@ -337,13 +338,13 @@ export function Table({
               style={{ "--range-pos": `${rangePos}%` } as CSSProperties}
             />
             <div className="raise-presets">
-              <button className="key-action key-small" type="button" onClick={() => range && setRaiseTo(range.min_to)} disabled={!range}><span className="key-face">Min</span></button>
-              <button className="key-action key-small" type="button" onClick={() => setRaiseTo(halfPotTarget)} disabled={!range}><span className="key-face">½ pot</span></button>
-              <button className="key-action key-small" type="button" onClick={() => setRaiseTo(potTarget)} disabled={!range}><span className="key-face">Pot</span></button>
-              <button className="key-action key-small" type="button" onClick={() => range && setRaiseTo(range.max_to)} disabled={!range}><span className="key-face">All in</span></button>
+              <button className="key-action key-small" type="button" onClick={() => range && setRaiseTo(range.min_to)} disabled={!range}><Keycap>Min</Keycap></button>
+              <button className="key-action key-small" type="button" onClick={() => setRaiseTo(halfPotTarget)} disabled={!range}><Keycap>½ Pot</Keycap></button>
+              <button className="key-action key-small" type="button" onClick={() => setRaiseTo(potTarget)} disabled={!range}><Keycap>Pot</Keycap></button>
+              <button className="key-action key-small" type="button" onClick={() => range && setRaiseTo(range.max_to)} disabled={!range}><Keycap>All In</Keycap></button>
             </div>
             <button className="raise-submit key-action key-primary" type="button" onClick={onRaise} disabled={!range}>
-              <span className="key-face">Raise</span>
+              <Keycap>Raise</Keycap>
             </button>
           </div>
 
@@ -356,13 +357,13 @@ export function Table({
               onClick={onReady}
               disabled={disabled || view.ready.mine || view.ready.complete || !view.challenge?.assigned}
             >
-              <span className="key-face">
+              <Keycap wide>
                 {view.ready.complete
-                  ? "Table complete"
+                  ? "Table Complete"
                   : view.ready.mine
                     ? `Ready ${view.ready.count}/${view.ready.players}`
-                    : "Ready for next hand"}
-              </span>
+                    : "Ready for Next Hand"}
+              </Keycap>
             </button>
           )}
         </div>

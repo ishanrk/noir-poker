@@ -306,18 +306,32 @@
 .challenge-proofs,
 .waiting-room,
 .room-status {
-  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
 }
 
-.form-heading { display: flex; align-items: baseline; gap: 12px; }
+.lobby-wrap > div > h2 {
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-weight: 700;
+}
+
+.form-heading {
+  display: block;
+}
+
 .form-heading h3 {
   margin: 0;
-  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-  font-size: 24px;
-  font-weight: 650;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.15;
 }
-.form-heading > span { color: var(--blue); font-size: 12px; font-weight: 650; letter-spacing: 0; text-transform: none; }
-.form-heading > span,
+
+.form-heading h3 span {
+  color: var(--blue);
+  font-size: inherit;
+  font-weight: 550;
+}
+
 .mode-switch legend,
 .mode-switch strong,
 .mode-switch small,
@@ -340,8 +354,9 @@
 .challenge-proofs h2,
 .challenge-proofs .protocol-label,
 .player-proof-line {
-  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
 }
+
 .mode-switch small,
 .seat-panel small,
 .private-challenge span,
@@ -351,13 +366,14 @@
 .pot span { letter-spacing: 0; text-transform: none; }
 .private-challenge details dd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .lobby-create, .lobby-join { gap: 30px; }
+.seat-help { margin: -6px 0 4px; }
 
 button.key-action,
 .key-choice {
   position: relative;
   display: inline-block;
-  width: 132px;
-  height: 54px;
+  width: 118px;
+  height: 64px;
   min-height: 0;
   padding: 0;
   border: 0;
@@ -367,120 +383,186 @@ button.key-action,
   isolation: isolate;
   opacity: 1;
   color: var(--ink);
-  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
 }
+
 button.key-action:hover,
 button.key-action:active,
 button.key-action:focus { border: 0; background: transparent; box-shadow: none; }
 
-.key-action::before,
-.key-choice::before {
+.keycap {
+  --key-body: #e4e7ea;
+  --key-top: #f4f5f6;
+  --key-side: #e4e7ea;
+  --key-bottom: #d2d6db;
+  --key-face-fill: var(--paper);
+  --key-label: var(--ink);
+  --key-stroke: var(--ink);
+  --key-accent: transparent;
   position: absolute;
-  z-index: 0;
-  top: 33px;
-  right: 1px;
-  left: 1px;
-  height: 15px;
-  border: 1.5px solid var(--ink);
-  background: var(--line);
-  clip-path: polygon(4px 0, calc(100% - 4px) 0, 100% 100%, 0 100%);
-  content: "";
-  transition: transform 100ms ease-out;
+  inset: 0;
+  display: block;
+  filter: drop-shadow(0 2px 0 rgb(20 22 28 / 18%));
+  pointer-events: none;
 }
-.key-action::after,
-.key-choice::after {
+
+.keycap-shape {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.keycap-body,
+.keycap-wall,
+.keycap-face,
+.keycap-accent {
+  vector-effect: non-scaling-stroke;
+}
+
+.keycap-body {
+  fill: var(--key-body);
+  stroke: var(--key-stroke);
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+}
+
+.keycap-wall {
+  stroke: var(--key-stroke);
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  transition: transform 105ms ease-out;
+}
+
+.keycap-wall-top { fill: var(--key-top); }
+.keycap-wall-left,
+.keycap-wall-right { fill: var(--key-side); }
+.keycap-wall-bottom { fill: var(--key-bottom); }
+
+.keycap-face {
+  fill: var(--key-face-fill);
+  stroke: var(--key-stroke);
+  stroke-width: 2.2;
+  transition: fill 105ms ease-out, stroke 105ms ease-out, transform 105ms ease-out;
+}
+
+.keycap-accent {
+  fill: none;
+  stroke: var(--key-accent);
+  stroke-linecap: round;
+  stroke-width: 2.5;
+}
+
+.keycap-label {
   position: absolute;
   z-index: 1;
-  right: 1px;
-  bottom: 0;
-  left: 1px;
-  height: 7px;
-  background: var(--ink);
-  clip-path: polygon(2px 0, calc(100% - 2px) 0, 100% 3px, calc(100% - 3px) 100%, 3px 100%, 0 3px);
-  content: "";
-}
-.key-action > .key-face,
-.key-choice > .key-face {
-  position: absolute;
-  z-index: 2;
-  top: 0;
-  right: 4px;
-  left: 4px;
+  inset: 16.7% 16% 25%;
   display: grid;
-  height: 43px;
   place-items: center;
-  padding: 0 16px;
-  border: 1.5px solid var(--ink);
-  border-radius: 3px;
-  background: var(--paper);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 90%);
-  color: var(--ink);
+  color: var(--key-label);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 700;
   line-height: 1;
+  text-align: center;
   white-space: nowrap;
   user-select: none;
-  transition: transform 100ms ease-out, border-color 100ms ease-out, color 100ms ease-out;
+  transition: color 105ms ease-out, transform 105ms ease-out;
 }
-.key-action:not(:disabled):hover > .key-face,
-.key-choice:hover > .key-face { border-color: var(--blue); color: var(--blue); transform: translateY(-1px); }
-.key-action:not(:disabled):active > .key-face,
-.key-choice:active > .key-face { transform: translateY(5px); transition-duration: 70ms; }
-.key-action:not(:disabled):active::before,
-.key-choice:active::before {
-  transform: translateY(3px) scaleY(0.55);
-  transform-origin: bottom;
-  transition-duration: 70ms;
-}
-.key-action:focus-visible { outline: 0; }
-.key-action:focus-visible > .key-face,
-.key-choice input:focus-visible + .key-face { outline: 3px solid var(--lime); outline-offset: 3px; }
 
-.key-primary > .key-face,
-.key-choice:has(input:checked) > .key-face {
-  border-color: var(--ink);
-  background: var(--blue);
-  color: white;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 18%);
+.key-action:not(:disabled):hover .keycap-face,
+.key-choice:hover .keycap-face { stroke: var(--blue); transform: translateY(-1px); }
+.key-action:not(:disabled):hover .keycap-label,
+.key-choice:hover .keycap-label { color: var(--blue); transform: translateY(-1px); }
+
+.key-action:not(:disabled):active .keycap-face,
+.key-action:not(:disabled):active .keycap-label,
+.key-choice:active .keycap-face,
+.key-choice:active .keycap-label {
+  transform: translateY(4px);
+  transition-duration: 75ms;
 }
-.key-primary::before,
-.key-choice:has(input:checked)::before { background: var(--blue-dark); }
-.key-primary::after,
-.key-choice:has(input:checked)::after { box-shadow: inset 0 -2px 0 var(--lime); }
-.key-primary:not(:disabled):hover > .key-face,
-.key-choice:has(input:checked):hover > .key-face { border-color: var(--ink); color: white; }
+
+.key-action:not(:disabled):active .keycap-wall-top,
+.key-choice:active .keycap-wall-top {
+  transform: translateY(3px) scaleY(0.45);
+  transform-box: fill-box;
+  transform-origin: bottom;
+  transition-duration: 75ms;
+}
+
+.key-action:not(:disabled):active .keycap-wall-left,
+.key-action:not(:disabled):active .keycap-wall-right,
+.key-choice:active .keycap-wall-left,
+.key-choice:active .keycap-wall-right {
+  transform: translateY(2px) scaleY(0.72);
+  transform-box: fill-box;
+  transform-origin: bottom;
+  transition-duration: 75ms;
+}
+
+.key-action:not(:disabled):active .keycap-wall-bottom,
+.key-choice:active .keycap-wall-bottom {
+  transform: translateY(1px) scaleY(0.55);
+  transform-box: fill-box;
+  transform-origin: bottom;
+  transition-duration: 75ms;
+}
+
+.key-action:focus-visible { outline: 0; }
+.key-action:focus-visible .keycap,
+.key-choice input:focus-visible + .keycap { outline: 3px solid var(--lime); outline-offset: 2px; }
+
+.key-primary .keycap,
+.key-choice:has(input:checked) .keycap {
+  --key-body: var(--blue-dark);
+  --key-top: var(--blue);
+  --key-side: var(--blue-dark);
+  --key-bottom: var(--blue-dark);
+  --key-face-fill: var(--blue);
+  --key-label: white;
+  --key-accent: var(--lime);
+}
+
+.key-primary:not(:disabled):hover .keycap-face,
+.key-choice:has(input:checked):hover .keycap-face { stroke: var(--ink); }
+.key-primary:not(:disabled):hover .keycap-label,
+.key-choice:has(input:checked):hover .keycap-label { color: white; }
 
 button.key-action:disabled { cursor: not-allowed; opacity: 1; }
-button.key-action:disabled > .key-face {
-  border-color: #9ba1a8;
-  background: #f0f2f4;
-  color: #989da4;
-  box-shadow: none;
+button.key-action:disabled .keycap {
+  --key-body: #d6dade;
+  --key-top: #e4e7ea;
+  --key-side: #d6dade;
+  --key-bottom: #9ba1a8;
+  --key-face-fill: #f0f2f4;
+  --key-label: #989da4;
+  --key-stroke: #9ba1a8;
+  --key-accent: transparent;
+  filter: none;
+}
+button.key-action:disabled .keycap-face,
+button.key-action:disabled .keycap-label {
   transform: translateY(3px);
 }
-button.key-action:disabled::before {
-  border-color: #9ba1a8;
-  background: #d6dade;
-  transform: translateY(2px) scaleY(0.72);
+button.key-action:disabled .keycap-wall-left,
+button.key-action:disabled .keycap-wall-right {
+  transform: translateY(1px) scaleY(0.84);
+  transform-box: fill-box;
   transform-origin: bottom;
 }
-button.key-action:disabled::after { background: #9ba1a8; box-shadow: none; }
 
-button.key-fold, button.key-check { width: 112px; }
+button.key-fold, button.key-check { width: 118px; }
 button.key-call { width: 132px; }
-button.key-small { width: 64px; height: 42px; }
-.key-small::before, .key-compact::before, .key-verify::before { top: 25px; height: 11px; }
-.key-small::after, .key-compact::after, .key-verify::after { height: 6px; }
-.key-small > .key-face,
-.key-compact > .key-face,
-.key-verify > .key-face { height: 33px; padding: 0 9px; font-size: 10px; }
-button.key-compact { width: 220px; height: 42px; }
-button.key-verify { width: 82px; height: 42px; }
-button.key-create { width: 164px; margin-top: 4px; }
-button.key-join { width: 136px; }
-button.key-space { width: 100%; max-width: 420px; height: 58px; justify-self: center; }
-.key-space > .key-face { height: 47px; clip-path: polygon(4% 0, 96% 0, 100% 100%, 0 100%); }
-.key-space::before { top: 37px; }
+button.key-small { width: 62px; height: 50px; }
+.key-small .keycap-label,
+.key-verify .keycap-label { font-size: 10px; }
+button.key-compact { width: 220px; height: 52px; }
+.key-compact .keycap-label { font-size: 11px; }
+button.key-verify { width: 82px; height: 50px; }
+button.key-create { width: 170px; height: 64px; margin-top: 4px; }
+button.key-join { width: 145px; height: 64px; }
+button.key-space { width: min(420px, 100%); height: 68px; justify-self: center; }
+button.key-space .keycap-label { right: 7%; left: 7%; }
 
 .plain-actions { display: flex; gap: 14px; align-items: end; border: 0; }
 .raise-control {
@@ -507,7 +589,7 @@ button.key-space { width: 100%; max-width: 420px; height: 58px; justify-self: ce
   grid-row: 1 / 3;
   align-self: end;
   width: 132px;
-  height: 52px;
+  height: 64px;
 }
 .action-bar { grid-template-columns: 170px minmax(0, 1fr); gap: 36px; padding: 26px 0; border-bottom: 0; }
 .action-controls { gap: 24px; }
@@ -515,41 +597,61 @@ button.key-space { width: 100%; max-width: 420px; height: 58px; justify-self: ce
 .action-copy span { color: var(--blue); font-size: 18px; font-weight: 650; letter-spacing: 0; text-transform: none; }
 .action-copy strong { color: var(--muted); font-size: 13px; font-weight: 500; line-height: 1.3; }
 
-.seat-scale > div { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; border: 0; }
+.seat-scale > div { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; border: 0; }
 .seat-scale label + label { border: 0; }
-.key-choice { width: 72px; height: 46px; }
-.key-choice::before { top: 28px; height: 12px; }
-.key-choice::after { height: 6px; }
-.key-choice > .key-face { height: 36px; padding: 0; font-size: 15px; }
+.key-choice { width: 84px; height: 62px; }
+.key-choice .keycap-label { font-size: 17px; }
 .key-choice input { position: absolute; opacity: 0; }
 
-.scale-control { gap: 10px; }
 .scale-control > span:first-child, .line-input { font-size: 13px; }
 .scale-control output { color: var(--blue); font-size: 13px; font-weight: 650; }
 .scale-ticks { font-size: 9px; }
 .raise-control input[type="range"],
 .scale-control input[type="range"] { height: 30px; }
 .raise-control input[type="range"]::-webkit-slider-runnable-track,
-.scale-control input[type="range"]::-webkit-slider-runnable-track,
+.scale-control input[type="range"]::-webkit-slider-runnable-track {
+  height: 7px;
+  border: 1px solid var(--line-strong);
+  background: linear-gradient(180deg, var(--paper), var(--line));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 85%);
+}
 .raise-control input[type="range"]::-moz-range-track,
 .scale-control input[type="range"]::-moz-range-track {
-  height: 6px;
-  border: 0;
+  height: 7px;
+  border: 1px solid var(--line-strong);
+  background: linear-gradient(180deg, var(--paper), var(--line));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 85%);
+}
+.raise-control input[type="range"]::-webkit-slider-runnable-track {
+  background: linear-gradient(90deg, var(--blue) 0 var(--range-pos, 0%), var(--line) var(--range-pos, 0%) 100%);
+}
+.raise-control input[type="range"]::-moz-range-track {
   background: linear-gradient(90deg, var(--blue) 0 var(--range-pos, 0%), var(--line) var(--range-pos, 0%) 100%);
 }
 .raise-control input[type="range"]::-webkit-slider-thumb,
-.scale-control input[type="range"]::-webkit-slider-thumb,
+.scale-control input[type="range"]::-webkit-slider-thumb {
+  width: 24px;
+  height: 27px;
+  margin-top: -11px;
+  border: 2px solid var(--blue);
+  clip-path: polygon(4px 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 0 calc(100% - 4px), 0 4px);
+  background: var(--lime);
+  box-shadow: 0 4px 0 var(--blue-dark);
+}
 .raise-control input[type="range"]::-moz-range-thumb,
 .scale-control input[type="range"]::-moz-range-thumb {
-  width: 20px;
-  height: 26px;
+  width: 24px;
+  height: 27px;
   border: 2px solid var(--blue);
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--lime);
-  box-shadow: inset 0 2px 0 rgb(255 255 255 / 70%);
+  box-shadow: 0 4px 0 var(--blue-dark);
 }
-.raise-control input[type="range"]::-webkit-slider-thumb,
-.scale-control input[type="range"]::-webkit-slider-thumb { margin-top: -10px; }
+.raise-control input[type="range"]:active::-webkit-slider-thumb,
+.scale-control input[type="range"]:active::-webkit-slider-thumb {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--blue-dark);
+}
 .private-challenge > header strong, .challenge-proofs h2 { font-weight: 650; }
 .player-proof-line { text-transform: none; }
 
@@ -568,8 +670,7 @@ button.key-space { width: 100%; max-width: 420px; height: 58px; justify-self: ce
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .key-action::before,
-  .key-choice::before,
-  .key-action > .key-face,
-  .key-choice > .key-face { transition: none; }
+  .keycap-wall,
+  .keycap-face,
+  .keycap-label { transition: none; }
 }

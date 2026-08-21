@@ -41,7 +41,7 @@ export default function Home() {
 
       <section className="lobby-wrap" aria-labelledby="lobby-title">
         <div>
-          <h2 id="lobby-title">Create a game</h2>
+          <h2 id="lobby-title">Create a Game</h2>
           <Lobby />
         </div>
       </section>

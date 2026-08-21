@@ -49,7 +49,7 @@ async function visit(route, name, expected) {
 await visit("/", "home", [
   "The game server cannot cheat even if it wanted to.",
   "Rust backend, Next.js and TypeScript frontend, Noir zero knowledge circuits.",
-  "Create a game",
+  "Create a Game",
 ]);
 
 async function waitForFrame(match, message, after = 0) {
@@ -84,15 +84,15 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
   await page.getByRole("radio", { name: "Multiplayer" }).check();
   assert.equal(await page.getByRole("radio", { name: "Multiplayer" }).isChecked(), true);
   assert.equal(await page.getByText("One human plus", { exact: false }).count(), 0);
-  await page.getByRole("heading", { name: "Join game" }).waitFor({ state: "visible" });
-  await page.getByRole("button", { name: "Create game" }).waitFor({ state: "visible" });
+  await page.getByRole("heading", { name: "Join Game" }).waitFor({ state: "visible" });
+  await page.getByRole("button", { name: "Create Game" }).waitFor({ state: "visible" });
 
   await page.getByRole("radio", { name: "Single Player" }).check();
   assert.equal(await page.getByRole("radio", { name: "Single Player" }).isChecked(), true);
-  assert.equal(await page.getByRole("heading", { name: "Join game" }).count(), 0);
+  assert.equal(await page.getByRole("heading", { name: "Join Game" }).count(), 0);
   await page.getByRole("radio", { name: "2" }).check();
   assert.equal(await page.getByRole("button", { name: "Connect Aztec" }).count(), 0);
-  await page.getByRole("button", { name: "Create game" }).click();
+  await page.getByRole("button", { name: "Create Game" }).click();
   await page.waitForURL(/\/table\//, { timeout: 15_000 });
 
   const commitment = await waitForFrame(
@@ -128,8 +128,8 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
   await waitForEnabled(fold, "bot did not return action");
   await fold.click();
   await page.getByText("Hand complete", { exact: true }).waitFor({ state: "visible", timeout: 15_000 });
-  await page.getByRole("button", { name: "Draw challenge" }).waitFor({ state: "visible", timeout: 15_000 });
-  await visit("/", "home-after-single", ["Create a game"]);
+  await page.getByRole("button", { name: "Draw Challenge" }).waitFor({ state: "visible", timeout: 15_000 });
+  await visit("/", "home-after-single", ["Create a Game"]);
 }
 
 await page.getByRole("radio", { name: /Aztec/ }).check();

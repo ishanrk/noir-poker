@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ContractView, LocalProofState, ProofState } from "@/components/contract";
 import { DealIntegrity, type DealView } from "@/components/deal-integrity";
+import { Keycap } from "@/components/keycap";
 import { Table, type ChallengeView, type ClaimView, type View } from "@/components/table";
 import {
   CHALLENGE_VERSION,
@@ -467,11 +468,11 @@ export function MultiplayerGame({ room }: { room: string }) {
         {waiting.deal && <DealIntegrity deal={waiting.deal} room={room} />}
         <p>The server commitment is already fixed. Each joining browser adds its own entropy share.</p>
         {error && <p className="form-error">{error}</p>}
-        {!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><span className="key-face">Reconnect</span></button>}
+        {!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><Keycap>Reconnect</Keycap></button>}
       </div>
     );
   }
-  if (!view) return <div className="room-status"><strong>{error ?? "Connecting to table"}</strong>{!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><span className="key-face">Reconnect</span></button>}</div>;
+  if (!view) return <div className="room-status"><strong>{error ?? "Connecting to table"}</strong>{!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><Keycap>Reconnect</Keycap></button>}</div>;
 
   const contract: ContractView = {
     assignment: !view.challenge
