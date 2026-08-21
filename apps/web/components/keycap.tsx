@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+// github write test
 export function Keycap({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   const top = wide ? "M11 2H89L93 12H7Z" : "M11 2H89L84 12H16Z";
   const left = wide ? "M3 8L11 2L7 12V54L4 66L2 58V13Z" : "M3 8L11 2L16 12V54L9 66L2 58V13Z";
