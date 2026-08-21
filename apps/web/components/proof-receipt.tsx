@@ -1,6 +1,4 @@
 "use client";
-
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { SiteHeader } from "@/components/site-header";
@@ -240,7 +238,6 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
             Export JSON
           </button>
         </details>
-        <Link href="/protocol#challenge">Read the exact circuit statement →</Link>
       </section>
     </main>
   );

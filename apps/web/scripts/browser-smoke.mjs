@@ -145,30 +145,6 @@ assert.equal(
   true,
   "Aztec controls did not load",
 );
-await visit("/rules", "rules", [
-  "Bluff and win with seven-deuce",
-  "These are the same challenge controls shown at the poker table.",
-  "Challenge missed",
-  "No completion proof +0",
-  "+20 proof points",
-  "Export JSON",
-]);
-await visit("/motivation", "motivation", [
-  "At a physical table you can see a dealer shuffle",
-  "UltimateBet and Absolute Poker",
-  "crypto.getRandomValues",
-  "Private challenges are an extra rule in this game",
-  "Limitations",
-]);
-await visit("/protocol", "protocol", [
-  "How verification works",
-  "There are two checks",
-  "/audit/<room>/<hand>",
-  "/proof/<nullifier>",
-  "UltraHonk",
-  "Where the poker program fits",
-  "Limitations",
-]);
 await visit("/chips", "chips", [
   "Aztec testnet",
   "Private chips for Aztec tables.",

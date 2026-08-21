@@ -44,7 +44,7 @@ export function DealIntegrity({
         {deal.audit ? (
           <Link href={`/audit/${room}/${deal.hand_no}`}>Replay deal →</Link>
         ) : (
-          <Link href="/protocol">Protocol →</Link>
+          <span>commitment fixed</span>
         )}
       </div>
     </section>

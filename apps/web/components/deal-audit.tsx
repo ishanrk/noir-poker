@@ -1,6 +1,4 @@
 "use client";
-
-import Link from "next/link";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import { Card } from "@/components/card";
@@ -122,7 +120,6 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
       <section className="receipt-actions">
         <button type="button" onClick={exportAudit} disabled={!audit}>Export JSON</button>
         <details><summary>CLI verifier</summary><code>npm --prefix apps/web run deal:verify -- audit.json</code></details>
-        <Link href="/protocol#deals">Read protocol →</Link>
       </section>
     </main>
   );

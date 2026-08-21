@@ -1,9 +1,5 @@
-import Link from "next/link";
-
 import { Lobby } from "@/components/lobby";
 import { SiteHeader } from "@/components/site-header";
-
-const WSOP_RULES = "https://assets.wsopcdn.com/wsop/853ee602-e1e9-4019-a0cf-381419d805c6.pdf";
 
 export default function Home() {
   return (
@@ -47,35 +43,6 @@ export default function Home() {
         <div>
           <h2 id="lobby-title">Create a game</h2>
           <Lobby />
-        </div>
-      </section>
-
-      <section className="home-rules" aria-labelledby="home-rules-title">
-        <div className="home-rules-heading">
-          <h2 id="home-rules-title">Rules</h2>
-          <Link href="/rules">Challenge rules</Link>
-        </div>
-
-        <div className="home-rule-row">
-          <div>
-            <h3>Texas Hold&apos;em</h3>
-            <p>Normal no-limit Texas Hold&apos;em rules apply.</p>
-          </div>
-          <a href={WSOP_RULES} target="_blank" rel="noreferrer">
-            WSOP rules ↗
-          </a>
-        </div>
-
-        <div className="home-rule-row home-rule-challenge">
-          <div>
-            <h3>Private challenge</h3>
-            <p>
-              Between hands, every active player receives one random private challenge. Examples
-              include reach showdown, check on the flop, or finish the hand ahead. A completed
-              challenge earns proof points without revealing the challenge or the player&apos;s hole cards.
-            </p>
-          </div>
-          <Link href="/rules">Examples and proofs →</Link>
         </div>
       </section>
     </main>

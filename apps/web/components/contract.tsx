@@ -208,7 +208,6 @@ export function ChallengeProofs({ proofs, disabled = false, onVerify }: ProofPro
           <p className="protocol-label">Challenge proofs</p>
           <h2>Public proof status</h2>
         </div>
-        <Link href="/protocol#challenge">Verifier details</Link>
       </header>
       <div className="player-proofs">
         {proofs.map((player) => (
