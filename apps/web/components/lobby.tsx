@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type FormEvent, useMemo, useState } from "react";
+import { type CSSProperties, type FormEvent, useMemo, useState } from "react";
 
 import { AztecConnect } from "@/components/aztec-connect";
 import {
@@ -39,6 +39,7 @@ function Scale({
         max={values.length - 1}
         value={index}
         onChange={(event) => setIndex(Number(event.target.value))}
+        style={{ "--range-pos": `${(index / (values.length - 1)) * 100}%` } as CSSProperties}
       />
       <span className="scale-ticks" aria-hidden="true">
         {values.map((value) => (
@@ -205,7 +206,7 @@ export function Lobby() {
             <legend>{mode === "single" ? "Total seats" : "Seats"}</legend>
             <div>
               {[2, 3, 4, 5, 6].map((count) => (
-                <label key={count}>
+                <label className="key-choice" key={count}>
                   <input
                     type="radio"
                     name="players"
@@ -213,7 +214,7 @@ export function Lobby() {
                     checked={players === count}
                     onChange={() => setPlayers(count)}
                   />
-                  <span>{count}</span>
+                  <span className="key-face">{count}</span>
                 </label>
               ))}
             </div>
@@ -259,13 +260,14 @@ export function Lobby() {
           {mode !== "aztec" && !normalValid && (
             <p className="form-error">Big blind must cover the small blind and stack.</p>
           )}
-          <button className="primary-action" type="submit" disabled={busy || !valid}>
-            {busy
-              ? "Working"
-              : mode === "aztec"
-                ? "Create Aztec game"
-                : "Create game"}
-            {!busy && <span>→</span>}
+          <button className="primary-action key-action key-primary key-create" type="submit" disabled={busy || !valid}>
+            <span className="key-face">
+              {busy
+                ? "Working"
+                : mode === "aztec"
+                  ? "Create Aztec game"
+                  : "Create game"}
+            </span>
           </button>
         </form>
 
@@ -277,8 +279,10 @@ export function Lobby() {
             Room id
             <input name="room" type="text" autoComplete="off" spellCheck="false" required />
           </label>
-          <button className="text-action" type="submit" disabled={busy || !valid}>
-            {busy ? "Working" : mode === "aztec" ? "Join with PLAY →" : "Join game →"}
+          <button className="text-action key-action key-join" type="submit" disabled={busy || !valid}>
+            <span className="key-face">
+              {busy ? "Working" : mode === "aztec" ? "Join with PLAY" : "Join game"}
+            </span>
           </button>
           <p>
             {mode === "aztec"

@@ -101,8 +101,8 @@ export function PrivateChallenge({
       </header>
 
       {assignment.kind === "draw" && (
-        <button type="button" onClick={onCommit} disabled={disabled}>
-          Draw challenge
+        <button className="key-action key-compact" type="button" onClick={onCommit} disabled={disabled}>
+          <span className="key-face">Draw challenge</span>
         </button>
       )}
 
@@ -111,8 +111,10 @@ export function PrivateChallenge({
           <span>Fair draw proof</span>
           <strong>{assignment.drawVerified ? "published" : proofLabel(assignment.drawState)}</strong>
           {!assignment.drawVerified && !busy(assignment.drawState) && (
-            <button type="button" onClick={onDraw} disabled={disabled}>
-              {assignment.drawState === "failed" ? "Retry proof" : "Generate fair draw proof"}
+            <button className="key-action key-compact" type="button" onClick={onDraw} disabled={disabled}>
+              <span className="key-face">
+                {assignment.drawState === "failed" ? "Retry proof" : "Generate fair draw proof"}
+              </span>
             </button>
           )}
           <small>{assignment.active ? "current hand" : "next hand"}</small>
@@ -136,8 +138,10 @@ export function PrivateChallenge({
             <>
               <strong>{proofLabel(claim.state)}</strong>
               {!busy(claim.state) && (
-                <button type="button" onClick={onClaim} disabled={disabled}>
-                  {claim.state === "failed" ? "Retry proof" : "Generate completion proof"}
+                <button className="key-action key-compact" type="button" onClick={onClaim} disabled={disabled}>
+                  <span className="key-face">
+                    {claim.state === "failed" ? "Retry proof" : "Generate completion proof"}
+                  </span>
                 </button>
               )}
             </>
@@ -184,8 +188,8 @@ function ProofLine({
       <strong data-state={proof?.local}>{localLabel(proof)}</strong>
       <div>
         {proof?.published && proof.local !== "verifying" && (
-          <button type="button" onClick={() => onVerify(seat, proof.handNo, kind)} disabled={disabled}>
-            Verify
+          <button className="key-action key-verify" type="button" onClick={() => onVerify(seat, proof.handNo, kind)} disabled={disabled}>
+            <span className="key-face">Verify</span>
           </button>
         )}
         {proof?.receipt && <Link href={proof.receipt}>Public receipt</Link>}

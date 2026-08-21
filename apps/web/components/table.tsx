@@ -228,7 +228,7 @@ export function Table({
   let message = actions
     ? "Choose an action"
     : view.turn === undefined
-      ? "Table moving"
+      ? "Waiting"
       : `${playerName(view.turn, viewer, view.mode)} to act`;
 
   if (view.settled) [status, message] = ["Hand complete", "Pot settled"];
@@ -308,16 +308,22 @@ export function Table({
         </div>
         <div className="action-controls">
           <div className="plain-actions">
-            <button type="button" onClick={onFold} disabled={!actions?.fold}>Fold</button>
-            <button type="button" onClick={onCheck} disabled={!actions?.check}>Check</button>
-            <button type="button" onClick={onCall} disabled={actions?.call === undefined}>
-              {actions?.call === undefined ? "Call" : `Call ${actions.call.toLocaleString("en-US")}`}
+            <button className="key-action key-fold" type="button" onClick={onFold} disabled={!actions?.fold}>
+              <span className="key-face">Fold</span>
+            </button>
+            <button className="key-action key-check" type="button" onClick={onCheck} disabled={!actions?.check}>
+              <span className="key-face">Check</span>
+            </button>
+            <button className="key-action key-call" type="button" onClick={onCall} disabled={actions?.call === undefined}>
+              <span className="key-face">
+                {actions?.call === undefined ? "Call" : `Call ${actions.call.toLocaleString("en-US")}`}
+              </span>
             </button>
           </div>
 
           <div className="raise-control" data-disabled={!range}>
             <div className="raise-heading">
-              <span>Raise to</span>
+              <span>Raise</span>
               <output>{range ? raiseTo.toLocaleString("en-US") : "—"}</output>
             </div>
             <input
@@ -331,13 +337,13 @@ export function Table({
               style={{ "--range-pos": `${rangePos}%` } as CSSProperties}
             />
             <div className="raise-presets">
-              <button type="button" onClick={() => range && setRaiseTo(range.min_to)} disabled={!range}>Min</button>
-              <button type="button" onClick={() => setRaiseTo(halfPotTarget)} disabled={!range}>½ pot</button>
-              <button type="button" onClick={() => setRaiseTo(potTarget)} disabled={!range}>Pot</button>
-              <button type="button" onClick={() => range && setRaiseTo(range.max_to)} disabled={!range}>All in</button>
+              <button className="key-action key-small" type="button" onClick={() => range && setRaiseTo(range.min_to)} disabled={!range}><span className="key-face">Min</span></button>
+              <button className="key-action key-small" type="button" onClick={() => setRaiseTo(halfPotTarget)} disabled={!range}><span className="key-face">½ pot</span></button>
+              <button className="key-action key-small" type="button" onClick={() => setRaiseTo(potTarget)} disabled={!range}><span className="key-face">Pot</span></button>
+              <button className="key-action key-small" type="button" onClick={() => range && setRaiseTo(range.max_to)} disabled={!range}><span className="key-face">All in</span></button>
             </div>
-            <button className="raise-submit" type="button" onClick={onRaise} disabled={!range}>
-              Raise →
+            <button className="raise-submit key-action key-primary" type="button" onClick={onRaise} disabled={!range}>
+              <span className="key-face">Raise</span>
             </button>
           </div>
 
@@ -345,16 +351,18 @@ export function Table({
 
           {view.settled && view.ready && (
             <button
-              className="next-hand-action"
+              className="next-hand-action key-action key-primary key-space"
               type="button"
               onClick={onReady}
               disabled={disabled || view.ready.mine || view.ready.complete || !view.challenge?.assigned}
             >
-              {view.ready.complete
-                ? "Table complete"
-                : view.ready.mine
-                  ? `Ready ${view.ready.count}/${view.ready.players}`
-                  : "Ready for next hand"}
+              <span className="key-face">
+                {view.ready.complete
+                  ? "Table complete"
+                  : view.ready.mine
+                    ? `Ready ${view.ready.count}/${view.ready.players}`
+                    : "Ready for next hand"}
+              </span>
             </button>
           )}
         </div>

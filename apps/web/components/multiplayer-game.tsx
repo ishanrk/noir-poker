@@ -467,11 +467,11 @@ export function MultiplayerGame({ room }: { room: string }) {
         {waiting.deal && <DealIntegrity deal={waiting.deal} room={room} />}
         <p>The server commitment is already fixed. Each joining browser adds its own entropy share.</p>
         {error && <p className="form-error">{error}</p>}
-        {!connecting && !connected && <button type="button" onClick={connect}>Reconnect →</button>}
+        {!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><span className="key-face">Reconnect</span></button>}
       </div>
     );
   }
-  if (!view) return <div className="room-status"><strong>{error ?? "Connecting to table"}</strong>{!connecting && !connected && <button type="button" onClick={connect}>Reconnect</button>}</div>;
+  if (!view) return <div className="room-status"><strong>{error ?? "Connecting to table"}</strong>{!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><span className="key-face">Reconnect</span></button>}</div>;
 
   const contract: ContractView = {
     assignment: !view.challenge
