@@ -29,24 +29,31 @@
 .challengePoints article {
   display: grid;
   min-height: 148px;
-  grid-template-columns: 44px minmax(0, 1fr) 112px;
-  gap: 18px;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 20px;
   align-items: center;
   padding: 22px 0;
   border-bottom: 1px solid var(--line);
 }
 
 .challengeNumber {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border: 2px solid var(--blue);
-  border-radius: 50%;
+  display: block;
+  width: auto;
+  height: auto;
+  align-self: start;
+  padding-top: 1px;
+  border: 0;
+  border-radius: 0;
   color: var(--blue);
-  background: var(--paper);
-  font-size: 18px;
-  font-weight: 820;
+  background: transparent;
+  place-items: initial;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-size: 36px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 780;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  text-rendering: geometricPrecision;
 }
 
 .challengePoints article > div:nth-child(2) > strong {
@@ -65,115 +72,8 @@
   line-height: 1.62;
 }
 
-.pointVisual {
-  position: relative;
-  width: 104px;
-  height: 92px;
-  justify-self: end;
-  transition: transform 180ms ease;
-}
-
-.challengePoints article:hover .pointVisual {
-  transform: translateY(-5px) rotate(1deg);
-}
-
-.drawVisual > span {
-  position: absolute;
-  z-index: 2;
-  top: 5px;
-  left: 18px;
-  display: grid;
-  width: 58px;
-  aspect-ratio: 5 / 7;
-  place-items: center;
-  border: 2px solid var(--ink);
-  border-radius: 3px;
-  color: var(--lime);
-  background: var(--blue);
-  font-size: 28px;
-  font-weight: 850;
-  transform: rotate(-6deg);
-}
-
-.drawVisual > i {
-  position: absolute;
-  top: 13px;
-  right: 10px;
-  width: 54px;
-  aspect-ratio: 5 / 7;
-  border: 2px solid var(--ink);
-  border-radius: 3px;
-  background: var(--paper);
-  transform: rotate(8deg);
-}
-
-.rewardVisual > span {
-  position: absolute;
-  top: 8px;
-  left: 7px;
-  display: grid;
-  width: 72px;
-  height: 72px;
-  place-items: center;
-  border: 3px solid var(--ink);
-  border-radius: 50%;
-  background: var(--lime);
-  font-size: 21px;
-  font-weight: 850;
-}
-
-.rewardVisual > i {
-  position: absolute;
-  right: 1px;
-  bottom: 4px;
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border: 2px solid var(--ink);
-  border-radius: 50%;
-  color: white;
-  background: var(--blue);
-  font-size: 19px;
-  font-style: normal;
-  font-weight: 850;
-}
-
-.proofVisual > span {
-  position: absolute;
-  top: 7px;
-  left: 8px;
-  display: grid;
-  width: 76px;
-  height: 62px;
-  place-items: center;
-  border: 2px solid var(--ink);
-  color: var(--success);
-  background: var(--paper);
-  box-shadow: 6px 6px 0 var(--lime);
-  font-size: 27px;
-  font-weight: 900;
-}
-
-.proofVisual > i {
-  position: absolute;
-  right: 3px;
-  bottom: 2px;
-  display: grid;
-  width: 42px;
-  height: 52px;
-  place-items: center;
-  border: 2px solid var(--ink);
-  border-radius: 3px;
-  color: var(--lime);
-  background: var(--blue);
-  font-size: 22px;
-  font-style: normal;
-  font-weight: 850;
-  transform: rotate(7deg);
-}
-
 .challengeExamples {
+  align-self: center;
   padding-top: 5px;
 }
 
@@ -182,50 +82,56 @@
   font-size: 21px;
   font-weight: 730;
   letter-spacing: -0.02em;
+  text-align: center;
 }
 
 .examplePyramid {
   display: grid;
+  width: 100%;
+  max-width: 430px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 14px;
+  margin: 0 auto;
   perspective: 900px;
 }
 
 .challengeExample {
   position: relative;
-  min-height: 188px;
-  padding: 20px;
+  min-height: 190px;
+  padding: 18px 18px 20px;
   overflow: hidden;
-  border: 1px solid var(--line-strong);
+  border: 2px solid var(--ink);
   background: var(--paper);
+  box-shadow: 5px 5px 0 rgb(31 11 209 / 8%);
   transition: transform 190ms ease, border-color 190ms ease, box-shadow 190ms ease;
 }
 
-.challengeExample::after {
+.challengeExample::before {
   position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 4px;
-  background: var(--lime);
+  top: -2px;
+  right: -2px;
+  left: -2px;
+  height: 5px;
+  background: var(--blue);
   content: "";
-  transform: scaleX(0);
+  transform: scaleX(0.22);
   transform-origin: left;
-  transition: transform 190ms ease;
+  transition: transform 190ms ease, background 190ms ease;
 }
 
 .challengeExample:hover {
   border-color: var(--blue);
-  box-shadow: 7px 7px 0 rgb(31 11 209 / 10%);
+  box-shadow: 8px 8px 0 var(--lime);
 }
 
-.challengeExample:hover::after {
+.challengeExample:hover::before {
+  background: var(--lime);
   transform: scaleX(1);
 }
 
 .exampleTop {
   grid-column: 1 / 3;
-  width: 72%;
+  width: calc(50% - 7px);
   justify-self: center;
 }
 
@@ -234,11 +140,11 @@
 }
 
 .exampleLeft:hover {
-  transform: translate(-5px, -5px) rotate(-2deg);
+  transform: translate(-4px, -7px) rotate(-1deg);
 }
 
 .exampleRight:hover {
-  transform: translate(5px, -5px) rotate(2deg);
+  transform: translate(4px, -7px) rotate(1deg);
 }
 
 .exampleCards {
@@ -290,41 +196,44 @@
   line-height: 1.3;
 }
 
-.exampleChips {
+.tajaderoMark {
   position: absolute;
-  top: 54px;
-  right: 22px;
-  width: 48px;
-  height: 55px;
-}
-
-.exampleChips i {
-  position: absolute;
-  left: 0;
-  width: 48px;
-  height: 17px;
+  z-index: 4;
+  top: 48px;
+  right: 39px;
+  display: grid;
+  width: 62px;
+  height: 62px;
+  place-items: center;
   border: 2px solid var(--ink);
   border-radius: 50%;
-  background: var(--paper);
-  transition: transform 190ms ease;
-}
-
-.exampleChips i:nth-child(1) {
-  bottom: 0;
-}
-
-.exampleChips i:nth-child(2) {
-  bottom: 13px;
   background: var(--lime);
+  box-shadow: 4px 4px 0 rgb(23 25 28 / 18%);
+  transform: rotate(-8deg);
+  transition: transform 190ms ease, box-shadow 190ms ease;
 }
 
-.exampleChips i:nth-child(3) {
-  bottom: 26px;
+.tajaderoMark :global(img) {
+  width: 52px;
+  height: 52px;
+}
+
+.tajaderoMark > b {
+  position: absolute;
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 50%;
+  color: white;
   background: var(--blue);
+  font-size: 11px;
+  font-weight: 850;
 }
 
-.challengeExample:hover .exampleChips i:nth-child(3) {
-  transform: translateY(-7px);
+.challengeExample:hover .tajaderoMark {
+  box-shadow: 7px 7px 0 rgb(31 11 209 / 12%);
+  transform: translate(-5px, -8px) rotate(9deg) scale(1.08);
 }
 
 .pov span {
@@ -448,6 +357,63 @@
   display: block;
 }
 
+.proofTools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px 20px;
+  align-items: center;
+  padding: 18px 20px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+}
+
+.proofTools > div > strong {
+  display: block;
+  font-size: 17px;
+  font-weight: 740;
+}
+
+.proofTools > div > p {
+  margin: 5px 0 0;
+  color: #4f5660;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.proofTools nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: end;
+}
+
+.proofTools a {
+  padding: 8px 10px;
+  border: 1px solid var(--blue);
+  color: var(--blue);
+  background: #f6f5ff;
+  font-size: 13px;
+  font-weight: 760;
+  text-decoration: none;
+  transition: transform 150ms ease, background 150ms ease;
+}
+
+.proofTools a:hover {
+  background: var(--lime);
+  transform: translateY(-2px);
+}
+
+.proofTools code {
+  grid-column: 1 / -1;
+  display: block;
+  padding: 11px 13px;
+  border-left: 3px solid var(--blue);
+  background: var(--background);
+  color: #454a52;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .proofMeaning {
   display: grid;
   max-height: 0;
@@ -520,8 +486,13 @@
     grid-template-columns: 1fr;
   }
 
-  .verifyAction {
+  .verifyAction,
+  .proofTools {
     grid-template-columns: 1fr;
+  }
+
+  .proofTools nav {
+    justify-content: start;
   }
 
   .verifyKey,
@@ -541,26 +512,24 @@
 
 @media (max-width: 620px) {
   .challengePoints article {
-    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-columns: 48px minmax(0, 1fr);
   }
 
-  .pointVisual {
-    grid-column: 2;
-    justify-self: start;
-    margin-top: 4px;
+  .challengeNumber {
+    font-size: 31px;
   }
 
   .exampleTop {
-    width: 86%;
+    width: calc(50% - 7px);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pointVisual,
   .challengeExample,
   .exampleCards :global(.card),
-  .exampleChips i,
+  .tajaderoMark,
   .verifyAction,
+  .proofTools a,
   .proofMeaning {
     transition: none;
   }

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 
 import { Card } from "@/components/card";
@@ -14,6 +15,8 @@ const BOT_PAPER =
 const BOT_SOURCE =
   "https://github.com/ishanrk/noir-poker/blob/multiplayer/apps/server/src/bot.rs";
 const AZTEC = "https://aztec.network/";
+const VERIFY_SCRIPT =
+  "https://github.com/ishanrk/noir-poker/blob/multiplayer/apps/web/scripts/verify-receipt.mjs";
 
 type ExampleState = "draw" | "complete" | "verify";
 
@@ -163,6 +166,20 @@ function ChallengeExample() {
               </label>
               <strong className={challengeStyles.verifyDone}>✓ Proof verified in your browser</strong>
             </div>
+            <div className={challengeStyles.proofTools}>
+              <div>
+                <strong>Published proof artifacts</strong>
+                <p>Everything needed for an independent check is public.</p>
+              </div>
+              <nav aria-label="Published proof artifacts">
+                <Link href="/protocol">Download proof JSON</Link>
+                <a href={VERIFY_SCRIPT} target="_blank" rel="noreferrer">
+                  Verifier script
+                </a>
+                <Link href="/protocol">Proof details</Link>
+              </nav>
+              <code>npm --prefix apps/web run proof:verify -- receipt.json</code>
+            </div>
             <div className={challengeStyles.proofMeaning}>
               <article>
                 <span>✓</span>
@@ -276,19 +293,11 @@ export default function RulesPage() {
                   <strong>A challenge shows up before the next hand starts.</strong>
                   <p>Some challenges are easy and some are hard.</p>
                 </div>
-                <div className={`${challengeStyles.pointVisual} ${challengeStyles.drawVisual}`} aria-hidden="true">
-                  <span>?</span>
-                  <i />
-                </div>
               </article>
               <article>
                 <span className={challengeStyles.challengeNumber}>2</span>
                 <div>
                   <strong>You need to complete the challenge before the next hand to get a reward.</strong>
-                </div>
-                <div className={`${challengeStyles.pointVisual} ${challengeStyles.rewardVisual}`} aria-hidden="true">
-                  <span>+20</span>
-                  <i>✓</i>
                 </div>
               </article>
               <article>
@@ -301,10 +310,6 @@ export default function RulesPage() {
                     challenge and that you completed it without ever seeing what the challenge was,
                     when you completed it, or how you completed it.
                   </p>
-                </div>
-                <div className={`${challengeStyles.pointVisual} ${challengeStyles.proofVisual}`} aria-hidden="true">
-                  <span>✓</span>
-                  <i>?</i>
                 </div>
               </article>
             </div>
@@ -334,11 +339,10 @@ export default function RulesPage() {
                   <Card value="A♥" />
                   <Card value="5♣" />
                 </div>
-                <div className={challengeStyles.exampleChips} aria-hidden="true">
-                  <i />
-                  <i />
-                  <i />
-                </div>
+                <span className={challengeStyles.tajaderoMark} aria-hidden="true">
+                  <Image src="/assets/poker-chip.svg" alt="" width={56} height={56} />
+                  <b>T</b>
+                </span>
                 <strong>Raise before the flop and finish ahead</strong>
               </article>
             </div>
