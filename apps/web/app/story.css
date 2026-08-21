@@ -983,7 +983,7 @@
 
 .chip-orbit img:nth-child(1) { top: 8px; margin-left: -62px; transform: translateX(-50%) rotate(-8deg); }
 .chip-orbit img:nth-child(2) { top: 77px; margin-left: 52px; background: var(--lime); animation-delay: -1.7s; transform: translateX(-50%) rotate(9deg); }
-.chip-orbit img:nth-child(3) { top: 110px; margin-left: -70px; background: var(--blue); filter: brightness(0) invert(1); animation-delay: -3.2s; transform: translateX(-50%) rotate(-4deg); }
+.chip-orbit img:nth-child(3) { top: 110px; margin-left: -70px; background: var(--blue); animation-delay: -3.2s; transform: translateX(-50%) rotate(-4deg); }
 
 @keyframes chip-float {
   0%, 100% { translate: 0 0; }

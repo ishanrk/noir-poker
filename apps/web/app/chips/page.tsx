@@ -23,7 +23,7 @@ export default function ChipsPage() {
         <div className="chip-orbit" aria-hidden="true">
           <Image src="/assets/poker-chip.svg" alt="" width={112} height={112} />
           <Image src="/assets/poker-chip.svg" alt="" width={112} height={112} />
-          <Image src="/assets/poker-chip.svg" alt="" width={112} height={112} />
+          <Image src="/assets/poker-chip-light.svg" alt="" width={112} height={112} />
         </div>
       </section>
 
