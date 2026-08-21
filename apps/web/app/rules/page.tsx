@@ -165,7 +165,7 @@ export default function RulesPage() {
           <p className="story-index">04</p>
           <div>
             <h2 id="challenge-rules-title">Challenge rules</h2>
-            <p>Proofs add evidence. They do not pause the poker game.</p>
+            <p>Proof publication runs alongside normal play.</p>
           </div>
         </header>
 

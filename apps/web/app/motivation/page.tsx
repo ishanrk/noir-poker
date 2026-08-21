@@ -160,7 +160,7 @@ export default function MotivationPage() {
           <li>The server sees the cards while a hand is live.</li>
           <li>The server can stop serving a room before settlement.</li>
           <li>Challenge completion currently uses six facts committed by the server.</li>
-          <li>The audit covers a completed deal. It is not a mental-poker protocol.</li>
+          <li>Live cards remain visible to the server; the audit starts after settlement.</li>
         </ul>
         <Link className="story-link" href="/protocol">
           Read the exact protocol

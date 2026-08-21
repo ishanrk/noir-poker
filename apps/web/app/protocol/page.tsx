@@ -5,7 +5,7 @@ import { ProofPuzzle } from "@/components/proof-puzzle";
 import { ProtocolDemo } from "@/components/protocol-demo";
 import { SiteHeader } from "@/components/site-header";
 
-const REPO = "https://github.com/ishanrk/noir-poker/blob/main";
+const REPO = "https://github.com/ishanrk/noir-poker/blob/multiplayer";
 const NOIR = "https://noir-lang.org/docs/";
 const NOIR_PROVING = "https://noir-lang.org/docs/getting_started_manually";
 const BARRETENBERG =
@@ -121,8 +121,8 @@ export default function ProtocolPage() {
         </div>
 
         <p className="story-note">
-          A completion proof independently rechecks the secret commitment, selector and catalog path.
-          A fair-draw proof is not a prerequisite for the points claim.
+          A completion proof repeats the secret commitment, selector and catalog checks, so it
+          stands on its own.
         </p>
       </section>
 
@@ -320,7 +320,7 @@ export default function ProtocolPage() {
           <details>
             <summary>
               <span>Limits</span>
-              <small>What the current proof does not cover</small>
+              <small>Current boundary</small>
             </summary>
             <div>
               <p>
