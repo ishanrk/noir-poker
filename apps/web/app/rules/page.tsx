@@ -1,214 +1,286 @@
 import Link from "next/link";
 
-import { ChallengeUiPreview } from "@/components/challenge-ui-preview";
+import { Card } from "@/components/card";
+import { Keycap } from "@/components/keycap";
 import { SiteHeader } from "@/components/site-header";
+
+import styles from "./rules.module.css";
 
 const WSOP_RULES =
   "https://assets.wsopcdn.com/wsop/853ee602-e1e9-4019-a0cf-381419d805c6.pdf";
 const BOT_PAPER =
   "https://www.cs.mun.ca/~lourdes/public/publication/billings-pss-99/";
+const BOT_SOURCE =
+  "https://github.com/ishanrk/noir-poker/blob/multiplayer/apps/server/src/bot.rs";
+const AZTEC = "https://aztec.network/";
 
-const CHALLENGES = [
-  "See the flop",
-  "Raise before the flop",
-  "Call before the flop",
-  "Check on the flop",
-  "Reach showdown",
-  "Finish the hand ahead",
-  "Raise before the flop and finish ahead",
-  "Reach showdown, finish ahead and never raise before the flop",
-] as const;
+type ExampleState = "draw" | "complete" | "verify";
 
-const POKER_FLOW = [
-  ["Deal", "Two private cards for each active seat."],
-  ["Preflop", "Action starts left of the big blind."],
-  ["Flop", "Three community cards after one burn."],
-  ["Turn", "A second burn, then one community card."],
-  ["River", "A third burn, then the final community card."],
-  ["Settle", "Fold wins immediately. Showdown compares the best five-card hands."],
-] as const;
-
-const CHALLENGE_RULES = [
-  ["Draw before ready", "A human seat needs an assigned challenge before it can ready for the next hand."],
-  ["Fair draw proof is optional", "Publishing the draw proof never blocks normal play."],
-  ["Completion proof claims points", "Generate it only after the hand and only when the objective was met."],
-  ["Verification is optional", "Any browser may verify an accepted proof. Gameplay does not wait for it."],
-  ["The objective stays private", "Other players see proof status and points, not the hidden rule."],
-  ["One claim per challenge", "A public nullifier prevents the same completion proof from paying twice."],
-] as const;
-
-function ChallengeGlyph({ index }: { index: number }) {
-  const cards = [
-    ["2♣", "K♠"],
-    ["A♦", "9♣"],
-    ["Q♠", "J♥"],
-    ["8♣", "8♦"],
-    ["A♠", "Q♦"],
-    ["K♣", "7♥"],
-    ["A♥", "5♣"],
-    ["J♠", "4♦"],
-  ][index];
+function ExampleTable({ state }: { state: ExampleState }) {
+  const opponent = state === "verify";
+  const played = state !== "draw";
+  const board = ["A♠", "K♦", "9♣", "4♥", undefined] as const;
 
   return (
-    <div className="challenge-glyph" aria-hidden="true">
-      <span>{cards[0]}</span>
-      <span>{cards[1]}</span>
-      <i>{String(index + 1).padStart(2, "0")}</i>
+    <div className={styles.tableWrap} data-state={state}>
+      <div className={`${styles.seat} ${styles.topSeat}`}>
+        <span>{opponent ? "You" : "Opponent"}</span>
+        <strong>{state === "complete" ? "folded" : "1,000"}</strong>
+        <div className={styles.hole}>
+          <Card hidden />
+          <Card hidden />
+        </div>
+      </div>
+
+      <div className={styles.table}>
+        <div className={styles.pot}>
+          <span>Pot</span>
+          <strong>{played ? "180" : "30"}</strong>
+        </div>
+        <div className={styles.board} aria-label="Example community cards">
+          {board.map((value, index) => (
+            <Card key={index} value={played ? value : undefined} />
+          ))}
+        </div>
+        {state === "complete" && <div className={styles.action}>Opponent folds · pot won</div>}
+      </div>
+
+      <div className={`${styles.seat} ${styles.bottomSeat}`}>
+        <div className={styles.hole}>
+          {state === "complete" ? (
+            <>
+              <Card value="7♣" />
+              <Card value="2♦" />
+            </>
+          ) : (
+            <>
+              <Card hidden />
+              <Card hidden />
+            </>
+          )}
+        </div>
+        <span>{opponent ? "Player 1" : "You"}</span>
+        <strong>{state === "complete" ? "1,180" : "1,000"}</strong>
+      </div>
+    </div>
+  );
+}
+
+function ChallengeExample() {
+  return (
+    <div className={styles.demo}>
+      <input className={`${styles.stepInput} ${styles.stepOne}`} type="radio" name="challenge-step" id="challenge-step-one" defaultChecked />
+      <input className={`${styles.stepInput} ${styles.stepTwo}`} type="radio" name="challenge-step" id="challenge-step-two" />
+      <input className={`${styles.stepInput} ${styles.stepThree}`} type="radio" name="challenge-step" id="challenge-step-three" />
+
+      <div className={styles.steps}>
+        <label className={styles.tabOne} htmlFor="challenge-step-one">
+          <span>Step 1</span>
+          <strong>Draw challenge</strong>
+        </label>
+        <label className={styles.tabTwo} htmlFor="challenge-step-two">
+          <span>Step 2</span>
+          <strong>Complete it</strong>
+        </label>
+        <label className={styles.tabThree} htmlFor="challenge-step-three">
+          <span>Step 3</span>
+          <strong>Opponent verifies</strong>
+        </label>
+      </div>
+
+      <div className={styles.panels}>
+        <section className={`${styles.walkPanel} ${styles.panelOne}`}>
+          <div className={styles.pov}>
+            <span>Player POV</span>
+            <strong>The challenge appears before the next hand</strong>
+          </div>
+          <ExampleTable state="draw" />
+          <div className={styles.privateChallenge}>
+            <header>
+              <div>
+                <span>Private challenge</span>
+                <strong>Draw your next challenge</strong>
+              </div>
+            </header>
+            <label className={`key-choice ${styles.demoKey}`} htmlFor="challenge-step-two">
+              <Keycap wide>Draw Challenge</Keycap>
+            </label>
+            <small>Only you will see it</small>
+          </div>
+        </section>
+
+        <section className={`${styles.walkPanel} ${styles.panelTwo}`}>
+          <div className={styles.pov}>
+            <span>Player POV</span>
+            <strong>Seven-deuce gets through and the bluff wins</strong>
+          </div>
+          <ExampleTable state="complete" />
+          <div className={styles.privateChallenge}>
+            <header>
+              <div>
+                <span>Private challenge</span>
+                <strong>Seven-deuce bluff</strong>
+              </div>
+              <b>+20</b>
+            </header>
+            <div className={styles.completion}>
+              <span>Completion</span>
+              <strong>Challenge complete</strong>
+              <label className={`key-choice ${styles.demoKeyWide}`} htmlFor="challenge-step-three">
+                <Keycap wide>Generate Completion Proof</Keycap>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section className={`${styles.walkPanel} ${styles.panelThree}`}>
+          <div className={styles.pov}>
+            <span>Opponent POV</span>
+            <strong>The opponent sees the proof, not the challenge</strong>
+          </div>
+          <ExampleTable state="verify" />
+          <div className={styles.publicProof}>
+            <input className={styles.verifyInput} id="challenge-proof-check" type="checkbox" />
+            <header>
+              <div>
+                <span>Published completion proof</span>
+                <strong>Player 1</strong>
+              </div>
+              <b>20 proof points</b>
+            </header>
+            <div className={styles.proofLine}>
+              <span>Completion</span>
+              <strong className={styles.proofState}>published</strong>
+              <label className="key-choice" htmlFor="challenge-proof-check">
+                <Keycap>Verify</Keycap>
+              </label>
+            </div>
+            <div className={styles.proofMeaning}>
+              <div>
+                <span>Random challenge</span>
+                <strong>verified</strong>
+              </div>
+              <div>
+                <span>Challenge completed</span>
+                <strong>verified</strong>
+              </div>
+              <div>
+                <span>Challenge itself</span>
+                <strong>private</strong>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
 
 export default function RulesPage() {
   return (
-    <main className="site-shell story-page story-rules">
+    <main className={`site-shell story-page ${styles.page}`}>
       <SiteHeader compact />
 
-      <header className="story-hero">
+      <header className={styles.hero}>
         <div>
-          <p className="story-kicker">Rules</p>
-          <h1>Texas Hold&apos;em with one private objective.</h1>
+          <h1>Rulebook</h1>
           <p>
-            The betting game is standard no-limit Hold&apos;em. Noir Poker adds an optional proof layer
-            between hands.
+            Standard WSOP Poker rules with secret cryptographically verifiable challenges between
+            hands.
           </p>
         </div>
         <a className="story-source-card" href={WSOP_RULES} target="_blank" rel="noreferrer">
           <span>Poker rules</span>
           <strong>WSOP rulebook</strong>
-          <small>Open source</small>
+          <small>Open rulebook</small>
         </a>
       </header>
 
-      <section className="story-section" aria-labelledby="modes-title">
-        <header className="story-section-head">
-          <p className="story-index">01</p>
-          <div>
-            <h2 id="modes-title">Choose the table</h2>
-            <p>All three modes share the same Rust game engine and table interface.</p>
-          </div>
+      <section className={styles.section} aria-labelledby="modes-title">
+        <header className={styles.sectionHead}>
+          <h2 id="modes-title">Choose your gamemode</h2>
         </header>
 
-        <div className="mode-rule-grid">
-          <article>
-            <span>Single player</span>
-            <h3>You and server-side bots</h3>
-            <p>
-              Bots sample possible hidden cards, estimate hand strength and compare the result with
-              pot odds before choosing a legal action.
-            </p>
-            <a href={BOT_PAPER} target="_blank" rel="noreferrer">
-              Simulation strategy reference
+        <div className={styles.modes}>
+          <article className={`${styles.mode} ${styles.single}`}>
+            <div className={styles.botVisual} aria-hidden="true">
+              <div className={styles.botCards}>
+                <Card value="A♠" />
+                <Card value="Q♦" />
+              </div>
+              <span>BOTS</span>
+            </div>
+            <h3>
+              Play against <strong>BOTS</strong>
+            </h3>
+            <p>Play against bots based on a strategy from the paper below.</p>
+            <a className={styles.citation} href={BOT_PAPER} target="_blank" rel="noreferrer">
+              <span>Billings et al. 1999</span>
+              <cite>Using Probabilistic Knowledge and Simulation to Play Poker</cite>
+            </a>
+            <a href={BOT_SOURCE} target="_blank" rel="noreferrer">
+              Bot source code
             </a>
           </article>
-          <article>
-            <span>Multiplayer</span>
-            <h3>Two to six human seats</h3>
-            <p>
-              Every browser contributes deal entropy. Private views, reconnection and durable room
-              recovery use the same server path as single player.
-            </p>
-          </article>
-          <article>
-            <span>Aztec poker</span>
-            <h3>Wallet-gated table entry</h3>
-            <p>
-              The current prototype locks a private PLAY buy-in before opening the table. On-chain
-              settlement remains a later step.
-            </p>
-          </article>
-        </div>
-      </section>
 
-      <section className="story-section" aria-labelledby="poker-title">
-        <header className="story-section-head">
-          <p className="story-index">02</p>
-          <div>
-            <h2 id="poker-title">One hand</h2>
-            <p>The table advances only through legal actions returned by the engine.</p>
-          </div>
-        </header>
-
-        <ol className="poker-flow">
-          {POKER_FLOW.map(([title, copy], index) => (
-            <li key={title}>
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              <strong>{title}</strong>
-              <p>{copy}</p>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      <section className="story-section" aria-labelledby="catalog-title">
-        <header className="story-section-head">
-          <p className="story-index">03</p>
-          <div>
-            <h2 id="catalog-title">Challenge catalog</h2>
-            <p>These eight definitions are committed into the current Merkle root.</p>
-          </div>
-        </header>
-
-        <div className="challenge-catalog">
-          {CHALLENGES.map((challenge, index) => (
-            <article key={challenge}>
-              <ChallengeGlyph index={index} />
-              <span>Challenge {String(index + 1).padStart(2, "0")}</span>
-              <h3>{challenge}</h3>
-              <p>Worth 20 proof points after an accepted completion proof.</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="story-section" aria-labelledby="challenge-rules-title">
-        <header className="story-section-head">
-          <p className="story-index">04</p>
-          <div>
-            <h2 id="challenge-rules-title">Challenge rules</h2>
-            <p>Proof publication runs alongside normal play.</p>
-          </div>
-        </header>
-
-        <dl className="rule-ledger">
-          {CHALLENGE_RULES.map(([term, copy], index) => (
-            <div key={term}>
-              <dt>
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                {term}
-              </dt>
-              <dd>{copy}</dd>
+          <article className={`${styles.mode} ${styles.multi}`}>
+            <div className={styles.roomVisual} aria-hidden="true">
+              <span>ROOM ID</span>
+              <strong>7K2P</strong>
+              <div>
+                <i>YOU</i>
+                <i>FRIEND</i>
+              </div>
             </div>
-          ))}
-        </dl>
-      </section>
+            <h3>
+              Play against other <strong>PEOPLE</strong>
+            </h3>
+            <p>Play with friends using just a Room ID and verifiable proofs for hidden challenges.</p>
+          </article>
 
-      <section className="story-section" aria-labelledby="states-title">
-        <header className="story-section-head">
-          <p className="story-index">05</p>
-          <div>
-            <h2 id="states-title">What the challenge panel shows</h2>
-            <p>The objective stays pinned above the table. Public proof status appears by player.</p>
-          </div>
-        </header>
-
-        <div className="challenge-state-grid">
-          <article>
-            <h3>Assigned</h3>
-            <ChallengeUiPreview state="assigned" />
-          </article>
-          <article>
-            <h3>Completed</h3>
-            <ChallengeUiPreview state="hit" />
-          </article>
-          <article>
-            <h3>Missed</h3>
-            <ChallengeUiPreview state="miss" />
-          </article>
-          <article>
-            <h3>Published</h3>
-            <ChallengeUiPreview state="verified" />
+          <article className={`${styles.mode} ${styles.aztec}`}>
+            <div className={styles.aztecVisual} aria-hidden="true">
+              <span>AZTEC</span>
+              <i />
+            </div>
+            <h3>
+              Play with people on the <strong>AZTEC NETWORK</strong>
+            </h3>
+            <p>Play with people using private Tajadero buy-ins on Aztec.</p>
+            <a href={AZTEC} target="_blank" rel="noreferrer">
+              Aztec Network
+            </a>
           </article>
         </div>
+      </section>
+
+      <section className={`${styles.section} ${styles.challengeIntro}`} aria-labelledby="challenge-title">
+        <div className={styles.challengeCopy}>
+          <h2 id="challenge-title">What is a challenge</h2>
+          <p>
+            A challenge shows up before the next hand starts. Some challenges are easy and some are
+            hard.
+          </p>
+          <p>You need to complete the challenge before the next hand to get a reward.</p>
+          <p>
+            Your challenge is private to you. When you complete a challenge, a cryptographic proof
+            of completion can be generated and verified by others. They can see that you had a
+            random challenge and that you completed it without ever seeing what the challenge was,
+            when you completed it, or how you completed it.
+          </p>
+          <strong className={styles.noCheating}>No server side cheating</strong>
+        </div>
+      </section>
+
+      <section className={`${styles.section} ${styles.example}`} aria-labelledby="example-title">
+        <header className={styles.exampleHead}>
+          <div>
+            <span>Example challenge</span>
+            <h2 id="example-title">Seven-deuce bluff</h2>
+          </div>
+          <p>See the same challenge from the player view and the opponent view.</p>
+        </header>
+        <ChallengeExample />
       </section>
 
       <section className="story-section story-next">
