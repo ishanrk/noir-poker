@@ -72,6 +72,8 @@ export type PublishedProof = {
   commitment: string;
   nonce: string;
   catalog_root: string;
+  facts_hash?: string;
+  nullifier?: string;
   proof: string;
   public_inputs: string;
 };
@@ -88,6 +90,24 @@ export type DealAudit = {
   contributions: Array<{ seat: number; share: string }>;
   seed: string;
   deck: Array<{ value: string }>;
+  starting_stacks: number[];
+  actions: Array<{
+    seq: number;
+    player: number;
+    action: "fold" | "check" | "call" | "raise_to";
+    raise_to?: number;
+  }>;
+};
+
+export type HandMeta = { hand_no: number; dealer: number };
+
+export type ProofMeta = {
+  hand_no: number;
+  seat: number;
+  draw_published: boolean;
+  completion_published: boolean;
+  nullifier?: string;
+  points?: number;
 };
 
 async function responseError(response: Response) {
@@ -151,6 +171,22 @@ export async function loadDealAudit(room: string, hand: number): Promise<DealAud
 
   if (!response.ok) throw new Error(await responseError(response));
   return response.json();
+}
+
+export async function loadHandHistory(room: string): Promise<HandMeta[]> {
+  const response = await fetch(`${serverUrl()}/rooms/${encodeURIComponent(room)}/hands`);
+
+  if (!response.ok) throw new Error(await responseError(response));
+  const value = await response.json() as { hands: HandMeta[] };
+  return value.hands;
+}
+
+export async function loadProofHistory(room: string): Promise<ProofMeta[]> {
+  const response = await fetch(`${serverUrl()}/rooms/${encodeURIComponent(room)}/proofs`);
+
+  if (!response.ok) throw new Error(await responseError(response));
+  const value = await response.json() as { proofs: ProofMeta[] };
+  return value.proofs;
 }
 
 function seatKey(room: string) {

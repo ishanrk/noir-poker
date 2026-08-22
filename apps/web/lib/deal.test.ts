@@ -46,6 +46,8 @@ const audit = {
   server_secret: encodeHex(secret),
   contributions: shares.map((share, seat) => ({ seat, share: encodeHex(share) })),
   seed: encodeHex(seed),
+  starting_stacks: [1000, 1000, 1000],
+  actions: [],
   deck: deck.map((card) => ({ value: cardValue(card) })),
 };
 
@@ -57,4 +59,60 @@ assert.throws(() =>
   verifyDealAudit({ ...audit, deck: [{ value: "A♠" }, ...audit.deck.slice(1)] }),
 );
 
+for (let players = 2; players <= 6; players += 1) {
+  for (let dealer = 0; dealer < players; dealer += 1) {
+    const value = auditFor(players, dealer);
+    assert.equal(verifyDealAudit(value).deck.length, 52);
+  }
+}
+
+const base = auditFor(4, 2);
+const flip = (value: string) => `${value[0] === "0" ? "1" : "0"}${value.slice(1)}`;
+assert.throws(() => verifyDealAudit({ ...base, protocol_version: 2 }));
+assert.throws(() => verifyDealAudit({ ...base, algorithm: "other" }));
+assert.throws(() => verifyDealAudit({ ...base, room: "10112233-4455-6677-8899-aabbccddeeff" }));
+assert.throws(() => verifyDealAudit({ ...base, hand_no: base.hand_no + 1 }));
+assert.throws(() => verifyDealAudit({ ...base, server_secret: flip(base.server_secret) }));
+assert.throws(() => verifyDealAudit({ ...base, commitment: flip(base.commitment) }));
+assert.throws(() => verifyDealAudit({ ...base, contributions: base.contributions.slice(1) }));
+assert.throws(() => verifyDealAudit({
+  ...base,
+  contributions: [base.contributions[1], base.contributions[0], ...base.contributions.slice(2)],
+}));
+assert.throws(() => verifyDealAudit({
+  ...base,
+  contributions: base.contributions.map((entry, index) =>
+    index === 2 ? { ...entry, share: flip(entry.share) } : entry),
+}));
+assert.throws(() => verifyDealAudit({ ...base, seed: flip(base.seed) }));
+assert.throws(() => verifyDealAudit({
+  ...base,
+  deck: [{ value: base.deck[1].value }, ...base.deck.slice(1)],
+}));
+assert.throws(() => verifyDealAudit({ ...base, deck: base.deck.slice(1) }));
+
 process.stdout.write("deal protocol vectors ok\n");
+
+function auditFor(players: number, dealer: number) {
+  const localSecret = Uint8Array.from({ length: 32 }, () => 0x61);
+  const localShares = Array.from({ length: players }, (_, seat) =>
+    Uint8Array.from({ length: 32 }, () => seat + 1));
+  const localSeed = dealSeed(room, BigInt(11), localSecret, localShares);
+  const localDeck = shuffleDeck(localSeed);
+
+  return {
+    protocol_version: 1,
+    algorithm: "sha256-counter-rejection-fisher-yates-v1",
+    room,
+    hand_no: 11,
+    players,
+    dealer,
+    commitment: encodeHex(dealCommitment(room, BigInt(11), localSecret)),
+    server_secret: encodeHex(localSecret),
+    contributions: localShares.map((share, seat) => ({ seat, share: encodeHex(share) })),
+    seed: encodeHex(localSeed),
+    deck: localDeck.map((card) => ({ value: cardValue(card) })),
+    starting_stacks: Array.from({ length: players }, () => 1000),
+    actions: [],
+  };
+}

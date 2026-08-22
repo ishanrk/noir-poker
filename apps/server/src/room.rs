@@ -1,4 +1,4 @@
-use challenge_core::{Facts, POINTS, facts_hash, hand_tag};
+use challenge_core::{Facts, facts_hash, hand_tag};
 use game_core::{Action, ActionError, Event, NextHandError, State, Street};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -434,6 +434,7 @@ impl Room {
         self.changed(rev);
     }
 
+    #[cfg(test)]
     pub(super) fn stage_draw(
         &self,
         seat: usize,
@@ -478,17 +479,22 @@ impl Room {
     }
 
     pub(super) fn commit_draw(&mut self, draw: PendingDraw) {
-        let challenges = if draw.next {
-            &mut self.next_challenges
-        } else {
-            &mut self.current_challenges
-        };
-        let challenge = challenges[draw.seat].as_mut().expect("staged challenge");
+        let current = self.current_challenges[draw.seat]
+            .as_mut()
+            .filter(|challenge| challenge.hand_no == draw.hand_no);
+        let challenge = current.or_else(|| {
+            self.next_challenges[draw.seat]
+                .as_mut()
+                .filter(|challenge| challenge.hand_no == draw.hand_no)
+        });
 
-        challenge.draw_verified = true;
+        if let Some(challenge) = challenge {
+            challenge.draw_verified = true;
+        }
         self.changed(draw.rev);
     }
 
+    #[cfg(test)]
     pub(super) fn stage_claim(
         &self,
         seat: usize,
@@ -516,7 +522,7 @@ impl Room {
             return Err("challenge already claimed");
         }
 
-        let points = u32::from(POINTS);
+        let points = u32::from(challenge_core::POINTS);
         let prior_points = self.seats[seat].proof_points;
         let next_points = prior_points
             .checked_add(u64::from(points))
@@ -539,12 +545,13 @@ impl Room {
     }
 
     pub(super) fn commit_claim(&mut self, claim: PendingClaim, nullifier: [u8; 32]) {
-        let challenge = self.current_challenges[claim.seat]
+        if let Some(challenge) = self.current_challenges[claim.seat]
             .as_mut()
-            .expect("staged challenge");
-
-        challenge.nullifier = Some(nullifier);
-        challenge.points = Some(claim.points);
+            .filter(|challenge| challenge.hand_no == claim.hand_no)
+        {
+            challenge.nullifier = Some(nullifier);
+            challenge.points = Some(claim.points);
+        }
         self.seats[claim.seat].proof_points = claim.next_points;
         self.changed(claim.rev);
     }

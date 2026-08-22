@@ -25,48 +25,12 @@ if (createHash("sha256").update(source).digest("hex") !== ARTIFACT_SHA256) {
   throw new Error("challenge artifact mismatch");
 }
 
-const receipt = await loadReceipt(input);
-const hasDraw = Boolean(receipt.draw_proof && receipt.draw_public_inputs);
-if (Boolean(receipt.draw_proof) !== Boolean(receipt.draw_public_inputs)) {
-  throw new Error("proof receipt mismatch");
-}
-const draw = hasDraw ? decodePublic(receipt.draw_public_inputs) : undefined;
-const completion = decodePublic(receipt.completion_public_inputs);
-const expectedTag = createHash("blake2s256")
-  .update(Buffer.concat([Buffer.from("NPHAND02"), uuid(receipt.room), u64(BigInt(receipt.hand_no))]))
-  .digest("hex");
-
-if (
-  receipt.protocol_version !== 2 ||
-  receipt.proof_system !== "ultra_honk" ||
-  receipt.circuit_id !== "challenge_v2" ||
-  receipt.bb_version !== "5.2.0" ||
-  receipt.artifact_sha256 !== ARTIFACT_SHA256 ||
-  receipt.vk_sha256 !== VK_SHA256 ||
-  receipt.catalog_root !== ROOT ||
-  receipt.points !== 20 ||
-  receipt.hand_tag !== expectedTag ||
-  !Number.isInteger(receipt.hand_no) ||
-  !Number.isInteger(receipt.seat) ||
-  receipt.seat < 0 ||
-  receipt.seat > 5 ||
-  !common(completion, receipt) ||
-  completion.mode !== 1 ||
-  completion.factsHash !== receipt.facts_hash ||
-  completion.nullifier !== receipt.nullifier ||
-  (draw &&
-    (!common(draw, receipt) ||
-      draw.mode !== 0 ||
-      draw.factsHash !== ZERO ||
-      draw.nullifier !== ZERO))
-) throw new Error("proof receipt mismatch");
+const value = await loadReceipt(input);
+const proofs = "kind" in value ? published(value) : receipt(value);
 
 const api = await Barretenberg.new({ backend: BackendType.Wasm });
 try {
   const backend = new UltraHonkBackend(artifact.bytecode, api);
-  const proofs = [[receipt.completion_proof, receipt.completion_public_inputs]];
-  if (hasDraw) proofs.unshift([receipt.draw_proof, receipt.draw_public_inputs]);
-
   for (const [proof, publicInputs] of proofs) {
     const verified = await backend.verifyProof(
       {
@@ -81,7 +45,76 @@ try {
   await api.destroy();
 }
 
-process.stdout.write(`verified room=${receipt.room} hand=${receipt.hand_no} nullifier=${receipt.nullifier}\n`);
+process.stdout.write(`verified room=${value.room} hand=${value.hand_no} proofs=${proofs.length}\n`);
+
+function published(proof) {
+  const inputs = decodePublic(proof.public_inputs);
+  const mode = proof.kind === "draw" ? 0 : proof.kind === "completion" ? 1 : -1;
+
+  if (
+    !metadata(proof) ||
+    !common(inputs, proof) ||
+    inputs.mode !== mode ||
+    (mode === 0 &&
+      (inputs.factsHash !== ZERO ||
+        inputs.nullifier !== ZERO ||
+        proof.facts_hash !== undefined ||
+        proof.nullifier !== undefined)) ||
+    (mode === 1 &&
+      (inputs.factsHash !== proof.facts_hash || inputs.nullifier !== proof.nullifier))
+  ) throw new Error("published proof mismatch");
+
+  return [[proof.proof, proof.public_inputs]];
+}
+
+function receipt(value) {
+  const hasDraw = Boolean(value.draw_proof && value.draw_public_inputs);
+  if (Boolean(value.draw_proof) !== Boolean(value.draw_public_inputs)) {
+    throw new Error("proof receipt mismatch");
+  }
+  const draw = hasDraw ? decodePublic(value.draw_public_inputs) : undefined;
+  const completion = decodePublic(value.completion_public_inputs);
+
+  if (
+    !metadata(value) ||
+    value.points !== 20 ||
+    !common(completion, value) ||
+    completion.mode !== 1 ||
+    completion.factsHash !== value.facts_hash ||
+    completion.nullifier !== value.nullifier ||
+    (draw &&
+      (!common(draw, value) ||
+        draw.mode !== 0 ||
+        draw.factsHash !== ZERO ||
+        draw.nullifier !== ZERO))
+  ) throw new Error("proof receipt mismatch");
+
+  const proofs = [[value.completion_proof, value.completion_public_inputs]];
+  if (hasDraw) proofs.unshift([value.draw_proof, value.draw_public_inputs]);
+  return proofs;
+}
+
+function metadata(value) {
+  const expectedTag = createHash("blake2s256")
+    .update(Buffer.concat([Buffer.from("NPHAND02"), uuid(value.room), u64(BigInt(value.hand_no))]))
+    .digest("hex");
+
+  return (
+    value.protocol_version === 2 &&
+    value.proof_system === "ultra_honk" &&
+    value.circuit_id === "challenge_v2" &&
+    value.bb_version === "5.2.0" &&
+    value.artifact_sha256 === ARTIFACT_SHA256 &&
+    value.vk_sha256 === VK_SHA256 &&
+    value.catalog_root === ROOT &&
+    value.hand_tag === expectedTag &&
+    Number.isInteger(value.hand_no) &&
+    value.hand_no >= 0 &&
+    Number.isInteger(value.seat) &&
+    value.seat >= 0 &&
+    value.seat <= 5
+  );
+}
 
 async function loadReceipt(value) {
   if (value === "-") {

@@ -92,7 +92,20 @@ export function verifyDealAudit(audit: DealAudit): DealVerification {
     !Number.isInteger(audit.players) ||
     !Number.isInteger(audit.dealer) ||
     audit.contributions.length !== audit.players ||
-    audit.contributions.some((entry, seat) => entry.seat !== seat)
+    audit.contributions.some((entry, seat) => entry.seat !== seat) ||
+    audit.starting_stacks.length !== audit.players ||
+    audit.starting_stacks.some((stack) => !Number.isInteger(stack) || stack < 0 || stack > 0xffffffff) ||
+    audit.actions.some((action, seq) =>
+      action.seq !== seq ||
+      !Number.isInteger(action.player) ||
+      action.player < 0 ||
+      action.player >= audit.players ||
+      !["fold", "check", "call", "raise_to"].includes(action.action) ||
+      (action.action === "raise_to"
+        ? !Number.isInteger(action.raise_to) || (action.raise_to ?? 0) < 0
+        : action.raise_to !== undefined)) ||
+    audit.deck.length !== 52 ||
+    new Set(audit.deck.map(({ value }) => value)).size !== 52
   ) {
     throw new Error("invalid deal audit");
   }

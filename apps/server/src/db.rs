@@ -185,8 +185,44 @@ pub struct PublishedProof {
     pub commitment: Vec<u8>,
     pub nonce: Vec<u8>,
     pub catalog_root: Vec<u8>,
+    pub facts_hash: Option<Vec<u8>>,
+    pub nullifier: Option<Vec<u8>>,
     pub proof: Vec<u8>,
     pub public_inputs: Vec<u8>,
+}
+
+pub struct StoredHandMeta {
+    pub hand_no: i64,
+    pub dealer: i32,
+}
+
+pub struct StoredProofMeta {
+    pub hand_no: i64,
+    pub seat: i32,
+    pub draw_published: bool,
+    pub completion_published: bool,
+    pub nullifier: Option<Vec<u8>>,
+    pub points: Option<i64>,
+}
+
+pub struct StoredClaim {
+    pub version: i32,
+    pub hand_tag: Vec<u8>,
+    pub commitment: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub catalog_root: Vec<u8>,
+    pub facts_salt: Vec<u8>,
+    pub facts_hash: Vec<u8>,
+    pub claimed: bool,
+}
+
+pub struct StoredDraw {
+    pub version: i32,
+    pub hand_tag: Vec<u8>,
+    pub commitment: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub catalog_root: Vec<u8>,
+    pub verified: bool,
 }
 
 #[derive(Clone)]
@@ -729,6 +765,7 @@ impl Db {
         };
         let sql = format!(
             "SELECT room_id, hand_no, seat, hand_tag, commitment, nonce, catalog_root, \
+             facts_hash, nullifier, \
              {proof} AS proof, {public} AS public_inputs \
              FROM challenge_assignments WHERE room_id = $1 AND hand_no = $2 AND seat = $3 \
              AND {published} IS NOT NULL"
@@ -750,8 +787,114 @@ impl Db {
                 commitment: row.try_get("commitment")?,
                 nonce: row.try_get("nonce")?,
                 catalog_root: row.try_get("catalog_root")?,
+                facts_hash: row.try_get("facts_hash")?,
+                nullifier: row.try_get("nullifier")?,
                 proof: row.try_get("proof")?,
                 public_inputs: row.try_get("public_inputs")?,
+            })
+        })
+        .transpose()
+    }
+
+    pub async fn hand_history(&self, room: Uuid) -> DbResult<Vec<StoredHandMeta>> {
+        query("SELECT hand_no, dealer FROM hands WHERE room_id = $1 ORDER BY hand_no")
+            .bind(room)
+            .fetch_all(&self.pool)
+            .await?
+            .into_iter()
+            .map(|row| {
+                Ok(StoredHandMeta {
+                    hand_no: row.try_get("hand_no")?,
+                    dealer: row.try_get("dealer")?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn proof_history(&self, room: Uuid) -> DbResult<Vec<StoredProofMeta>> {
+        query(
+            "SELECT hand_no, seat, draw_verified_at IS NOT NULL AS draw_published, \
+             claimed_at IS NOT NULL AS completion_published, nullifier, points \
+             FROM challenge_assignments WHERE room_id = $1 ORDER BY hand_no, seat",
+        )
+        .bind(room)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|row| {
+            Ok(StoredProofMeta {
+                hand_no: row.try_get("hand_no")?,
+                seat: row.try_get("seat")?,
+                draw_published: row.try_get("draw_published")?,
+                completion_published: row.try_get("completion_published")?,
+                nullifier: row.try_get("nullifier")?,
+                points: row.try_get("points")?,
+            })
+        })
+        .collect()
+    }
+
+    pub async fn pending_claim(
+        &self,
+        room: Uuid,
+        hand_no: u64,
+        seat: usize,
+    ) -> DbResult<Option<StoredClaim>> {
+        let row = query(
+            "SELECT version, hand_tag, commitment, nonce, catalog_root, facts_salt, facts_hash, \
+             nullifier IS NOT NULL AS claimed \
+             FROM challenge_assignments \
+             WHERE room_id = $1 AND hand_no = $2 AND seat = $3 \
+             AND facts_salt IS NOT NULL AND facts_hash IS NOT NULL",
+        )
+        .bind(room)
+        .bind(i64::try_from(hand_no)?)
+        .bind(i32::try_from(seat)?)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            Ok(StoredClaim {
+                version: row.try_get("version")?,
+                hand_tag: row.try_get("hand_tag")?,
+                commitment: row.try_get("commitment")?,
+                nonce: row.try_get("nonce")?,
+                catalog_root: row.try_get("catalog_root")?,
+                facts_salt: row.try_get("facts_salt")?,
+                facts_hash: row.try_get("facts_hash")?,
+                claimed: row.try_get("claimed")?,
+            })
+        })
+        .transpose()
+    }
+
+    pub async fn pending_draw(
+        &self,
+        room: Uuid,
+        hand_no: u64,
+        seat: usize,
+    ) -> DbResult<Option<StoredDraw>> {
+        let row = query(
+            "SELECT version, hand_tag, commitment, nonce, catalog_root, \
+             draw_verified_at IS NOT NULL AS verified \
+             FROM challenge_assignments \
+             WHERE room_id = $1 AND hand_no = $2 AND seat = $3 \
+             AND nonce IS NOT NULL",
+        )
+        .bind(room)
+        .bind(i64::try_from(hand_no)?)
+        .bind(i32::try_from(seat)?)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            Ok(StoredDraw {
+                version: row.try_get("version")?,
+                hand_tag: row.try_get("hand_tag")?,
+                commitment: row.try_get("commitment")?,
+                nonce: row.try_get("nonce")?,
+                catalog_root: row.try_get("catalog_root")?,
+                verified: row.try_get("verified")?,
             })
         })
         .transpose()

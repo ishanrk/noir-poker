@@ -34,7 +34,7 @@ use uuid::Uuid;
 
 use crate::db::{
     ChallengeEntropy, ClaimUpdate, Db, DrawUpdate, NewAction, NewChallenge, NewHand, ProofReceipt,
-    PublishedProof, StoredAction, StoredChallenge, StoredHand, StoredRoom,
+    PublishedProof, StoredAction, StoredChallenge, StoredClaim, StoredDraw, StoredHand, StoredRoom,
 };
 use crate::proof::{
     ARTIFACT_SHA256, BB_VERSION, CIRCUIT_ID, PROOF_SYSTEM, ProofInputs, ProofVerifier, VK_SHA256,
@@ -173,6 +173,13 @@ enum ServerMessage {
     Error {
         message: &'static str,
     },
+    ProofError {
+        kind: &'static str,
+        message: &'static str,
+    },
+    ProofAccepted {
+        kind: &'static str,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -241,6 +248,45 @@ struct AuditView {
     contributions: Vec<AuditEntropyView>,
     seed: String,
     deck: Vec<CardView>,
+    starting_stacks: Vec<u32>,
+    actions: Vec<AuditActionView>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct AuditActionView {
+    seq: u64,
+    player: usize,
+    action: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    raise_to: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct HandHistoryView {
+    hands: Vec<HandMetaView>,
+}
+
+#[derive(Serialize)]
+struct HandMetaView {
+    hand_no: u64,
+    dealer: usize,
+}
+
+#[derive(Serialize)]
+struct ProofHistoryView {
+    proofs: Vec<ProofHistoryMetaView>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct ProofHistoryMetaView {
+    hand_no: u64,
+    seat: usize,
+    draw_published: bool,
+    completion_published: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nullifier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    points: Option<u32>,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -346,6 +392,10 @@ struct PublishedProofView {
     commitment: String,
     nonce: String,
     catalog_root: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    facts_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nullifier: Option<String>,
     proof: String,
     public_inputs: String,
 }
@@ -435,6 +485,8 @@ fn app_with_origins(state: AppState, origins: Vec<HeaderValue>) -> Router {
         .route("/rooms", post(create_room))
         .route("/rooms/{room}/join", post(join_room))
         .route("/rooms/{room}/ws", get(room_ws))
+        .route("/rooms/{room}/hands", get(hand_history))
+        .route("/rooms/{room}/proofs", get(proof_history))
         .route("/proofs/{nullifier}", get(proof_receipt))
         .route(
             "/proofs/{room}/{hand_no}/{seat}/{kind}",
@@ -492,6 +544,20 @@ async fn deal_audit(
         &stored.shares,
     )
     .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "invalid deal audit"))?;
+    let starting_stacks = stored
+        .hand
+        .stacks
+        .iter()
+        .map(|&stack| u32::try_from(stack))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "invalid deal audit"))?;
+    let actions = stored
+        .hand
+        .actions
+        .iter()
+        .map(audit_action_view)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "invalid deal audit"))?;
     let (hand, _) = restore_hand(room, stored.config, stored.hand)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "invalid deal audit"))?;
 
@@ -533,7 +599,110 @@ async fn deal_audit(
             .collect(),
         seed: encode_hex(expected_seed),
         deck,
+        starting_stacks,
+        actions,
     }))
+}
+
+async fn hand_history(
+    AxumState(state): AxumState<AppState>,
+    Path(code): Path<String>,
+) -> Result<Json<HandHistoryView>, HttpError> {
+    let (room_id, room) = resolve_room(&state, &code)
+        .await
+        .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
+    let (latest, settled) = {
+        let room = room.lock().await;
+        room.hand
+            .as_ref()
+            .map(|hand| (Some(hand.no), hand.game.settled))
+            .unwrap_or((None, false))
+    };
+    let hands = state
+        .db
+        .hand_history(room_id)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "cannot load hand history",
+            )
+        })?
+        .into_iter()
+        .filter(|hand| {
+            u64::try_from(hand.hand_no)
+                .is_ok_and(|no| latest.is_some_and(|latest| no < latest || no == latest && settled))
+        })
+        .map(|hand| {
+            Ok(HandMetaView {
+                hand_no: u64::try_from(hand.hand_no)?,
+                dealer: usize::try_from(hand.dealer)?,
+            })
+        })
+        .collect::<Result<Vec<_>, std::num::TryFromIntError>>()
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "invalid hand history"))?;
+
+    Ok(Json(HandHistoryView { hands }))
+}
+
+async fn proof_history(
+    AxumState(state): AxumState<AppState>,
+    Path(code): Path<String>,
+) -> Result<Json<ProofHistoryView>, HttpError> {
+    let (room, _) = resolve_room(&state, &code)
+        .await
+        .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
+    let proofs = state
+        .db
+        .proof_history(room)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "cannot load proof history",
+            )
+        })?
+        .into_iter()
+        .map(|proof| {
+            Ok(ProofHistoryMetaView {
+                hand_no: u64::try_from(proof.hand_no).map_err(|_| ())?,
+                seat: usize::try_from(proof.seat).map_err(|_| ())?,
+                draw_published: proof.draw_published,
+                completion_published: proof.completion_published,
+                nullifier: proof.nullifier.map(encode_hex_vec).transpose()?,
+                points: proof
+                    .points
+                    .map(u32::try_from)
+                    .transpose()
+                    .map_err(|_| ())?,
+            })
+        })
+        .collect::<Result<Vec<_>, ()>>()
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "invalid proof history"))?;
+
+    Ok(Json(ProofHistoryView { proofs }))
+}
+
+fn audit_action_view(action: &StoredAction) -> Result<AuditActionView, ()> {
+    let (text, raise_to) = match (action.action.as_str(), action.raise_to) {
+        ("fold", None) => ("fold", None),
+        ("check", None) => ("check", None),
+        ("call", None) => ("call", None),
+        ("raise_to", Some(to)) => ("raise_to", Some(u32::try_from(to).map_err(|_| ())?)),
+        _ => return Err(()),
+    };
+
+    Ok(AuditActionView {
+        seq: u64::try_from(action.seq).map_err(|_| ())?,
+        player: usize::try_from(action.player).map_err(|_| ())?,
+        action: text,
+        raise_to,
+    })
+}
+
+fn encode_hex_vec(value: Vec<u8>) -> Result<String, ()> {
+    let value: [u8; 32] = value.try_into().map_err(|_| ())?;
+    Ok(encode_hex(value))
 }
 
 async fn proof_receipt(
@@ -585,6 +754,14 @@ fn published_proof_view(proof: PublishedProof, completion: bool) -> Result<Publi
     let commitment: [u8; 32] = proof.commitment.try_into().map_err(|_| ())?;
     let nonce: [u8; 32] = proof.nonce.try_into().map_err(|_| ())?;
     let root: [u8; 32] = proof.catalog_root.try_into().map_err(|_| ())?;
+    let (facts_hash, nullifier) = if completion {
+        (
+            Some(encode_hex_vec(proof.facts_hash.ok_or(())?)?),
+            Some(encode_hex_vec(proof.nullifier.ok_or(())?)?),
+        )
+    } else {
+        (None, None)
+    };
 
     if seat >= 6 || tag != hand_tag(*proof.room.as_bytes(), hand_no) || root != catalog_root() {
         return Err(());
@@ -605,6 +782,8 @@ fn published_proof_view(proof: PublishedProof, completion: bool) -> Result<Publi
         commitment: encode_hex(commitment),
         nonce: encode_hex(nonce),
         catalog_root: encode_hex(root),
+        facts_hash,
+        nullifier,
         proof: STANDARD.encode(proof.proof),
         public_inputs: STANDARD.encode(proof.public_inputs),
     })
@@ -985,39 +1164,39 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                     }
                     Message::Ping(_) | Message::Pong(_) => continue,
                 };
-                let result = match message {
-                    ClientMessage::Fold => apply_action(&state, id, seat, Action::Fold).await,
-                    ClientMessage::Check => apply_action(&state, id, seat, Action::Check).await,
-                    ClientMessage::Call => apply_action(&state, id, seat, Action::Call).await,
+                let (result, proof_kind) = match message {
+                    ClientMessage::Fold => (apply_action(&state, id, seat, Action::Fold).await, None),
+                    ClientMessage::Check => (apply_action(&state, id, seat, Action::Check).await, None),
+                    ClientMessage::Call => (apply_action(&state, id, seat, Action::Call).await, None),
                     ClientMessage::RaiseTo { to } => {
-                        apply_action(&state, id, seat, Action::RaiseTo(to)).await
+                        (apply_action(&state, id, seat, Action::RaiseTo(to)).await, None)
                     }
                     ClientMessage::ChallengeCommit {
                         hand_no,
                         commitment,
                     } => {
-                        challenge_room(&state, id, seat, hand_no, &commitment).await
+                        (challenge_room(&state, id, seat, hand_no, &commitment).await, None)
                     }
                     ClientMessage::ChallengeDraw {
                         hand_no,
                         proof,
                         public_inputs,
                     } => {
-                        draw_room(&state, id, seat, hand_no, &proof, &public_inputs).await
+                        (draw_room(&state, id, seat, hand_no, &proof, &public_inputs).await, Some("draw"))
                     }
                     ClientMessage::ChallengeClaim {
                         hand_no,
                         proof,
                         public_inputs,
                     } => {
-                        claim_room(&state, id, seat, hand_no, &proof, &public_inputs).await
+                        (claim_room(&state, id, seat, hand_no, &proof, &public_inputs).await, Some("completion"))
                     }
                     ClientMessage::Ready { entropy } => match entropy {
-                        Some(entropy) => ready_room_entropy(&state, id, seat, &entropy).await,
-                        None => Err("deal entropy required"),
+                        Some(entropy) => (ready_room_entropy(&state, id, seat, &entropy).await, None),
+                        None => (Err("deal entropy required"), None),
                     },
                     ClientMessage::DealEntropy { entropy } => {
-                        single_entropy(&state, id, seat, &entropy).await
+                        (single_entropy(&state, id, seat, &entropy).await, None)
                     }
                     ClientMessage::Auth { .. } => {
                         send_error(&mut socket, "already authenticated").await;
@@ -1025,8 +1204,19 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                     }
                 };
 
-                if let Err(err) = result {
-                    send_error(&mut socket, err).await;
+                match (result, proof_kind) {
+                    (Err(err), Some(kind)) => {
+                        let _ = send_message(
+                            &mut socket,
+                            &ServerMessage::ProofError { kind, message: err },
+                        )
+                        .await;
+                    }
+                    (Err(err), None) => send_error(&mut socket, err).await,
+                    (Ok(()), Some(kind)) => {
+                        let _ = send_message(&mut socket, &ServerMessage::ProofAccepted { kind }).await;
+                    }
+                    (Ok(()), None) => {}
                 }
             }
             change = changes.recv() => {
@@ -1312,8 +1502,17 @@ async fn claim_room(
     let room = find_room(state, id).await.ok_or("room not found")?;
 
     {
+        let stored = state
+            .db
+            .pending_claim(id, hand_no, seat)
+            .await
+            .map_err(|_| "cannot load challenge claim")?
+            .ok_or("challenge missing")?;
+        if stored.claimed {
+            return Err("challenge already claimed");
+        }
         let room = room.lock().await;
-        let pending = room.stage_claim(seat, hand_no)?;
+        let pending = persisted_claim(&room, hand_no, seat, stored)?;
 
         if !claim_matches(inputs, pending) {
             return Err("challenge proof mismatch");
@@ -1333,8 +1532,17 @@ async fn claim_room(
         return Err("challenge proof failed");
     }
 
+    let stored = state
+        .db
+        .pending_claim(id, hand_no, seat)
+        .await
+        .map_err(|_| "cannot load challenge claim")?
+        .ok_or("challenge missing")?;
+    if stored.claimed {
+        return Err("challenge already claimed");
+    }
     let mut room = room.lock().await;
-    let pending = room.stage_claim(seat, hand_no)?;
+    let pending = persisted_claim(&room, hand_no, seat, stored)?;
 
     if !claim_matches(inputs, pending) {
         return Err("challenge proof mismatch");
@@ -1367,6 +1575,64 @@ async fn claim_room(
     Ok(())
 }
 
+fn persisted_claim(
+    room: &Room,
+    hand_no: u64,
+    seat: usize,
+    stored: StoredClaim,
+) -> Result<PendingClaim, &'static str> {
+    let hand_tag: [u8; 32] = stored
+        .hand_tag
+        .try_into()
+        .map_err(|_| "invalid challenge claim")?;
+    let commitment = stored
+        .commitment
+        .try_into()
+        .map_err(|_| "invalid challenge claim")?;
+    let nonce = stored
+        .nonce
+        .try_into()
+        .map_err(|_| "invalid challenge claim")?;
+    let root = stored
+        .catalog_root
+        .try_into()
+        .map_err(|_| "invalid challenge claim")?;
+    let facts_salt = stored
+        .facts_salt
+        .try_into()
+        .map_err(|_| "invalid challenge claim")?;
+    let facts_hash = stored
+        .facts_hash
+        .try_into()
+        .map_err(|_| "invalid challenge claim")?;
+
+    if stored.version != i32::from(PROTOCOL_VERSION) || root != catalog_root() {
+        return Err("invalid challenge claim");
+    }
+
+    let player = room.seats.get(seat).ok_or("invalid player")?;
+    let points = u32::from(POINTS);
+    let next_points = player
+        .proof_points
+        .checked_add(u64::from(points))
+        .ok_or("proof points limit reached")?;
+
+    Ok(PendingClaim {
+        hand_no,
+        seat,
+        hand_tag,
+        commitment,
+        nonce,
+        catalog_root: root,
+        facts_salt,
+        facts_hash,
+        points,
+        prior_points: player.proof_points,
+        next_points,
+        rev: room.rev.checked_add(1).ok_or("revision limit reached")?,
+    })
+}
+
 async fn draw_room(
     state: &AppState,
     id: Uuid,
@@ -1380,8 +1646,17 @@ async fn draw_room(
     let room = find_room(state, id).await.ok_or("room not found")?;
 
     {
+        let stored = state
+            .db
+            .pending_draw(id, hand_no, seat)
+            .await
+            .map_err(|_| "cannot load draw proof")?
+            .ok_or("challenge missing")?;
+        if stored.verified {
+            return Err("draw already verified");
+        }
         let room = room.lock().await;
-        let pending = room.stage_draw(seat, hand_no)?;
+        let pending = persisted_draw(&room, id, hand_no, seat, stored)?;
 
         if !draw_matches(inputs, pending) {
             return Err("draw proof mismatch");
@@ -1401,8 +1676,17 @@ async fn draw_room(
         return Err("draw proof failed");
     }
 
+    let stored = state
+        .db
+        .pending_draw(id, hand_no, seat)
+        .await
+        .map_err(|_| "cannot load draw proof")?
+        .ok_or("challenge missing")?;
+    if stored.verified {
+        return Err("draw already verified");
+    }
     let mut room = room.lock().await;
-    let pending = room.stage_draw(seat, hand_no)?;
+    let pending = persisted_draw(&room, id, hand_no, seat, stored)?;
 
     if !draw_matches(inputs, pending) {
         return Err("draw proof mismatch");
@@ -1427,6 +1711,49 @@ async fn draw_room(
         .map_err(|_| "cannot persist draw proof")?;
     room.commit_draw(pending);
     Ok(())
+}
+
+fn persisted_draw(
+    room: &Room,
+    id: Uuid,
+    hand_no: u64,
+    seat: usize,
+    stored: StoredDraw,
+) -> Result<PendingDraw, &'static str> {
+    let tag: [u8; 32] = stored
+        .hand_tag
+        .try_into()
+        .map_err(|_| "invalid draw proof")?;
+    let commitment = stored
+        .commitment
+        .try_into()
+        .map_err(|_| "invalid draw proof")?;
+    let nonce = stored.nonce.try_into().map_err(|_| "invalid draw proof")?;
+    let root = stored
+        .catalog_root
+        .try_into()
+        .map_err(|_| "invalid draw proof")?;
+
+    if stored.version != i32::from(PROTOCOL_VERSION)
+        || tag != challenge_core::hand_tag(*id.as_bytes(), hand_no)
+        || root != catalog_root()
+        || room.seats.get(seat).is_none()
+    {
+        return Err("invalid draw proof");
+    }
+
+    Ok(PendingDraw {
+        hand_no,
+        seat,
+        hand_tag: tag,
+        commitment,
+        nonce,
+        catalog_root: root,
+        rev: room.rev.checked_add(1).ok_or("revision limit reached")?,
+        next: room.next_challenges[seat]
+            .as_ref()
+            .is_some_and(|challenge| challenge.hand_no == hand_no),
+    })
 }
 
 fn draw_matches(inputs: ProofInputs, draw: PendingDraw) -> bool {
@@ -3495,6 +3822,8 @@ mod tests {
             commitment: [2; 32].to_vec(),
             nonce: [8; 32].to_vec(),
             catalog_root: catalog_root().to_vec(),
+            facts_hash: None,
+            nullifier: None,
             proof: vec![1, 2, 3],
             public_inputs: vec![4, 5, 6],
         };
@@ -3507,6 +3836,39 @@ mod tests {
         assert!(value.get("objective_index").is_none());
         assert!(value.get("facts_salt").is_none());
         assert!(value.get("siblings").is_none());
+    }
+
+    #[test]
+    fn proof_history_privacy() {
+        let value = serde_json::to_value(ProofHistoryView {
+            proofs: vec![ProofHistoryMetaView {
+                hand_no: 4,
+                seat: 2,
+                draw_published: true,
+                completion_published: true,
+                nullifier: Some(encode_hex([9; 32])),
+                points: Some(u32::from(POINTS)),
+            }],
+        })
+        .unwrap();
+        let proof = &value["proofs"][0];
+
+        assert_eq!(proof.as_object().unwrap().len(), 6);
+        for private in [
+            "objective",
+            "objective_index",
+            "secret",
+            "siblings",
+            "must_true",
+            "must_false",
+            "facts_salt",
+            "facts",
+            "witness",
+            "proof",
+            "public_inputs",
+        ] {
+            assert!(proof.get(private).is_none());
+        }
     }
 
     #[test]
@@ -3619,6 +3981,49 @@ mod tests {
         );
         assert_eq!(view.claim.unwrap().points, Some(u32::from(POINTS)));
         assert_eq!(view.players[0].proof_points, u64::from(POINTS));
+    }
+
+    #[test]
+    fn late_claim_stays_on_old_hand() {
+        let mut room = claimable_room();
+        let old = room.current_challenges[0].as_ref().unwrap();
+        let stored = StoredClaim {
+            version: i32::from(PROTOCOL_VERSION),
+            hand_tag: old.hand_tag.to_vec(),
+            commitment: old.commitment.to_vec(),
+            nonce: old.nonce.to_vec(),
+            catalog_root: old.catalog_root.to_vec(),
+            facts_salt: old.facts_salt.unwrap().to_vec(),
+            facts_hash: old.facts_hash.unwrap().to_vec(),
+            claimed: false,
+        };
+        room.hand.as_mut().unwrap().no = 2;
+        room.current_challenges[0] = Some(Challenge {
+            hand_no: 2,
+            seat: 0,
+            hand_tag: hand_tag(*TEST_ROOM.as_bytes(), 2),
+            commitment: [2; 32],
+            nonce: [3; 32],
+            catalog_root: catalog_root(),
+            draw_verified: false,
+            facts_salt: None,
+            facts_hash: None,
+            facts: None,
+            nullifier: None,
+            points: None,
+        });
+
+        let claim = persisted_claim(&room, 1, 0, stored).unwrap();
+        room.commit_claim(claim, [9; 32]);
+
+        assert_eq!(room.seats[0].proof_points, u64::from(POINTS));
+        assert!(
+            room.current_challenges[0]
+                .as_ref()
+                .unwrap()
+                .nullifier
+                .is_none()
+        );
     }
 
     #[test]
@@ -4903,10 +5308,22 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        let hands = db.hand_history(ready_id).await.unwrap();
+        let proofs = db.proof_history(ready_id).await.unwrap();
 
         assert_eq!(proof.room, ready_id);
         assert_eq!(proof.hand_no, 1);
         assert_eq!(proof.seat, 0);
+        assert_eq!(
+            hands.iter().map(|hand| hand.hand_no).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        assert!(proofs.iter().any(|proof| {
+            proof.hand_no == 1
+                && proof.seat == 0
+                && proof.completion_published
+                && proof.points == Some(i64::from(POINTS))
+        }));
         assert_eq!(
             room_view(ready_id, &restored, restored.hand.as_ref().unwrap(), 0)
                 .claim
@@ -5088,11 +5505,12 @@ mod tests {
         let short = find_room(&short_state, short_id).await.unwrap();
         let short = short.lock().await;
         let hand = short.hand.as_ref().unwrap();
+        let next_short_hand = hand.id;
 
-        assert_eq!(hand.id, short_hand);
-        assert_eq!(hand.no, 0);
-        assert_eq!(hand.game.players[0].stack, 5);
-        assert!(room_view(short_id, &short, hand, 0).ready.unwrap().complete);
+        assert_ne!(hand.id, short_hand);
+        assert_eq!(hand.no, 1);
+        assert_eq!(hand.game.players[0].stack, 0);
+        assert!(room_view(short_id, &short, hand, 0).ready.is_none());
         assert_eq!(
             sqlx::query("SELECT COUNT(*) AS count FROM hands WHERE room_id = $1")
                 .bind(short_id)
@@ -5100,15 +5518,16 @@ mod tests {
                 .await
                 .unwrap()
                 .get::<i64, _>("count"),
-            1
+            2
         );
         drop(short);
 
         let short = reload(&db, short_id).await;
         let hand = short.hand.as_ref().unwrap();
 
-        assert!(room_view(short_id, &short, hand, 1).ready.unwrap().complete);
-        assert_eq!(hand.id, short_hand);
+        assert!(room_view(short_id, &short, hand, 1).ready.is_none());
+        assert_eq!(hand.id, next_short_hand);
+        assert_eq!(hand.no, 1);
     }
 
     #[tokio::test]
@@ -5277,7 +5696,7 @@ mod tests {
         );
         assert_eq!(
             claim_room(&state, id, 2, 0, proof, public).await,
-            Err("wrong challenge hand")
+            Err("challenge missing")
         );
 
         let mut wrong_root = STANDARD.decode(public).unwrap();

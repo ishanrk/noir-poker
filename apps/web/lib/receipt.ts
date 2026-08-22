@@ -102,6 +102,15 @@ export function validateReceipt(receipt: ProofReceipt) {
 }
 
 export async function verifyPublishedProof(proof: PublishedProof) {
+  validatePublishedProof(proof);
+
+  // same verifier for both modes
+  if (!(await verifyChallengeProofs([{ proof: proof.proof, publicInputs: proof.public_inputs }]))) {
+    throw new Error("proof verification failed");
+  }
+}
+
+export function validatePublishedProof(proof: PublishedProof) {
   const expectedTag = encodeHex(handTag(uuidBytes(proof.room), BigInt(proof.hand_no)));
   const inputs = decodePublicInputs(proof.public_inputs);
   if (proof.kind !== "draw" && proof.kind !== "completion") {
@@ -129,14 +138,13 @@ export async function verifyPublishedProof(proof: PublishedProof) {
     encodeHex(inputs.commitment) !== proof.commitment ||
     encodeHex(inputs.nonce) !== proof.nonce ||
     encodeHex(inputs.catalogRoot) !== proof.catalog_root ||
+    (mode === 0 && (proof.facts_hash !== undefined || proof.nullifier !== undefined)) ||
+    (mode === 1 &&
+      (encodeHex(inputs.factsHash) !== proof.facts_hash ||
+        encodeHex(inputs.nullifier) !== proof.nullifier)) ||
     (mode === 0 && (encodeHex(inputs.factsHash) !== ZERO || encodeHex(inputs.nullifier) !== ZERO))
   ) {
     throw new Error("published proof mismatch");
-  }
-
-  // same verifier for both modes
-  if (!(await verifyChallengeProofs([{ proof: proof.proof, publicInputs: proof.public_inputs }]))) {
-    throw new Error("proof verification failed");
   }
 }
 

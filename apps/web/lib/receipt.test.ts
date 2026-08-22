@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { catalogRoot, encodeHex, handTag } from "./challenge.ts";
 import { uuidBytes } from "./deal.ts";
-import { validateReceipt } from "./receipt.ts";
+import { validatePublishedProof, validateReceipt } from "./receipt.ts";
 
 const room = "00112233-4455-6677-8899-aabbccddeeff";
 const handNo = 9;
@@ -52,4 +52,50 @@ assert.throws(() => validateReceipt({ ...receipt, room: "10112233-4455-6677-8899
 assert.throws(() => validateReceipt({ ...receipt, hand_no: handNo + 1 }));
 assert.throws(() => validateReceipt({ ...receipt, points: 40 }));
 assert.throws(() => validateReceipt({ ...receipt, completion_public_inputs: receipt.draw_public_inputs }));
+
+const published = {
+  protocol_version: 2,
+  room,
+  hand_no: handNo,
+  seat: 2,
+  kind: "draw" as const,
+  proof_system: "ultra_honk",
+  circuit_id: "challenge_v2",
+  bb_version: "5.2.0",
+  artifact_sha256: receipt.artifact_sha256,
+  vk_sha256: receipt.vk_sha256,
+  hand_tag: receipt.hand_tag,
+  commitment: receipt.commitment,
+  nonce: receipt.nonce,
+  catalog_root: receipt.catalog_root,
+  proof: "AA==",
+  public_inputs: receipt.draw_public_inputs,
+};
+
+assert.doesNotThrow(() => validatePublishedProof(published));
+for (const [field, value] of [
+  ["protocol_version", 1],
+  ["room", "10112233-4455-6677-8899-aabbccddeeff"],
+  ["hand_no", handNo + 1],
+  ["seat", 1],
+  ["commitment", encodeHex(new Uint8Array(32).fill(9))],
+  ["nonce", encodeHex(new Uint8Array(32).fill(9))],
+  ["catalog_root", encodeHex(new Uint8Array(32).fill(9))],
+  ["artifact_sha256", "00".repeat(32)],
+  ["vk_sha256", "00".repeat(32)],
+] as const) {
+  assert.throws(() => validatePublishedProof({ ...published, [field]: value }));
+}
+assert.throws(() => validatePublishedProof({ ...published, kind: "completion" }));
+
+const completion = {
+  ...published,
+  kind: "completion" as const,
+  facts_hash: receipt.facts_hash,
+  nullifier: receipt.nullifier,
+  public_inputs: receipt.completion_public_inputs,
+};
+assert.doesNotThrow(() => validatePublishedProof(completion));
+assert.throws(() => validatePublishedProof({ ...completion, facts_hash: "00".repeat(32) }));
+assert.throws(() => validatePublishedProof({ ...completion, nullifier: "00".repeat(32) }));
 process.stdout.write("proof receipt bindings ok\n");
