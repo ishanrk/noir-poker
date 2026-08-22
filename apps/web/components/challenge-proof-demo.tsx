@@ -17,8 +17,8 @@ const STEPS = [
   },
   {
     label: "Prove",
-    title: "Proof generation stays optional.",
-    copy: "A fair-draw proof may be published at any time. A completion proof is generated only when the player claims points.",
+    title: "Proof generation runs behind the game.",
+    copy: "Mode 0 starts after assignment. Mode 1 starts after a completed objective. Neither job blocks poker actions.",
     code: "UltraHonkBackend.generateProof(witness)",
   },
   {
@@ -51,7 +51,7 @@ export function ChallengeProofDemo() {
         <div className="challenge-demo-cards" aria-hidden="true">
           <span className="challenge-demo-secret">?</span>
           <span className="challenge-demo-hole">A♠</span>
-          <span className="challenge-demo-proof">✓</span>
+          <span className="challenge-demo-proof">ZK</span>
         </div>
         <div className="challenge-demo-copy">
           <strong>{value.title}</strong>

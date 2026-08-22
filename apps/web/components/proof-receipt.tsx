@@ -20,7 +20,7 @@ function ReceiptSeal({ verified, points = 20 }: { verified: boolean; points?: nu
   return (
     <div className="receipt-seal" data-verified={verified}>
       <span>Hidden challenge</span>
-      <strong>{verified ? "✓" : "?"}</strong>
+      <strong>{verified ? "VALID" : "?"}</strong>
       <small>{verified ? `+${points} proof points` : "still private"}</small>
       <i aria-hidden="true" />
     </div>
@@ -186,6 +186,8 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
       </header>
 
       <VerificationTimeline receipt={Boolean(receipt)} draw={draw} completion={completion} />
+
+      <p className="story-note">A completion proof does not require a previous draw proof</p>
 
       {error && <p className="proof-error">{error}</p>}
 

@@ -47,9 +47,9 @@ async function visit(route, name, expected) {
 }
 
 await visit("/", "home", [
-  "The game server cannot cheat even if it wanted to.",
-  "Rust backend, Next.js and TypeScript frontend, Noir zero knowledge circuits.",
-  "Create a Game",
+  "Poker where the server cannot cheat even if it wanted to.",
+  "Written in",
+  "Create a game",
 ]);
 
 async function waitForFrame(match, message, after = 0) {
@@ -90,7 +90,7 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
   await page.getByRole("radio", { name: "Single Player" }).check();
   assert.equal(await page.getByRole("radio", { name: "Single Player" }).isChecked(), true);
   assert.equal(await page.getByRole("heading", { name: "Join Game" }).count(), 0);
-  await page.getByRole("radio", { name: "2" }).check();
+  await page.getByRole("radio", { name: "2", exact: true }).check();
   assert.equal(await page.getByRole("button", { name: "Connect Aztec" }).count(), 0);
   await page.getByRole("button", { name: "Create Game" }).click();
   await page.waitForURL(/\/table\//, { timeout: 15_000 });
@@ -128,27 +128,29 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
   await waitForEnabled(fold, "bot did not return action");
   await fold.click();
   await page.getByText("Hand complete", { exact: true }).waitFor({ state: "visible", timeout: 15_000 });
-  await page.getByRole("button", { name: "Draw Challenge" }).waitFor({ state: "visible", timeout: 15_000 });
-  await visit("/", "home-after-single", ["Create a Game"]);
+  await page.getByText("PRIVATE CHALLENGE", { exact: true }).waitFor({ state: "visible", timeout: 15_000 });
+  await visit("/", "home-after-single", ["Create a game"]);
 }
 
-await page.getByRole("radio", { name: /Aztec/ }).check();
-// wait for lazy wallet ui
-await page
-  .getByRole("button", { name: "Connect Aztec" })
-  .waitFor({ state: "visible", timeout: 15_000 });
-if (errors.length > 0) {
-  throw new Error(errors.join("\n"));
+if (process.env.SINGLE_PLAYER_SMOKE !== "1") {
+  await page.getByRole("radio", { name: /Aztec/ }).check();
+  // wait for lazy wallet ui
+  await page
+    .getByRole("button", { name: "Connect Aztec" })
+    .waitFor({ state: "visible", timeout: 15_000 });
+  if (errors.length > 0) {
+    throw new Error(errors.join("\n"));
+  }
+  assert.equal(
+    await page.getByRole("button", { name: "Connect Aztec" }).isVisible(),
+    true,
+    "Aztec controls did not load",
+  );
+  await visit("/chips", "chips", [
+    "Aztec testnet",
+    "Private chips for Aztec tables.",
+  ]);
 }
-assert.equal(
-  await page.getByRole("button", { name: "Connect Aztec" }).isVisible(),
-  true,
-  "Aztec controls did not load",
-);
-await visit("/chips", "chips", [
-  "Aztec testnet",
-  "Private chips for Aztec tables.",
-]);
 
 await browser.close();
 

@@ -23,12 +23,17 @@ const FACTS = [
 ] as const;
 
 const IMPLEMENTATION = [
+  ["Challenge protocol", "2"],
   ["Circuit", "challenge_v2"],
   ["Circuit language", "Noir 1.0.0 beta 26"],
   ["Proof system", "UltraHonk"],
   ["Prover and verifier", "Barretenberg 5.2.0"],
   ["Browser execution", "NoirJS and bb.js WASM worker"],
   ["Public fields", "194"],
+  ["Challenge catalog", "8 fixed entries"],
+  ["Challenge reward", "20 proof points"],
+  ["Deal protocol", "1"],
+  ["Deal algorithm", "sha256-counter-rejection-fisher-yates-v1"],
   [
     "Circuit artifact SHA-256",
     "1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d",
@@ -89,13 +94,13 @@ export default function ProtocolPage() {
 
           <article>
             <header>
-              <span>Optional</span>
+              <span>Automatic</span>
               <h3>Fair-draw proof</h3>
             </header>
             <ol>
-              <li>After assignment, choose <strong>Generate fair draw proof</strong>.</li>
+              <li>The player browser starts Mode 0 after the challenge assignment arrives.</li>
               <li>The Rust server verifies the proof before marking it published.</li>
-              <li>Another player chooses <strong>Verify</strong> in the Challenge proofs section.</li>
+              <li>Another player opens the published proof and verifies it locally.</li>
               <li>
                 The accepted JSON is available from the server at{" "}
                 <code>/proofs/&lt;room&gt;/&lt;hand&gt;/&lt;seat&gt;/draw</code>.
@@ -109,7 +114,7 @@ export default function ProtocolPage() {
               <h3>Completion receipt</h3>
             </header>
             <ol>
-              <li>Meet the objective and choose <strong>Generate completion proof</strong>.</li>
+              <li>Meeting the objective starts Mode 1 in the player browser.</li>
               <li>The server verifies it, publishes the claim and awards 20 proof points.</li>
               <li>Open <code>/proof/&lt;nullifier&gt;</code>; verification starts in that browser.</li>
               <li>
@@ -157,7 +162,7 @@ export default function ProtocolPage() {
           <article>
             <header>
               <h3>Private challenge</h3>
-              <p>Secret commitment, hidden assignment, optional proof and public verification.</p>
+              <p>Secret commitment, hidden assignment, automatic proof and public verification.</p>
             </header>
             <ChallengeProofDemo />
           </article>
@@ -243,6 +248,11 @@ export default function ProtocolPage() {
                 SHA-256 counter output drives rejection sampling and Fisher-Yates over the canonical
                 52-card deck. Hole cards, burns and community cards use fixed positions.
               </p>
+              <code>stream_block = SHA256(&quot;NPSTRM01&quot; || seed || counter)</code>
+              <p>
+                A 32-bit word is rejected when it falls outside the largest exact multiple of the
+                shrinking range. This removes modulo bias from each swap choice.
+              </p>
             </div>
           </details>
 
@@ -266,6 +276,11 @@ export default function ProtocolPage() {
               <p>
                 The circuit hashes the selected rule and its three private Merkle siblings, then
                 requires the computed root to equal the public catalog root.
+              </p>
+              <p>
+                The catalog has eight entries, so the low three selector bits choose an entry
+                without modulo imbalance. The player commits before seeing the nonce. The server
+                cannot evaluate candidate nonces without the hidden 256-bit browser secret.
               </p>
             </div>
           </details>
@@ -324,12 +339,15 @@ export default function ProtocolPage() {
             </summary>
             <div>
               <p>
-                The server sees live cards and can stop serving a room. The completed deal is
-                auditable after settlement.
+                The deal check relies on SHA-256 commitment security, pseudorandom hash output and
+                browser entropy from crypto.getRandomValues. An unpredictable contribution after
+                the server commitment prevents the server from choosing the final deck after it
+                commits. The server can still abort or stop serving a room.
               </p>
               <p>
                 The completion circuit proves the private rule against six facts committed by the
-                server. A future public action transcript could derive those facts independently.
+                server. The recorded action transcript does not independently replay poker rules.
+                The deal transcript independently verifies deck generation.
               </p>
             </div>
           </details>
@@ -374,6 +392,18 @@ export default function ProtocolPage() {
           </a>
           <a href={`${REPO}/apps/server/src/proof.rs`} target="_blank" rel="noreferrer">
             Rust verifier
+          </a>
+          <a href={`${REPO}/crates/deal-core/src/lib.rs`} target="_blank" rel="noreferrer">
+            Deal protocol
+          </a>
+          <a href={`${REPO}/apps/server/src/fairness.rs`} target="_blank" rel="noreferrer">
+            Fair ceremony
+          </a>
+          <a href={`${REPO}/apps/web/lib/deal.ts`} target="_blank" rel="noreferrer">
+            Browser deal verifier
+          </a>
+          <a href={`${REPO}/apps/web/scripts/verify-receipt.mjs`} target="_blank" rel="noreferrer">
+            Standalone proof verifier
           </a>
           <a href={NOIR} target="_blank" rel="noreferrer">
             Noir documentation

@@ -1,0 +1,273 @@
+.strip {
+  width: min(1180px, calc(100% - 32px));
+  margin: 18px auto 24px;
+  padding: 18px 20px;
+  border-block: 2px solid var(--blue);
+  background: rgb(255 255 255 / 82%);
+  color: var(--ink);
+  font-family: "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
+}
+
+.stripHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.strip h2,
+.strip h3,
+.page h1,
+.page h2 {
+  margin: 0;
+  font-family: inherit;
+  text-transform: uppercase;
+}
+
+.label {
+  margin: 0 0 8px;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.state {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  text-align: right;
+}
+
+.state strong {
+  color: var(--blue);
+  font-size: 18px;
+}
+
+.state span {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.retry {
+  border: 0;
+  border-bottom: 3px solid var(--lime);
+  padding: 9px 12px;
+  color: white;
+  background: var(--blue);
+  font: 800 11px/1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
+}
+
+.links,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.links a,
+.actions a,
+.actions button {
+  border: 0;
+  border-bottom: 3px solid var(--lime);
+  background: var(--blue);
+  color: white;
+  padding: 10px 14px;
+  font: 800 12px/1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.private {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 20px;
+}
+
+.private strong {
+  display: block;
+  font-size: 19px;
+}
+
+.private small {
+  display: block;
+  margin-top: 6px;
+  font-weight: 700;
+}
+
+.proofRows {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.proofPlayer {
+  display: grid;
+  grid-template-columns: minmax(110px 0.7fr) 1fr 1fr;
+  gap: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-strong);
+}
+
+.proofItem {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.proofItem a {
+  color: var(--blue);
+}
+
+.page {
+  width: min(1120px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 50px 0 90px;
+  min-height: calc(100vh - 66px);
+  color: var(--ink);
+  font-family: "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
+}
+
+.hero {
+  max-width: 820px;
+  padding: 50px 0 34px;
+  border-bottom: 3px solid var(--blue);
+}
+
+.hero h1 {
+  font-size: clamp(34px 6vw 70px);
+  line-height: 0.95;
+}
+
+.hero p {
+  max-width: 680px;
+  font: 650 16px/1.55 ui-sans-serif system-ui sans-serif;
+}
+
+.list {
+  margin-top: 34px;
+  border-top: 1px solid var(--line-strong);
+}
+
+.entry {
+  display: grid;
+  grid-template-columns: 130px 1fr auto;
+  align-items: center;
+  gap: 24px;
+  padding: 24px 0;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.entry strong {
+  color: var(--blue);
+  font-size: 20px;
+}
+
+.entry span {
+  font: 700 14px/1.4 ui-sans-serif, system-ui, sans-serif;
+}
+
+.entry a {
+  color: var(--blue);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.verifyState {
+  margin: 28px 0;
+  padding: 15px 0;
+  border-block: 1px solid var(--blue);
+  color: var(--blue);
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.verifyState[data-state="verified"] {
+  color: #4f6900;
+  border-color: var(--lime);
+}
+
+.verifyState[data-state="failed"] {
+  color: #a0162c;
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px;
+  margin: 34px 0;
+}
+
+.detailGrid section {
+  padding-top: 18px;
+  border-top: 3px solid var(--blue);
+}
+
+.detailGrid p,
+.detailGrid li {
+  font: 600 15px/1.55 ui-sans-serif system-ui sans-serif;
+}
+
+.public {
+  margin-top: 36px;
+  padding: 24px 0;
+  border-block: 1px solid var(--line-strong);
+}
+
+.public dl {
+  display: grid;
+  gap: 14px;
+}
+
+.public div {
+  display: grid;
+  grid-template-columns: 170px minmax(0 1fr);
+  gap: 18px;
+}
+
+.public dt {
+  color: var(--blue);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.public dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font: 600 12px/1.45 ui-monospace monospace;
+}
+
+.error {
+  color: #a0162c;
+  font-weight: 800;
+}
+
+@media (max-width: 680px) {
+  .stripHead,
+  .private,
+  .entry,
+  .detailGrid,
+  .public div,
+  .proofPlayer {
+    grid-template-columns: 1fr;
+  }
+
+  .stripHead {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .state {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .entry {
+    gap: 8px;
+  }
+}

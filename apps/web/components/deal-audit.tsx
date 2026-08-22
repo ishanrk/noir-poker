@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import { Card } from "@/components/card";
+import styles from "@/components/crypto.module.css";
 import { SiteHeader } from "@/components/site-header";
 import { cardValue, verifyDealAudit, type DealVerification } from "@/lib/deal";
 import { loadDealAudit, type DealAudit } from "@/lib/server";
@@ -57,7 +58,11 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
       <header className="audit-hero">
         <div>
           <p className="eyebrow">Independent deal audit</p>
-          <h1>{state === "verified" ? "All 52 positions reproduce." : "Rebuilding the deck."}</h1>
+          <h1>{state === "verified"
+            ? "52 / 52 positions reproduced."
+            : state === "failed"
+              ? "Verification failed."
+              : "Verifying locally."}</h1>
           <p>The browser recomputes the commitment, seed, shuffle and deal locally.</p>
         </div>
         <div className="audit-deck" data-state={state} data-replay={replay}>
@@ -81,6 +86,10 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
 
       {error && <p className="proof-error">{error}</p>}
 
+      <div className={styles.verifyState} data-state={state} aria-live="polite">
+        {state === "loading" ? "VERIFYING LOCALLY" : state === "verified" ? "52 / 52 POSITIONS REPRODUCED" : "VERIFICATION FAILED"}
+      </div>
+
       {audit && layout && (
         <>
           <section className="audit-transcript">
@@ -92,6 +101,7 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
               <div><dt>combined seed</dt><dd>{audit.seed}</dd></div>
               <div><dt>player shares</dt><dd>{audit.contributions.length} ordered contributions</dd></div>
               <div><dt>algorithm</dt><dd>{audit.algorithm}</dd></div>
+              <div><dt>starting stacks</dt><dd>{audit.starting_stacks.join(" / ")}</dd></div>
             </dl>
           </section>
 
@@ -114,11 +124,52 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
             </div>
             <p className="audit-footnote">The first {dealt.length} consumed positions match the engine&apos;s clockwise deal and three burn rules.</p>
           </section>
+
+          <section className={styles.public}>
+            <h2>RECORDED ACTIONS</h2>
+            <div className={styles.list}>
+              {audit.actions.map((action) => (
+                <div className={styles.entry} key={action.seq}>
+                  <strong>{String(action.seq + 1).padStart(2, "0")}</strong>
+                  <span>PLAYER {action.player + 1}&nbsp;&nbsp;&nbsp;{action.action === "raise_to" ? `RAISE TO ${action.raise_to}` : action.action.toUpperCase()}</span>
+                </div>
+              ))}
+              {!audit.actions.length && <p>NO PLAYER ACTIONS</p>}
+            </div>
+            <p>These commands come from the durable server log. Their legality is not part of the deck verification above.</p>
+          </section>
+
+          <section className={styles.public}>
+            <h2>WHY THIS CHECK WORKS</h2>
+            <p>The server commits to its secret before final player randomness determines the deck. This browser then rebuilds every shuffle choice after settlement.</p>
+            <details>
+              <summary>SERVER COMMITMENT AND FINAL SEED</summary>
+              <p><code>C = SHA256(&quot;NPDEAL01&quot; || room || hand || server_secret)</code></p>
+              <p><code>seed = SHA256(&quot;NPSEED01&quot; || room || hand || share_count || seat_0 || share_0 || ... || server_secret)</code></p>
+              <p>Each human share contains 32 bytes from crypto.getRandomValues and remains bound to its seat.</p>
+            </details>
+            <details>
+              <summary>CARD SAMPLING AND REPLAY</summary>
+              <p><code>block = SHA256(&quot;NPSTRM01&quot; || seed || counter)</code></p>
+              <p>SHA-256 counter blocks provide 32-bit words. Values outside the largest exact multiple of each shrinking range are rejected. Fisher-Yates then reproduces all 52 card positions without modulo bias.</p>
+            </details>
+            <details>
+              <summary>ASSUMPTIONS</summary>
+              <p>The check relies on SHA-256 commitment security and pseudorandom hash output. At least one contribution must remain unpredictable before the server commitment. A server can still abort or stop serving a room. Verification becomes available after settlement.</p>
+            </details>
+            <details>
+              <summary>FULL TECHNICAL VALUES</summary>
+              <p><strong>ORDERED SHARES</strong></p>
+              {audit.contributions.map((entry) => <p key={entry.seat}><code>seat {entry.seat} {entry.share}</code></p>)}
+              <p><strong>FULL DECK</strong></p>
+              <p><code>{audit.deck.map((card) => card.value).join("  ")}</code></p>
+            </details>
+          </section>
         </>
       )}
 
       <section className="receipt-actions">
-        <button type="button" onClick={exportAudit} disabled={!audit}>Export JSON</button>
+        <button type="button" onClick={exportAudit} disabled={!audit}>DOWNLOAD JSON</button>
         <details><summary>CLI verifier</summary><code>npm --prefix apps/web run deal:verify -- audit.json</code></details>
       </section>
     </main>

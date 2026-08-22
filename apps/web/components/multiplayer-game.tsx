@@ -6,7 +6,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ContractView, LocalProofState, ProofState } from "@/components/contract";
 import type { DealView } from "@/components/deal-integrity";
+import { HandTranscript } from "@/components/hand-transcript";
 import { Keycap } from "@/components/keycap";
+import { PlayProofs } from "@/components/play-proofs";
+import { PrivateChallengeBar } from "@/components/private-challenge";
 import { Table, type ActionNoticeView, type ChallengeView, type ClaimView, type View } from "@/components/table";
 import { playErrorSound } from "@/components/ui-sounds";
 import {
@@ -45,6 +48,8 @@ type ServerMessage =
   | ({ type: "waiting" } & Waiting)
   | ({ type: "waiting_fair" } & Waiting & { deal: DealView })
   | { type: "snapshot"; rev: number; view: View }
+  | { type: "proof_accepted"; kind: ProofKind }
+  | { type: "proof_error"; kind: ProofKind; message: string }
   | { type: "error"; message: string };
 type ClientAction =
   | { type: "fold" }
@@ -172,13 +177,15 @@ export function MultiplayerGame({ room }: { room: string }) {
   const seenAction = useRef<string | undefined>(undefined);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const finishTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const viewRef = useRef<View | undefined>(undefined);
+  const actionWait = useRef<{ hand: number; seq: number } | undefined>(undefined);
   const [seat, setSeat] = useState<number | null>();
   const [waiting, setWaiting] = useState<Waiting>();
   const [view, setView] = useState<View>();
   const [error, setError] = useState<string>();
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
-  const [pending, setPending] = useState(false);
+  const [actionPending, setActionPending] = useState(false);
   const [raiseTo, setRaiseTo] = useState(0);
   const [objective, setObjective] = useState<string>();
   const [claimObjective, setClaimObjective] = useState<string>();
@@ -210,7 +217,7 @@ export function MultiplayerGame({ room }: { room: string }) {
 
     setConnecting(true);
     setConnected(false);
-    setPending(false);
+    setActionPending(false);
     setError(undefined);
 
     let next: WebSocket;
@@ -229,7 +236,8 @@ export function MultiplayerGame({ room }: { room: string }) {
       try {
         message = JSON.parse(event.data) as ServerMessage;
       } catch {
-        setPending(false);
+        actionWait.current = undefined;
+        setActionPending(false);
         setError("Invalid server message");
         return;
       }
@@ -244,7 +252,8 @@ export function MultiplayerGame({ room }: { room: string }) {
         setView(undefined);
         setConnected(true);
         setConnecting(false);
-        setPending(false);
+        actionWait.current = undefined;
+        setActionPending(false);
         setError(undefined);
 
         if (
@@ -254,7 +263,7 @@ export function MultiplayerGame({ room }: { room: string }) {
           !dealing.current
         ) {
           dealing.current = true;
-          setPending(true);
+          setActionPending(true);
           next.send(JSON.stringify({ type: "deal_entropy", entropy: freshEntropy() } satisfies ClientAction));
         }
         return;
@@ -263,6 +272,7 @@ export function MultiplayerGame({ room }: { room: string }) {
       if (message.type === "snapshot") {
         dealing.current = false;
         if (message.rev < rev.current) return;
+        viewRef.current = message.view;
         const actionKey = message.view.last_action
           ? `${message.view.hand_no}:${message.view.last_action.seq}`
           : undefined;
@@ -308,7 +318,15 @@ export function MultiplayerGame({ room }: { room: string }) {
         setChallengeError(currentChallenge.error ?? currentClaim.error ?? completion.error);
         setConnected(true);
         setConnecting(false);
-        setPending(drawing.current || claiming.current);
+        const wait = actionWait.current;
+        if (
+          !wait ||
+          message.view.hand_no !== wait.hand ||
+          (message.view.last_action?.seq ?? -1) >= wait.seq
+        ) {
+          actionWait.current = undefined;
+          setActionPending(false);
+        }
         setError(undefined);
 
         if (
@@ -337,8 +355,27 @@ export function MultiplayerGame({ room }: { room: string }) {
         if (drawing.current) { drawing.current = false; setDrawState("failed"); }
         if (claiming.current) { claiming.current = false; setClaimState("failed"); }
         setConnecting(false);
-        setPending(false);
+        setActionPending(false);
         setError(message.message);
+      }
+      if (message.type === "proof_error") {
+        if (message.kind === "draw") {
+          drawing.current = false;
+          setDrawState("failed");
+        } else {
+          claiming.current = false;
+          setClaimState("failed");
+        }
+        setChallengeError(message.message);
+      }
+      if (message.type === "proof_accepted") {
+        if (message.kind === "draw") {
+          drawing.current = false;
+          setDrawState("verified");
+        } else {
+          claiming.current = false;
+          setClaimState("verified");
+        }
       }
     };
     next.onerror = () => {
@@ -347,7 +384,7 @@ export function MultiplayerGame({ room }: { room: string }) {
         claiming.current = false;
         dealing.current = false;
         setConnecting(false);
-        setPending(false);
+        setActionPending(false);
         setError("Connection failed");
       }
     };
@@ -357,7 +394,7 @@ export function MultiplayerGame({ room }: { room: string }) {
         dealing.current = false;
         setConnecting(false);
         setConnected(false);
-        setPending(false);
+        setActionPending(false);
         setError((currentError) => currentError ?? "Disconnected");
       }
     };
@@ -383,8 +420,16 @@ export function MultiplayerGame({ room }: { room: string }) {
 
   function send(action: ClientAction) {
     const current = socket.current;
-    if (!current || current.readyState !== WebSocket.OPEN || !connected || pending) return;
-    setPending(true);
+    if (!current || current.readyState !== WebSocket.OPEN || !connected || actionPending) return;
+    if (["fold", "check", "call", "raise_to"].includes(action.type)) {
+      const currentView = viewRef.current;
+      actionWait.current = currentView
+        ? { hand: currentView.hand_no, seq: (currentView.last_action?.seq ?? -1) + 1 }
+        : undefined;
+    } else {
+      actionWait.current = undefined;
+    }
+    setActionPending(true);
     setError(undefined);
     current.send(JSON.stringify(action));
   }
@@ -400,10 +445,10 @@ export function MultiplayerGame({ room }: { room: string }) {
     }
   }
 
-  async function drawChallenge() {
+  const drawChallenge = useCallback(async () => {
     const assignment = challengeAssignment(view?.challenge);
     const current = socket.current;
-    if (!assignment || assignment.draw_verified || typeof seat !== "number" || !current || current.readyState !== WebSocket.OPEN || !connected || pending || drawing.current) return;
+    if (!assignment || assignment.draw_verified || typeof seat !== "number" || !current || current.readyState !== WebSocket.OPEN || !connected || drawing.current) return;
     const stored = loadChallengeSecret(room, assignment.hand_no, seat);
     if (!stored) { setChallengeError("Draw secret unavailable"); setDrawState("failed"); return; }
 
@@ -424,7 +469,6 @@ export function MultiplayerGame({ room }: { room: string }) {
       ) throw new Error("challenge mismatch");
 
       drawing.current = true;
-      setPending(true);
       setChallengeError(undefined);
       const result = await proveChallenge({
         mode: 0,
@@ -447,16 +491,15 @@ export function MultiplayerGame({ room }: { room: string }) {
       current.send(JSON.stringify({ type: "challenge_draw", hand_no: assignment.hand_no, proof: result.proof, public_inputs: result.public_inputs } satisfies ClientAction));
     } catch {
       drawing.current = false;
-      setPending(false);
       setDrawState("failed");
       setChallengeError("Draw proof failed");
     }
-  }
+  }, [connected, room, seat, view?.challenge]);
 
-  async function claimChallenge() {
+  const claimChallenge = useCallback(async () => {
     const claim = view?.claim;
     const current = socket.current;
-    if (!claim || claim.status !== "claimable" || typeof seat !== "number" || !current || current.readyState !== WebSocket.OPEN || !connected || pending || claiming.current) return;
+    if (!claim || claim.status !== "claimable" || typeof seat !== "number" || !current || current.readyState !== WebSocket.OPEN || !connected || claiming.current) return;
     const stored = loadChallengeSecret(room, claim.hand_no, seat);
     if (!stored) { setChallengeError("Draw secret unavailable"); setClaimState("failed"); return; }
 
@@ -481,7 +524,6 @@ export function MultiplayerGame({ room }: { room: string }) {
       if (!objectiveMet(objective, claim.facts)) { setClaimCompleted(false); return; }
 
       claiming.current = true;
-      setPending(true);
       setChallengeError(undefined);
       const result = await proveChallenge({
         mode: 1,
@@ -504,11 +546,24 @@ export function MultiplayerGame({ room }: { room: string }) {
       current.send(JSON.stringify({ type: "challenge_claim", hand_no: claim.hand_no, proof: result.proof, public_inputs: result.public_inputs } satisfies ClientAction));
     } catch {
       claiming.current = false;
-      setPending(false);
       setClaimState("failed");
       setChallengeError("Completion proof failed");
     }
-  }
+  }, [connected, room, seat, view?.claim]);
+
+  useEffect(() => {
+    if (drawState !== "idle") return;
+    const assignment = challengeAssignment(view?.challenge);
+    if (!assignment || assignment.draw_verified) return;
+    queueMicrotask(() => void drawChallenge());
+  }, [drawChallenge, drawState, view?.challenge]);
+
+  useEffect(() => {
+    if (claimState !== "idle" || claimCompleted !== true || view?.claim?.status !== "claimable") {
+      return;
+    }
+    queueMicrotask(() => void claimChallenge());
+  }, [claimChallenge, claimCompleted, claimState, view?.claim?.status]);
 
   async function verifyProof(owner: number, hand: number, kind: ProofKind) {
     const key = proofKey(owner, hand, kind);
@@ -596,12 +651,20 @@ export function MultiplayerGame({ room }: { room: string }) {
   return (
     <div className={`game-view${error || challengeError ? " ui-shake" : ""}`}>
       {!connected && <div className="connection-bar"><span>{connecting ? "Connecting" : "Disconnected"}</span>{!connecting && <button type="button" onClick={connect}>Reconnect</button>}</div>}
+      <HandTranscript room={room} hand={view.hand_no} deal={view.deal} settled={view.settled} />
+      <PrivateChallengeBar
+        view={contract}
+        onRetry={(kind) => {
+          if (kind === "draw") void drawChallenge();
+          else void claimChallenge();
+        }}
+      />
       <Table
         view={view}
         viewer={seat}
         room={room}
         error={error}
-        disabled={pending || Boolean(notice) || !connected}
+        disabled={actionPending || Boolean(notice) || !connected}
         notice={notice}
         finish={finish}
         raiseTo={raiseTo}
@@ -617,6 +680,7 @@ export function MultiplayerGame({ room }: { room: string }) {
         onGenerateProof={() => void claimChallenge()}
         onVerifyProof={(owner, hand, kind) => void verifyProof(owner, hand, kind)}
       />
+      <PlayProofs room={room} view={contract} />
     </div>
   );
 }
