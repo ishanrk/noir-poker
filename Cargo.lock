@@ -2195,6 +2195,7 @@ dependencies = [
  "challenge-core",
  "deal-core",
  "deck-crypto",
+ "flate2",
  "game-core",
  "getrandom 0.4.3",
  "serde",

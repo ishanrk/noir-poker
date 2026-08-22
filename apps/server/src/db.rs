@@ -129,6 +129,7 @@ pub struct StoredHand {
     pub dealer: i32,
     pub stacks: Vec<i64>,
     pub actions: Vec<StoredAction>,
+    pub final_deck: Option<Vec<u8>>,
 }
 
 #[derive(Clone)]
@@ -237,6 +238,56 @@ impl Db {
 
         MIGRATOR.run(&pool).await?;
         Ok(Self { pool })
+    }
+
+    pub async fn begin_deck(&self, room: Uuid, hand_no: u64, hand: Uuid) -> DbResult<()> {
+        query("INSERT INTO deck_transcripts (room_id, hand_no, hand_id) VALUES ($1, $2, $3)")
+            .bind(room)
+            .bind(i64::try_from(hand_no)?)
+            .bind(hand)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn finish_deck(
+        &self,
+        room: Uuid,
+        hand_no: u64,
+        transcript: &[u8],
+        deck: &[u8; 52],
+    ) -> DbResult<()> {
+        let changed = query(
+            "UPDATE deck_transcripts SET transcript = $3, final_deck = $4, completed_at = now() \
+             WHERE room_id = $1 AND hand_no = $2 AND completed_at IS NULL",
+        )
+        .bind(room)
+        .bind(i64::try_from(hand_no)?)
+        .bind(transcript)
+        .bind(deck.as_slice())
+        .execute(&self.pool)
+        .await?;
+        one_row(changed)?;
+        Ok(())
+    }
+
+    pub async fn deck_audit(&self, room: Uuid, hand_no: u64) -> DbResult<Option<Vec<u8>>> {
+        Ok(
+            query("SELECT transcript FROM deck_transcripts WHERE room_id = $1 AND hand_no = $2")
+                .bind(room)
+                .bind(i64::try_from(hand_no)?)
+                .fetch_optional(&self.pool)
+                .await?
+                .and_then(|row| row.get("transcript")),
+        )
+    }
+
+    pub async fn incomplete_decks(&self) -> DbResult<u64> {
+        let row =
+            query("SELECT COUNT(*) AS count FROM deck_transcripts WHERE completed_at IS NULL")
+                .fetch_one(&self.pool)
+                .await?;
+        Ok(u64::try_from(row.try_get::<i64, _>("count")?)?)
     }
 
     #[cfg(test)]
@@ -645,8 +696,10 @@ impl Db {
 
     async fn load_hand(&self, room: Uuid) -> DbResult<Option<StoredHand>> {
         let Some(row) = query(
-            "SELECT id, hand_no, seed, dealer, starting_stacks FROM hands \
-             WHERE room_id = $1 ORDER BY hand_no DESC LIMIT 1",
+            "SELECT hands.id, hands.hand_no, hands.seed, hands.dealer, hands.starting_stacks, \
+             deck_transcripts.final_deck FROM hands LEFT JOIN deck_transcripts \
+             ON deck_transcripts.hand_id = hands.id \
+             WHERE hands.room_id = $1 ORDER BY hands.hand_no DESC LIMIT 1",
         )
         .bind(room)
         .fetch_optional(&self.pool)
@@ -681,6 +734,7 @@ impl Db {
             dealer: row.try_get("dealer")?,
             stacks: row.try_get("starting_stacks")?,
             actions,
+            final_deck: row.try_get("final_deck")?,
         }))
     }
 

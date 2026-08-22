@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
+use crate::mental::MentalDeck;
+
 pub(super) type TokenHash = [u8; 32];
 pub(super) type Challenges = Vec<Option<Challenge>>;
 
@@ -88,6 +90,9 @@ pub(super) struct Room {
     pub(super) ceremony: Option<Ceremony>,
     pub(super) current_challenges: Challenges,
     pub(super) next_challenges: Challenges,
+    pub(super) deck: Option<MentalDeck>,
+    pub(super) last_deck: Option<MentalDeck>,
+    pub(super) mental: bool,
     pub(super) rev: u64,
     pub(super) notify: broadcast::Sender<u64>,
 }
@@ -133,6 +138,9 @@ impl Room {
             ceremony: None,
             current_challenges: vec![None; config.players],
             next_challenges: vec![None; config.players],
+            deck: None,
+            last_deck: None,
+            mental: false,
             rev: 0,
             notify,
         })
@@ -245,6 +253,10 @@ impl Room {
             return Err("hand not settled");
         }
 
+        if self.deck.as_ref().is_some_and(|deck| !deck.complete) {
+            return Err("deck opening incomplete");
+        }
+
         if self.game_complete() {
             return Err("game complete");
         }
@@ -323,7 +335,13 @@ impl Room {
             .collect();
         let no = hand.no.checked_add(1).ok_or("hand limit reached")?;
 
-        match hand.game.next_hand(seed) {
+        let next = if self.mental {
+            hand.game.next_hidden()
+        } else {
+            hand.game.next_hand(seed)
+        };
+
+        match next {
             Ok(game) => Ok(Some(LiveHand {
                 id: Uuid::new_v4(),
                 no,
@@ -576,14 +594,18 @@ impl Room {
         let mut game = hand.game.clone();
 
         game.apply(seat, action).map_err(action_error)?;
-        let result = advance(&mut game)?;
+        let result = if self.mental {
+            advance_hidden(&mut game)?
+        } else {
+            advance(&mut game)?
+        };
 
         let mut actions = hand.actions.clone();
         actions.push(PlayedAction {
             player: seat,
             action,
         });
-        let facts = if game.settled && hand.no > 0 {
+        let facts = if !self.mental && game.settled && hand.no > 0 {
             let (replayed, replayed_result, facts) = replay_hand(
                 self.config,
                 hand.seed,
@@ -832,6 +854,7 @@ pub(super) enum JoinError {
     Full,
 }
 
+#[cfg(test)]
 pub(super) fn start_game(config: RoomConfig, seed: [u8; 32]) -> State {
     let stacks = vec![config.stack; config.players];
 
@@ -855,6 +878,14 @@ fn advance(game: &mut State) -> Result<Option<HandResult>, &'static str> {
     Ok(None)
 }
 
+fn advance_hidden(game: &mut State) -> Result<Option<HandResult>, &'static str> {
+    if game.fold_winner.is_some() {
+        settle(game).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
 pub(super) fn replay_hand(
     config: RoomConfig,
     seed: [u8; 32],
@@ -862,7 +893,30 @@ pub(super) fn replay_hand(
     stacks: &[u32],
     actions: &[PlayedAction],
 ) -> Result<(State, Option<HandResult>, Vec<Facts>), &'static str> {
-    let mut game = State::new(seed, dealer, stacks, config.small_blind, config.big_blind);
+    replay_state(
+        State::new(seed, dealer, stacks, config.small_blind, config.big_blind),
+        stacks,
+        actions,
+    )
+}
+
+pub(super) fn replay_deck(
+    config: RoomConfig,
+    cards: [game_core::Card; 52],
+    dealer: usize,
+    stacks: &[u32],
+    actions: &[PlayedAction],
+) -> Result<(State, Option<HandResult>, Vec<Facts>), &'static str> {
+    let game = State::from_cards(cards, dealer, stacks, config.small_blind, config.big_blind)
+        .ok_or("invalid encrypted deck")?;
+    replay_state(game, stacks, actions)
+}
+
+fn replay_state(
+    mut game: State,
+    stacks: &[u32],
+    actions: &[PlayedAction],
+) -> Result<(State, Option<HandResult>, Vec<Facts>), &'static str> {
     let mut facts = vec![empty_facts(); stacks.len()];
     let mut result = None;
 
@@ -931,6 +985,10 @@ fn settle(game: &mut State) -> Result<HandResult, &'static str> {
     }
 
     Ok(HandResult { kind, awards })
+}
+
+pub(super) fn settle_hidden(game: &mut State) -> Result<HandResult, &'static str> {
+    settle(game)
 }
 
 const fn empty_facts() -> Facts {

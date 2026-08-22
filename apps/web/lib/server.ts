@@ -78,24 +78,32 @@ export type PublishedProof = {
   public_inputs: string;
 };
 
+export type DeckPoint = { x: string; y: string };
+export type DeckCipher = { left: DeckPoint; right: DeckPoint };
+export type DeckProof = { a: DeckPoint; b: DeckPoint; z: string };
+
 export type DealAudit = {
   protocol_version: number;
-  algorithm: string;
   room: string;
   hand_no: number;
-  players: number;
-  dealer: number;
-  commitment: string;
-  server_secret: string;
-  contributions: Array<{ seat: number; share: string }>;
-  seed: string;
-  deck: Array<{ value: string }>;
-  starting_stacks: number[];
-  actions: Array<{
+  transcript_hash: string;
+  keys: DeckPoint[];
+  key_proofs: DeckProof[];
+  shuffles: Array<{
+    participant: number;
+    input: DeckCipher[];
+    output: DeckCipher[];
+    proof: string;
+    public_inputs: string;
+  }>;
+  openings: string[];
+  deck: number[];
+  records: Array<{
     seq: number;
-    player: number;
-    action: "fold" | "check" | "call" | "raise_to";
-    raise_to?: number;
+    kind: string;
+    seat?: number;
+    payload: string;
+    hash: string;
   }>;
 };
 

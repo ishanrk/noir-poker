@@ -1,6 +1,25 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import type { DealAudit } from "@/lib/server";
+type LegacyDealAudit = {
+  protocol_version: number;
+  algorithm: string;
+  room: string;
+  hand_no: number;
+  players: number;
+  dealer: number;
+  commitment: string;
+  server_secret: string;
+  contributions: Array<{ seat: number; share: string }>;
+  seed: string;
+  deck: Array<{ value: string }>;
+  starting_stacks: number[];
+  actions: Array<{
+    seq: number;
+    player: number;
+    action: "fold" | "check" | "call" | "raise_to";
+    raise_to?: number;
+  }>;
+};
 
 const COMMIT_DOMAIN = new TextEncoder().encode("NPDEAL01");
 const SEED_DOMAIN = new TextEncoder().encode("NPSEED01");
@@ -84,7 +103,7 @@ export function cardValue(card: number) {
   return `${RANKS[card % 13]}${SUITS[Math.floor(card / 13)]}`;
 }
 
-export function verifyDealAudit(audit: DealAudit): DealVerification {
+export function verifyDealAudit(audit: LegacyDealAudit): DealVerification {
   if (
     audit.protocol_version !== 1 ||
     audit.algorithm !== "sha256-counter-rejection-fisher-yates-v1" ||

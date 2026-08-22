@@ -2,6 +2,7 @@ mod bot;
 mod db;
 mod deck_proof;
 mod fairness;
+mod mental;
 mod proof;
 mod room;
 
@@ -24,6 +25,7 @@ use challenge_core::{
     FACT_COUNT, Facts, MODE_COMPLETE, MODE_DRAW, POINTS, PROTOCOL_VERSION, catalog_root,
     facts_hash, hand_tag,
 };
+use deck_crypto::{CARD_COUNT as ENCRYPTED_CARD_COUNT, Fr, shuffle};
 use game_core::{Action, Card, LegalActions, Rank, State, Street, Suit};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -37,14 +39,21 @@ use crate::db::{
     ChallengeEntropy, ClaimUpdate, Db, DrawUpdate, NewAction, NewChallenge, NewHand, ProofReceipt,
     PublishedProof, StoredAction, StoredChallenge, StoredClaim, StoredDraw, StoredHand, StoredRoom,
 };
+use crate::deck_proof::{DeckProofs, ShuffleInput, ShufflePublic};
+use crate::mental::{
+    AuditWire as DeckAuditView, CipherWire, MentalDeck, OpenKind, PointWire, ProofWire, ShareWire,
+    cipher_from_wire, cipher_wire, point_from_wire, point_wire, proof_from_wire, proof_wire,
+};
 use crate::proof::{
     ARTIFACT_SHA256, BB_VERSION, CIRCUIT_ID, PROOF_SYSTEM, ProofInputs, ProofVerifier, VK_SHA256,
     decode_bytes, decode_proof,
 };
+#[cfg(test)]
+use crate::room::start_game;
 use crate::room::{
     ActionNotice, Ceremony, Challenge, Challenges, HandResult, HandResultKind, LiveHand,
     PendingClaim, PendingDraw, PlayedAction, Room, RoomConfig, RoomMode, Seat, TokenHash,
-    bind_facts, replay_hand, start_game,
+    bind_facts, replay_deck, replay_hand, settle_hidden,
 };
 
 type HttpError = (StatusCode, &'static str);
@@ -55,14 +64,21 @@ struct AppState {
     db: Db,
     rooms: Rooms,
     proof: Option<ProofVerifier>,
+    deck_proof: Option<DeckProofs>,
 }
 
 impl AppState {
-    fn new(db: Db, rooms: HashMap<Uuid, Arc<Mutex<Room>>>, proof: ProofVerifier) -> Self {
+    fn new(
+        db: Db,
+        rooms: HashMap<Uuid, Arc<Mutex<Room>>>,
+        proof: ProofVerifier,
+        deck_proof: DeckProofs,
+    ) -> Self {
         Self {
             db,
             rooms: Arc::new(Mutex::new(rooms)),
             proof: Some(proof),
+            deck_proof: Some(deck_proof),
         }
     }
 
@@ -72,6 +88,7 @@ impl AppState {
             db,
             rooms: Arc::new(Mutex::new(rooms)),
             proof: None,
+            deck_proof: None,
         }
     }
 }
@@ -151,6 +168,30 @@ enum ClientMessage {
     DealEntropy {
         entropy: String,
     },
+    DeckKey {
+        hand_no: u64,
+        key: PointWire,
+        proof: ProofWire,
+    },
+    DeckShuffle {
+        hand_no: u64,
+        context: String,
+        output: Vec<CipherWire>,
+        proof: String,
+        public_inputs: String,
+    },
+    DeckShares {
+        hand_no: u64,
+        context: String,
+        shares: Vec<ShareWire>,
+    },
+    DeckOpen {
+        hand_no: u64,
+        secret: String,
+    },
+    DeckPrivateReady {
+        hand_no: u64,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -181,6 +222,54 @@ enum ServerMessage {
     ProofAccepted {
         kind: &'static str,
     },
+    DeckKey {
+        hand_no: u64,
+        start: String,
+        context: String,
+        server_key: PointWire,
+        server_proof: ProofWire,
+    },
+    DeckShuffle {
+        hand_no: u64,
+        participant: usize,
+        context: String,
+        key: PointWire,
+        deck: Vec<CipherWire>,
+    },
+    DeckShares {
+        hand_no: u64,
+        context: String,
+        deck: Vec<CipherWire>,
+        positions: Vec<usize>,
+    },
+    DeckPrivate {
+        hand_no: u64,
+        context: String,
+        keys: Vec<PointWire>,
+        cards: Vec<PrivateCardView>,
+    },
+    DeckOpen {
+        hand_no: u64,
+    },
+    DeckWait {
+        hand_no: u64,
+        stage: &'static str,
+    },
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct PrivateCardView {
+    position: usize,
+    card: CipherWire,
+    shares: Vec<ShareWire>,
+}
+
+struct SubmittedShuffle<'a> {
+    hand_no: u64,
+    context: &'a str,
+    output: Vec<CipherWire>,
+    proof: &'a str,
+    public_inputs: &'a str,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -251,6 +340,13 @@ struct AuditView {
     deck: Vec<CardView>,
     starting_stacks: Vec<u32>,
     actions: Vec<AuditActionView>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum AuditResponse {
+    Deck(DeckAuditView),
+    Legacy(AuditView),
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -466,16 +562,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let vk = env::var("CHALLENGE_VK_PATH")
         .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/zk/challenge_v2.vk").to_owned());
     let db = Db::connect(&database_url).await?;
+    if db.incomplete_decks().await? != 0 {
+        return Err(
+            io::Error::other("unfinished encrypted deck requires live participants").into(),
+        );
+    }
     fairness::ensure_pending(&db).await?;
     finish_pending_challenges(&db).await?;
     let proof = ProofVerifier::load(bb, vk)?;
+    let deck_proof = DeckProofs::load(env::var("BB_PATH")?)?;
     let rooms = restore_rooms(db.load_rooms().await?)?;
     attach_fairness(&db, &rooms).await?;
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
 
     axum::serve(
         listener,
-        app_with_origins(AppState::new(db, rooms, proof), origins),
+        app_with_origins(AppState::new(db, rooms, proof, deck_proof), origins),
     )
     .await?;
     Ok(())
@@ -529,10 +631,39 @@ async fn health() -> &'static str {
 async fn deal_audit(
     AxumState(state): AxumState<AppState>,
     Path((code, hand_no)): Path<(String, u64)>,
-) -> Result<Json<AuditView>, HttpError> {
-    let (room, _) = resolve_room(&state, &code)
+) -> Result<Json<AuditResponse>, HttpError> {
+    let (room, live) = resolve_room(&state, &code)
         .await
         .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
+    {
+        let live = live.lock().await;
+        let deck = live
+            .deck
+            .as_ref()
+            .filter(|deck| deck.hand_no == hand_no && deck.complete)
+            .or_else(|| {
+                live.last_deck
+                    .as_ref()
+                    .filter(|deck| deck.hand_no == hand_no && deck.complete)
+            });
+        if let Some(deck) = deck {
+            return deck
+                .audit()
+                .map(AuditResponse::Deck)
+                .map(Json)
+                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "invalid deck proof"));
+        }
+    }
+    if let Some(bytes) = state
+        .db
+        .deck_audit(room, hand_no)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot load deck proof"))?
+    {
+        let audit = serde_json::from_slice(&bytes)
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "invalid deck proof"))?;
+        return Ok(Json(AuditResponse::Deck(audit)));
+    }
     let stored = fairness::audit(&state.db, room, hand_no)
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot load deal audit"))?
@@ -581,7 +712,7 @@ async fn deal_audit(
         .map(card_view)
         .collect();
 
-    Ok(Json(AuditView {
+    Ok(Json(AuditResponse::Legacy(AuditView {
         protocol_version: deal_core::PROTOCOL_VERSION,
         algorithm: "sha256-counter-rejection-fisher-yates-v1",
         room,
@@ -603,7 +734,7 @@ async fn deal_audit(
         deck,
         starting_stacks,
         actions,
-    }))
+    })))
 }
 
 async fn hand_history(
@@ -969,7 +1100,12 @@ async fn join_fair(
         no: 0,
         seed,
         starting_stacks: stacks.clone().expect("starting stacks"),
-        game: start_game(room.config, seed),
+        game: State::hidden(
+            0,
+            &stacks.clone().expect("starting stacks"),
+            room.config.small_blind,
+            room.config.big_blind,
+        ),
         result: None,
         next_seq: 0,
         actions: Vec::new(),
@@ -999,7 +1135,16 @@ async fn join_fair(
     )
     .await
     .map_err(|_| "cannot join room")?;
+    if let Some(hand_id) = hand_id {
+        db.begin_deck(id, 0, hand_id)
+            .await
+            .map_err(|_| "cannot persist deck protocol")?;
+    }
     room.commit_fair_join(token_hash, seat, share, game, next, next_rev);
+    if final_join {
+        room.deck = Some(new_deck(id, 0, 0, room.mode, room.config.players)?);
+        room.mental = true;
+    }
 
     Ok(seat)
 }
@@ -1066,7 +1211,7 @@ async fn single_entropy(
         no: 0,
         seed,
         starting_stacks: stacks.clone(),
-        game: start_game(room.config, seed),
+        game: State::hidden(0, &stacks, room.config.small_blind, room.config.big_blind),
         result: None,
         next_seq: 0,
         actions: Vec::new(),
@@ -1097,7 +1242,14 @@ async fn single_entropy(
     )
     .await
     .map_err(|_| "cannot start single deal")?;
+    state
+        .db
+        .begin_deck(id, hand.no, hand.id)
+        .await
+        .map_err(|_| "cannot persist deck protocol")?;
     room.commit_single_start(tokens, hand, next, next_rev);
+    room.deck = Some(new_deck(id, 0, 0, room.mode, room.config.players)?);
+    room.mental = true;
     drop(room);
     drive_bots(state, id).await
 }
@@ -1201,6 +1353,38 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                     ClientMessage::DealEntropy { entropy } => {
                         (single_entropy(&state, id, seat, &entropy).await, None)
                     }
+                    ClientMessage::DeckKey { hand_no, key, proof } => {
+                        (deck_key(&state, id, seat, hand_no, key, proof).await, None)
+                    }
+                    ClientMessage::DeckShuffle {
+                        hand_no,
+                        context,
+                        output,
+                        proof,
+                        public_inputs,
+                    } => (
+                        deck_shuffle(&state, id, seat, SubmittedShuffle {
+                            hand_no,
+                            context: &context,
+                            output,
+                            proof: &proof,
+                            public_inputs: &public_inputs,
+                        })
+                        .await,
+                        None,
+                    ),
+                    ClientMessage::DeckShares { hand_no, context, shares } => (
+                        deck_shares(&state, id, seat, hand_no, &context, shares).await,
+                        None,
+                    ),
+                    ClientMessage::DeckPrivateReady { hand_no } => (
+                        deck_private_ready(&state, id, seat, hand_no).await,
+                        None,
+                    ),
+                    ClientMessage::DeckOpen { hand_no, secret } => (
+                        deck_open(&state, id, seat, hand_no, &secret).await,
+                        None,
+                    ),
                     ClientMessage::Auth { .. } => {
                         send_error(&mut socket, "already authenticated").await;
                         continue;
@@ -1266,6 +1450,344 @@ async fn auth_token(socket: &mut WebSocket) -> Result<Uuid, &'static str> {
 
 async fn find_room(state: &AppState, id: Uuid) -> Option<Arc<Mutex<Room>>> {
     state.rooms.lock().await.get(&id).cloned()
+}
+
+async fn deck_key(
+    state: &AppState,
+    id: Uuid,
+    seat: usize,
+    hand_no: u64,
+    key: PointWire,
+    proof: ProofWire,
+) -> Result<(), &'static str> {
+    let room = find_room(state, id).await.ok_or("room not found")?;
+    let start_server = {
+        let mut room = room.lock().await;
+        let deck = room.deck.as_mut().ok_or("deck protocol missing")?;
+        if deck.hand_no != hand_no {
+            return Err("wrong deck hand");
+        }
+        deck.add_key(seat, point_from_wire(key)?, proof_from_wire(proof)?)?;
+        let start = deck.next_key().is_none() && deck.next_shuffler() == Some(0);
+        let _ = room.notify.send(room.rev);
+        start
+    };
+
+    if start_server {
+        server_shuffle(state, id).await?;
+    }
+    Ok(())
+}
+
+async fn server_shuffle(state: &AppState, id: Uuid) -> Result<(), &'static str> {
+    let room_ref = find_room(state, id).await.ok_or("room not found")?;
+    let (hand_no, context, input, key, secret) = {
+        let room = room_ref.lock().await;
+        let deck = room.deck.as_ref().ok_or("deck protocol missing")?;
+        if deck.next_shuffler() != Some(0) {
+            return Err("server shuffle unavailable");
+        }
+        (
+            deck.hand_no,
+            deck.head,
+            deck.deck,
+            deck.aggregate_key().ok_or("deck keys missing")?,
+            deck.server_secret,
+        )
+    };
+    let permutation = random_permutation()?;
+    let masks = random_masks()?;
+    let output = shuffle(&input, &permutation, &masks, key).ok_or("cannot shuffle deck")?;
+    let prover = state.deck_proof.as_ref().ok_or("deck prover unavailable")?;
+    let proof = prover
+        .prove(ShuffleInput {
+            hand_no,
+            seat: 0,
+            context,
+            input: &input,
+            output: &output,
+            key,
+            permutation: &permutation,
+            masks: &masks,
+        })
+        .await
+        .map_err(|_| "cannot prove deck shuffle")?;
+    let mut room = room_ref.lock().await;
+    let rev = room.rev;
+    let deck = room.deck.as_mut().ok_or("deck protocol missing")?;
+    if deck.hand_no != hand_no
+        || deck.head != context
+        || deck.deck != input
+        || deck.server_secret != secret
+    {
+        return Err("deck protocol changed");
+    }
+    deck.add_shuffle(0, output, proof)?;
+    let _ = room.notify.send(rev);
+    Ok(())
+}
+
+async fn deck_shuffle(
+    state: &AppState,
+    id: Uuid,
+    seat: usize,
+    value: SubmittedShuffle<'_>,
+) -> Result<(), &'static str> {
+    let context = decode_hex(value.context).ok_or("invalid deck context")?;
+    let output: [deck_crypto::Cipher; ENCRYPTED_CARD_COUNT] = value
+        .output
+        .into_iter()
+        .map(cipher_from_wire)
+        .collect::<Result<Vec<_>, _>>()?
+        .try_into()
+        .map_err(|_| "invalid encrypted deck")?;
+    let proof = crate::deck_proof::decode(value.proof, value.public_inputs)?;
+    let room_ref = find_room(state, id).await.ok_or("room not found")?;
+    let (input, key, participant) = {
+        let room = room_ref.lock().await;
+        let deck = room.deck.as_ref().ok_or("deck protocol missing")?;
+        let participant = deck.participant_for(seat).ok_or("invalid deck seat")?;
+        if deck.hand_no != value.hand_no
+            || deck.head != context
+            || deck.next_shuffler() != Some(participant)
+        {
+            return Err("wrong deck shuffle");
+        }
+        (
+            deck.deck,
+            deck.aggregate_key().ok_or("deck keys missing")?,
+            participant,
+        )
+    };
+    let verifier = state
+        .deck_proof
+        .as_ref()
+        .ok_or("deck verifier unavailable")?;
+    if !verifier.matches(
+        ShufflePublic {
+            hand_no: value.hand_no,
+            seat: participant,
+            context,
+            input: &input,
+            output: &output,
+            key,
+        },
+        &proof,
+    ) || !verifier
+        .verify(&proof)
+        .await
+        .map_err(|_| "cannot verify deck shuffle")?
+    {
+        return Err("deck shuffle proof failed");
+    }
+    let mut room = room_ref.lock().await;
+    let rev = room.rev;
+    let players = room.config.players;
+    let deck = room.deck.as_mut().ok_or("deck protocol missing")?;
+    if deck.hand_no != value.hand_no || deck.head != context || deck.deck != input {
+        return Err("deck protocol changed");
+    }
+    deck.add_shuffle(participant, output, proof)?;
+    if deck.shuffled() {
+        deck.begin_open(OpenKind::Private, (0..players * 2).collect())?;
+    }
+    let _ = room.notify.send(rev);
+    Ok(())
+}
+
+async fn deck_shares(
+    state: &AppState,
+    id: Uuid,
+    seat: usize,
+    hand_no: u64,
+    context: &str,
+    shares: Vec<ShareWire>,
+) -> Result<(), &'static str> {
+    let context = decode_hex(context).ok_or("invalid deck context")?;
+    let room_ref = find_room(state, id).await.ok_or("room not found")?;
+    let mut drive = false;
+    {
+        let mut room = room_ref.lock().await;
+        let rev = room.rev;
+        let deck = room.deck.as_mut().ok_or("deck protocol missing")?;
+        if deck.hand_no != hand_no || deck.head != context {
+            return Err("wrong deck opening");
+        }
+        deck.add_shares(seat, shares)?;
+        if deck.ready_to_open()
+            && deck.opening.as_ref().map(|opening| opening.kind) == Some(OpenKind::Board)
+        {
+            let cards = deck
+                .open_requested()?
+                .into_iter()
+                .map(|(_, card)| Card::from_id(card).ok_or("invalid opened card"))
+                .collect::<Result<Vec<_>, _>>()?;
+            drive = {
+                let hand = room.hand.as_mut().ok_or("game not started")?;
+                hand.game
+                    .advance_street_with(&cards)
+                    .map_err(|_| "cannot advance hand")?;
+                !hand.game.round_complete
+            };
+            queue_open(&mut room)?;
+        }
+        let _ = room.notify.send(rev);
+    }
+    if drive {
+        drive_bots(state, id).await?;
+    }
+    Ok(())
+}
+
+async fn deck_private_ready(
+    state: &AppState,
+    id: Uuid,
+    seat: usize,
+    hand_no: u64,
+) -> Result<(), &'static str> {
+    let room_ref = find_room(state, id).await.ok_or("room not found")?;
+    {
+        let mut room = room_ref.lock().await;
+        let rev = room.rev;
+        let players = room.config.players;
+        let single = room.mode == RoomMode::Single;
+        let bot_holes = {
+            let deck = room.deck.as_mut().ok_or("deck protocol missing")?;
+            if deck.hand_no != hand_no {
+                return Err("wrong deck hand");
+            }
+            deck.private_ack(seat)?;
+            if !deck.private_done() {
+                Vec::new()
+            } else {
+                let opened = deck.open_requested()?;
+                (0..players)
+                    .filter(|&bot| single && bot != 0)
+                    .map(|bot| {
+                        let cards = opened
+                            .iter()
+                            .filter(|(position, _)| deck.owner_at(*position) == Some(bot))
+                            .map(|(_, card)| Card::from_id(*card).ok_or("invalid opened card"))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let cards: [Card; 2] = cards.try_into().map_err(|_| "bot cards missing")?;
+                        Ok((bot, cards))
+                    })
+                    .collect::<Result<Vec<_>, &'static str>>()?
+            }
+        };
+        if !bot_holes.is_empty() {
+            let hand = room.hand.as_mut().ok_or("game not started")?;
+            for (bot, hole) in bot_holes {
+                if !hand.game.set_hole(bot, hole) {
+                    return Err("invalid bot cards");
+                }
+            }
+        }
+        let _ = room.notify.send(rev);
+    }
+    drive_bots(state, id).await
+}
+
+async fn deck_open(
+    state: &AppState,
+    id: Uuid,
+    seat: usize,
+    hand_no: u64,
+    secret: &str,
+) -> Result<(), &'static str> {
+    let room_ref = find_room(state, id).await.ok_or("room not found")?;
+    let mut room = room_ref.lock().await;
+    let rev = room.rev;
+    let players = room.config.players;
+    let mut deck = room.deck.clone().ok_or("deck protocol missing")?;
+    if deck.hand_no != hand_no {
+        return Err("wrong deck hand");
+    }
+    deck.reveal_secret(seat, secret)?;
+    let finished = if deck.all_secrets() {
+        let cards = deck.finish()?;
+        let holes = (0..players)
+            .map(|player| {
+                let cards = (0..players * 2)
+                    .filter(|&position| deck.owner_at(position) == Some(player))
+                    .map(|position| Card::from_id(cards[position]).ok_or("invalid opened card"))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let cards = cards.try_into().map_err(|_| "player cards missing")?;
+                Ok(cards)
+            })
+            .collect::<Result<Vec<[Card; 2]>, &'static str>>()?;
+        let transcript =
+            serde_json::to_vec(&deck.audit()?).map_err(|_| "invalid deck transcript")?;
+        state
+            .db
+            .finish_deck(id, hand_no, &transcript, &cards)
+            .await
+            .map_err(|_| "cannot persist deck transcript")?;
+        Some(holes)
+    } else {
+        None
+    };
+    room.deck = Some(deck);
+    if let Some(holes) = finished {
+        let hand = room.hand.as_mut().ok_or("game not started")?;
+        for (player, cards) in holes.into_iter().enumerate() {
+            if !hand.game.hole_known(player) && !hand.game.set_hole(player, cards) {
+                return Err("invalid player cards");
+            }
+        }
+        if !hand.game.settled {
+            hand.result = Some(settle_hidden(&mut hand.game)?);
+        }
+    }
+    let _ = room.notify.send(rev);
+    Ok(())
+}
+
+fn queue_open(room: &mut Room) -> Result<(), &'static str> {
+    let hand = room.hand.as_ref().ok_or("game not started")?;
+    if !hand.game.round_complete || hand.game.settled || hand.game.fold_winner.is_some() {
+        return Ok(());
+    }
+    if hand.game.street == Street::River {
+        return Ok(());
+    }
+    let next = hand.game.next_card;
+    let positions = match hand.game.street {
+        Street::Preflop => vec![next + 1, next + 2, next + 3],
+        Street::Flop | Street::Turn => vec![next + 1],
+        Street::River => Vec::new(),
+    };
+    room.deck
+        .as_mut()
+        .ok_or("deck protocol missing")?
+        .begin_open(OpenKind::Board, positions)
+}
+
+fn random_permutation() -> Result<[usize; ENCRYPTED_CARD_COUNT], &'static str> {
+    let mut values = core::array::from_fn(|index| index);
+    for upper in (2..=ENCRYPTED_CARD_COUNT).rev() {
+        let limit = u64::MAX - u64::MAX % upper as u64;
+        let value = loop {
+            let raw = u64::from_be_bytes(
+                secure_nonce().map_err(|_| "cannot shuffle deck")?[..8]
+                    .try_into()
+                    .expect("random word"),
+            );
+            if raw < limit {
+                break raw as usize % upper;
+            }
+        };
+        values.swap(upper - 1, value);
+    }
+    Ok(values)
+}
+
+fn random_masks() -> Result<[Fr; ENCRYPTED_CARD_COUNT], &'static str> {
+    let mut values = [Fr::from(1u64); ENCRYPTED_CARD_COUNT];
+    for value in &mut values {
+        *value = secure_scalar()?;
+    }
+    Ok(values)
 }
 
 fn room_code(id: Uuid) -> String {
@@ -1353,6 +1875,7 @@ async fn apply_action_once(
         .await
         .map_err(|_| "cannot persist action")?;
     room.commit_action(next);
+    queue_open(&mut room)?;
     Ok(())
 }
 
@@ -1384,7 +1907,7 @@ fn next_bot_action(room: Uuid, state: &Room) -> Result<Option<(usize, Action)>, 
 
     let hand = state.hand.as_ref().ok_or("game not started")?;
 
-    if hand.game.settled || hand.game.turn == 0 {
+    if hand.game.settled || hand.game.round_complete || hand.game.turn == 0 {
         return Ok(None);
     }
 
@@ -1845,6 +2368,18 @@ async fn ready_room_entropy_once(
         None => None,
         Some(_) => None,
     };
+    let next_deck = next_hand
+        .as_ref()
+        .map(|hand| {
+            new_deck(
+                id,
+                hand.no,
+                hand.game.dealer,
+                room.mode,
+                room.config.players,
+            )
+        })
+        .transpose()?;
     fairness::ready(
         &state.db,
         id,
@@ -1859,7 +2394,20 @@ async fn ready_room_entropy_once(
     )
     .await
     .map_err(|_| "cannot persist deal contribution")?;
+    if let Some(hand) = next_hand.as_ref() {
+        state
+            .db
+            .begin_deck(id, hand.no, hand.id)
+            .await
+            .map_err(|_| "cannot persist deck protocol")?;
+    }
+    if next_deck.is_some() {
+        room.last_deck = room.deck.take();
+    }
     room.commit_fair_ready(seat, pending, next_hand, next);
+    if next_deck.is_some() {
+        room.deck = next_deck;
+    }
     Ok(())
 }
 
@@ -1907,6 +2455,10 @@ async fn current_message(state: &AppState, id: Uuid, seat: usize) -> Option<Serv
 }
 
 fn room_message(id: Uuid, room: &Room, seat: usize) -> ServerMessage {
+    if let Some(message) = deck_message(room, seat) {
+        return message;
+    }
+
     match &room.hand {
         Some(hand) => ServerMessage::Snapshot {
             rev: room.rev,
@@ -1928,6 +2480,92 @@ fn room_message(id: Uuid, room: &Room, seat: usize) -> ServerMessage {
     }
 }
 
+fn deck_message(room: &Room, seat: usize) -> Option<ServerMessage> {
+    let deck = room.deck.as_ref()?;
+    let hand = room.hand.as_ref()?;
+    let server = deck.keys[0]?;
+
+    if let Some(next) = deck.next_key() {
+        return Some(if next == seat {
+            ServerMessage::DeckKey {
+                hand_no: deck.hand_no,
+                start: encode_hex(deck_crypto::transcript_start(
+                    *deck.room.as_bytes(),
+                    deck.hand_no,
+                )),
+                context: encode_hex(deck.head),
+                server_key: point_wire(server.0),
+                server_proof: proof_wire(server.1),
+            }
+        } else {
+            ServerMessage::DeckWait {
+                hand_no: deck.hand_no,
+                stage: "collecting keys",
+            }
+        });
+    }
+    if let Some(participant) = deck.next_shuffler() {
+        return Some(if deck.participant_for(seat) == Some(participant) {
+            ServerMessage::DeckShuffle {
+                hand_no: deck.hand_no,
+                participant,
+                context: encode_hex(deck.head),
+                key: point_wire(deck.aggregate_key()?),
+                deck: deck.deck.iter().copied().map(cipher_wire).collect(),
+            }
+        } else {
+            ServerMessage::DeckWait {
+                hand_no: deck.hand_no,
+                stage: "verifying shuffles",
+            }
+        });
+    }
+    if let Some(positions) = deck.needed_shares(seat) {
+        return Some(ServerMessage::DeckShares {
+            hand_no: deck.hand_no,
+            context: encode_hex(deck.head),
+            deck: deck.deck.iter().copied().map(cipher_wire).collect(),
+            positions,
+        });
+    }
+    if deck.opening.as_ref().map(|opening| opening.kind) == Some(OpenKind::Private) {
+        if deck.ready_to_open() && deck.human[seat] && !deck.private_ready[seat] {
+            let cards = deck
+                .private_packet(seat)
+                .ok()?
+                .into_iter()
+                .map(|(position, card, shares)| PrivateCardView {
+                    position,
+                    card,
+                    shares,
+                })
+                .collect();
+            return Some(ServerMessage::DeckPrivate {
+                hand_no: deck.hand_no,
+                context: encode_hex(deck.head),
+                keys: deck
+                    .keys
+                    .iter()
+                    .map(|entry| point_wire(entry.expect("deck key").0))
+                    .collect(),
+                cards,
+            });
+        }
+        return Some(ServerMessage::DeckWait {
+            hand_no: deck.hand_no,
+            stage: "dealing private cards",
+        });
+    }
+    if (hand.game.settled || hand.game.street == Street::River && hand.game.round_complete)
+        && deck.needs_secret(seat)
+    {
+        return Some(ServerMessage::DeckOpen {
+            hand_no: deck.hand_no,
+        });
+    }
+    None
+}
+
 fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
     let mut view = seat_view(&hand.game, seat);
 
@@ -1935,18 +2573,14 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
     view.hand_no = hand.no;
     view.total_hands = room.config.hands;
     view.last_action = hand.last_action.map(action_notice_view);
-    view.deal = room.current_commitment.map(|commitment| DealView {
+    view.deal = room.deck.as_ref().map(|deck| DealView {
         hand_no: hand.no,
-        commitment: encode_hex(commitment),
-        contributors: room.config.players,
-        required: room.config.players,
-        mine: true,
-        state: if hand.game.settled {
-            "revealed"
-        } else {
-            "sealed"
-        },
-        audit: hand.game.settled,
+        commitment: encode_hex(deck.head),
+        contributors: deck.keys.iter().flatten().count(),
+        required: deck.keys.len(),
+        mine: deck.participant_for(seat).is_some(),
+        state: if deck.complete { "revealed" } else { "sealed" },
+        audit: deck.complete,
     });
 
     for (player, stored) in view.players.iter_mut().zip(&room.seats) {
@@ -2145,6 +2779,38 @@ fn secure_nonce() -> Result<[u8; 32], getrandom::Error> {
     Ok(nonce)
 }
 
+fn secure_scalar() -> Result<Fr, &'static str> {
+    loop {
+        let mut bytes = secure_nonce().map_err(|_| "cannot create deck key")?;
+        bytes[0] = 0;
+        if let Some(value) = deck_crypto::scalar_from_bytes(bytes)
+            && value != Fr::from(0u64)
+        {
+            return Ok(value);
+        }
+    }
+}
+
+fn new_deck(
+    room: Uuid,
+    hand_no: u64,
+    dealer: usize,
+    mode: RoomMode,
+    players: usize,
+) -> Result<MentalDeck, &'static str> {
+    let human = (0..players)
+        .map(|seat| mode != RoomMode::Single || seat == 0)
+        .collect();
+    Ok(MentalDeck::new(
+        room,
+        hand_no,
+        dealer,
+        human,
+        secure_scalar()?,
+        secure_scalar()?,
+    ))
+}
+
 async fn finish_pending_challenges(
     db: &Db,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -2292,6 +2958,10 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
         });
     }
 
+    let mental = stored
+        .hand
+        .as_ref()
+        .is_some_and(|hand| hand.final_deck.is_some());
     let (hand, facts) = match stored.hand {
         Some(hand) if seats.len() == config.players => {
             let (hand, facts) = restore_hand(id, config, hand)?;
@@ -2403,6 +3073,9 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
         hand,
         current_commitment: None,
         ceremony: None,
+        deck: None,
+        last_deck: None,
+        mental,
         current_challenges,
         next_challenges,
         rev,
@@ -2419,6 +3092,7 @@ fn restore_hand(
         u64::try_from(stored.hand_no).map_err(|_| recovery_error(id, "invalid hand number"))?;
     let seed = stored
         .seed
+        .clone()
         .try_into()
         .map_err(|_| recovery_error(id, "invalid hand seed"))?;
     let dealer =
@@ -2464,8 +3138,22 @@ fn restore_hand(
         actions.push(PlayedAction { player, action });
     }
 
-    let (game, result, facts) = replay_hand(config, seed, dealer, &stacks, &actions)
-        .map_err(|_| recovery_error(id, "action replay failed"))?;
+    let replay = match stored.final_deck {
+        Some(deck) => {
+            let cards = deck
+                .into_iter()
+                .map(|card| {
+                    Card::from_id(card).ok_or_else(|| recovery_error(id, "invalid final deck"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let cards = cards
+                .try_into()
+                .map_err(|_| recovery_error(id, "invalid final deck"))?;
+            replay_deck(config, cards, dealer, &stacks, &actions)
+        }
+        None => replay_hand(config, seed, dealer, &stacks, &actions),
+    };
+    let (game, result, facts) = replay.map_err(|_| recovery_error(id, "action replay failed"))?;
     let facts = game.settled.then_some(facts);
 
     Ok((
@@ -3050,6 +3738,7 @@ mod tests {
                 dealer: 0,
                 stacks: vec![1000, 1000],
                 actions: Vec::new(),
+                final_deck: None,
             }),
             challenges: Vec::new(),
         }
@@ -5679,13 +6368,14 @@ mod tests {
         room.rev = 3;
 
         let verifier = ProofVerifier::load(
-            bb,
+            &bb,
             concat!(env!("CARGO_MANIFEST_DIR"), "/zk/challenge_v2.vk"),
         )
         .unwrap();
         let mut rooms = HashMap::new();
         rooms.insert(id, Arc::new(Mutex::new(room)));
-        let state = AppState::new(db.clone(), rooms, verifier);
+        let deck_proof = DeckProofs::load(bb).unwrap();
+        let state = AppState::new(db.clone(), rooms, verifier, deck_proof);
         let mut wrong_public = STANDARD.decode(public).unwrap();
 
         wrong_public[32 + 31] ^= 1;

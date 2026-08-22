@@ -19,13 +19,6 @@ export function DealIntegrity({
   room: string;
   compact?: boolean;
 }) {
-  const label =
-    deal.state === "collecting"
-      ? `${deal.contributors}/${deal.required} randomness shares`
-      : deal.state === "sealed"
-        ? "deck fixed before play"
-        : "transcript open for replay";
-
   return (
     <section className={`deal-integrity${compact ? " deal-integrity-compact" : ""}`}>
       <div className="deal-stack" data-state={deal.state} aria-hidden="true">
@@ -35,16 +28,18 @@ export function DealIntegrity({
         <span>{deal.state === "revealed" ? "✓" : "◆"}</span>
       </div>
       <div className="deal-copy">
-        <p className="protocol-label">Deal / Hand {deal.hand_no}</p>
-        <strong>{label}</strong>
-        <code title={deal.commitment}>{deal.commitment.slice(0, 16)}…</code>
+        <p className="protocol-label">Deck Randomness Proof</p>
+        <strong>A short cryptographic protocol showing how the cards were dealt randomly and not unfairly to prefer one player</strong>
+        <code title={deal.commitment}>SHA-256 {deal.commitment}</code>
       </div>
       <div className="deal-actions">
-        <span className="deal-state">{deal.state}</span>
         {deal.audit ? (
-          <Link href={`/audit/${room}/${deal.hand_no}`}>Replay deal →</Link>
+          <>
+            <span className="deal-state">Deck Randomness Verification</span>
+            <Link href={`/audit/${room}/${deal.hand_no}`}>Verify Deck →</Link>
+          </>
         ) : (
-          <span>commitment fixed</span>
+          <span>Available after hand</span>
         )}
       </div>
     </section>

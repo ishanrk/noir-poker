@@ -124,6 +124,14 @@ export async function decryptionShare(
   };
 }
 
+export async function decryptionValue(cardValue: CipherValue, secretValue: string) {
+  const api = await curve();
+  return pointValue(await api.Grumpkin.mul(
+    cipher(cardValue, api).left,
+    scalar(secretValue, api.Scalar),
+  ));
+}
+
 export async function verifyShare(
   cardValue: CipherValue,
   keyValue: PointValue,
@@ -195,6 +203,23 @@ export function transcriptNext(
 
 export function pointHex(value: PointValue) {
   return value.x.slice(2).padStart(64, "0") + value.y.slice(2).padStart(64, "0");
+}
+
+export function keyPayload(key: PointValue, proof: ShareProof) {
+  return join(
+    bytes(pointHex(key)),
+    bytes(pointHex(proof.a)),
+    bytes(pointHex(proof.b)),
+    bytes(proof.z.slice(2)),
+  );
+}
+
+export function pointBytes(value: PointValue) {
+  return bytes(pointHex(value));
+}
+
+export function cipherBytes(value: CipherValue) {
+  return join(pointBytes(value.left), pointBytes(value.right));
 }
 
 export function pointFromHex(value: string): PointValue {

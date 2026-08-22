@@ -650,3 +650,35 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
+
+.deck-proof-seal { display: grid; width: 220px; min-height: 150px; place-content: center; gap: 12px; border: 2px solid var(--blue); box-shadow: 8px 8px 0 var(--lime); text-align: center; }
+.deck-proof-seal span { color: var(--blue); font: 800 24px/1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
+.deck-proof-seal small { max-width: 170px; color: var(--muted); font-size: 11px; }
+.deck-proof-seal[data-state="verified"] { background: var(--blue); }
+.deck-proof-seal[data-state="verified"] span { color: var(--lime); }
+.deck-opening { width: min(100% - 40px, 1040px); margin: 0 auto; padding: 74px 0; border-bottom: 2px solid var(--blue); }
+.deck-opening h2 { margin: 7px 0 8px; font: 800 32px/1.1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
+.deck-opening header > p:last-child { max-width: 670px; color: var(--muted); line-height: 1.55; }
+.deck-opening-stream { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 16px 9px; margin: 36px 0 28px; }
+.deck-opening-stream > div { display: grid; justify-items: center; gap: 5px; opacity: 0; animation: deck-open 360ms steps(4, end) forwards; animation-delay: calc(var(--open-index) * 125ms); }
+.deck-opening-stream span { color: var(--blue); font: 700 9px/1 ui-sans-serif, system-ui, sans-serif; }
+.deck-opening-stream .card { width: 58px; }
+.proof-link { padding: 13px 18px; border: 2px solid var(--blue); color: white; background: var(--blue); box-shadow: 5px 5px 0 var(--lime); font: 800 12px/1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
+.deck-protocol-blocks { display: grid; grid-template-columns: repeat(2, 1fr); width: min(100% - 40px, 1040px); margin: 54px auto 0; border-top: 2px solid var(--blue); border-left: 1px solid var(--line-strong); }
+.deck-protocol-blocks article { min-height: 230px; padding: 28px; border-right: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); background: rgb(255 255 255 / 78%); }
+.deck-protocol-blocks span { color: var(--blue); font: 800 11px/1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
+.deck-protocol-blocks h2 { margin: 28px 0 12px; font: 800 23px/1.1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
+.deck-protocol-blocks p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.65; }
+.deck-limit { width: min(100% - 40px, 1040px); margin: 0 auto 80px; padding: 26px 28px; color: white; background: var(--blue); box-shadow: 8px 8px 0 var(--lime); }
+.deck-limit strong { color: var(--lime); font: 800 15px/1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
+.deck-limit p { max-width: 780px; margin: 10px 0 0; line-height: 1.6; }
+@keyframes deck-open { from { opacity: 0; transform: translateY(-18px); } to { opacity: 1; transform: translateY(0); } }
+
+@media (max-width: 700px) {
+  .deck-proof-seal { justify-self: start; }
+  .deck-opening { width: calc(100% - 32px); }
+  .deck-opening-stream { grid-template-columns: repeat(5, 1fr); }
+  .deck-opening-stream .card { width: 50px; }
+  .deck-protocol-blocks { grid-template-columns: 1fr; width: calc(100% - 32px); }
+  .deck-limit { width: calc(100% - 32px); }
+}

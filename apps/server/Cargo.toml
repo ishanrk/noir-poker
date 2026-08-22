@@ -12,6 +12,7 @@ base64 = "=0.22.1"
 challenge-core = { path = "../../crates/challenge-core" }
 deal-core = { path = "../../crates/deal-core" }
 deck-crypto = { path = "../../crates/deck-crypto" }
+flate2 = "1.1.9"
 game-core = { path = "../../crates/game-core" }
 bn254_blackbox_solver = "=1.0.0-beta.26"
 getrandom = "0.4.3"

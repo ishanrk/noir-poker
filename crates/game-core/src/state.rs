@@ -86,6 +86,8 @@ pub struct Player {
 pub struct State {
     // same shuffled deck continues after hole cards
     deck: Deck,
+    external_deck: bool,
+    hole_known: Vec<[bool; 2]>,
 
     pub players: Vec<Player>,
     pub hole: Vec<[Card; 2]>,
@@ -105,6 +107,26 @@ pub struct State {
 
 impl State {
     pub fn new(seed: [u8; 32], dealer: usize, stacks: &[u32], sb: u32, bb: u32) -> Self {
+        Self::from_deck(Deck::from_seed(seed), dealer, stacks, sb, bb)
+    }
+
+    pub fn from_cards(
+        cards: [Card; 52],
+        dealer: usize,
+        stacks: &[u32],
+        sb: u32,
+        bb: u32,
+    ) -> Option<Self> {
+        Some(Self::from_deck(
+            Deck::from_cards(cards)?,
+            dealer,
+            stacks,
+            sb,
+            bb,
+        ))
+    }
+
+    fn from_deck(deck: Deck, dealer: usize, stacks: &[u32], sb: u32, bb: u32) -> Self {
         let n = stacks.len();
         let total: u64 = stacks.iter().map(|&stack| u64::from(stack)).sum();
 
@@ -131,7 +153,6 @@ impl State {
         } else {
             Self::next_funded(stacks, bb_pos)
         };
-        let deck = Deck::from_seed(seed);
         let cards = deck.cards();
         let mut players: Vec<_> = stacks
             .iter()
@@ -166,6 +187,8 @@ impl State {
 
         let mut state = Self {
             deck,
+            external_deck: false,
+            hole_known: vec![[true; 2]; n],
             players,
             hole,
             board: Vec::with_capacity(5),
@@ -184,6 +207,35 @@ impl State {
 
         state.round_complete = state.round_done();
         state
+    }
+
+    pub fn hidden(dealer: usize, stacks: &[u32], sb: u32, bb: u32) -> Self {
+        let mut state = Self::new([0; 32], dealer, stacks, sb, bb);
+
+        state.deck = Deck::new();
+        state.external_deck = true;
+        state.hole_known.fill([false; 2]);
+        state
+    }
+
+    pub fn set_hole(&mut self, player: usize, cards: [Card; 2]) -> bool {
+        if !self.external_deck
+            || player >= self.hole.len()
+            || cards[0] == cards[1]
+            || cards.into_iter().any(|card| self.card_known(card))
+        {
+            return false;
+        }
+
+        self.hole[player] = cards;
+        self.hole_known[player] = [true; 2];
+        true
+    }
+
+    pub fn hole_known(&self, player: usize) -> bool {
+        self.hole_known
+            .get(player)
+            .is_some_and(|known| *known == [true; 2])
     }
 
     pub fn legal_actions(&self, player: usize) -> Option<LegalActions> {
@@ -310,19 +362,42 @@ impl State {
             return Err(AdvanceError::HandComplete);
         }
 
+        if !self.round_complete || self.external_deck {
+            return Err(AdvanceError::CannotAdvance);
+        }
+
+        let cards = match self.street {
+            Street::Preflop => {
+                let k = self.next_card;
+                vec![
+                    self.deck.cards()[k + 1],
+                    self.deck.cards()[k + 2],
+                    self.deck.cards()[k + 3],
+                ]
+            }
+            Street::Flop | Street::Turn => vec![self.deck.cards()[self.next_card + 1]],
+            Street::River => return Err(AdvanceError::CannotAdvance),
+        };
+
+        self.advance_street_with(&cards)
+    }
+
+    pub fn advance_street_with(&mut self, cards: &[Card]) -> Result<Event, AdvanceError> {
+        if self.fold_winner.is_some() {
+            return Err(AdvanceError::HandComplete);
+        }
+
         if !self.round_complete {
+            return Err(AdvanceError::CannotAdvance);
+        }
+
+        if cards.iter().any(|&card| self.card_known(card)) {
             return Err(AdvanceError::CannotAdvance);
         }
 
         let event = match self.street {
             Street::Preflop => {
-                // burn next card then deal three
-                let k = self.next_card;
-                let cards = [
-                    self.deck.cards()[k + 1],
-                    self.deck.cards()[k + 2],
-                    self.deck.cards()[k + 3],
-                ];
+                let cards: [Card; 3] = cards.try_into().map_err(|_| AdvanceError::CannotAdvance)?;
 
                 self.board.extend_from_slice(&cards);
                 self.next_card += 4;
@@ -330,22 +405,24 @@ impl State {
                 Event::FlopDealt { cards }
             }
             Street::Flop => {
-                // burn next card then deal one
-                let card = self.deck.cards()[self.next_card + 1];
+                let [card] = cards else {
+                    return Err(AdvanceError::CannotAdvance);
+                };
 
-                self.board.push(card);
+                self.board.push(*card);
                 self.next_card += 2;
                 self.street = Street::Turn;
-                Event::TurnDealt { card }
+                Event::TurnDealt { card: *card }
             }
             Street::Turn => {
-                // burn next card then deal one
-                let card = self.deck.cards()[self.next_card + 1];
+                let [card] = cards else {
+                    return Err(AdvanceError::CannotAdvance);
+                };
 
-                self.board.push(card);
+                self.board.push(*card);
                 self.next_card += 2;
                 self.street = Street::River;
-                Event::RiverDealt { card }
+                Event::RiverDealt { card: *card }
             }
             Street::River => return Err(AdvanceError::CannotAdvance),
         };
@@ -382,6 +459,10 @@ impl State {
         for (i, player) in self.players.iter().enumerate() {
             if player.folded {
                 continue;
+            }
+
+            if !self.hole_known(i) {
+                return Err(SettlementError::NotReady);
             }
 
             let hole = self.hole[i];
@@ -480,6 +561,17 @@ impl State {
     }
 
     pub fn next_hand(&self, seed: [u8; 32]) -> Result<Self, NextHandError> {
+        self.next_with(|dealer, stacks, sb, bb| Self::new(seed, dealer, stacks, sb, bb))
+    }
+
+    pub fn next_hidden(&self) -> Result<Self, NextHandError> {
+        self.next_with(Self::hidden)
+    }
+
+    fn next_with(
+        &self,
+        build: impl FnOnce(usize, &[u32], u32, u32) -> Self,
+    ) -> Result<Self, NextHandError> {
         if !self.settled {
             return Err(NextHandError::NotSettled);
         }
@@ -500,13 +592,7 @@ impl State {
         let stacks: Vec<_> = self.players.iter().map(|player| player.stack).collect();
         let dealer = Self::next_funded(&stacks, self.dealer);
 
-        Ok(Self::new(
-            seed,
-            dealer,
-            &stacks,
-            self.small_blind,
-            self.big_blind,
-        ))
+        Ok(build(dealer, &stacks, self.small_blind, self.big_blind))
     }
 
     fn next_funded(stacks: &[u32], player: usize) -> usize {
@@ -514,6 +600,16 @@ impl State {
             .map(|offset| (player + offset) % stacks.len())
             .find(|&next| stacks[next] > 0)
             .expect("funded player")
+    }
+
+    fn card_known(&self, card: Card) -> bool {
+        self.board.contains(&card)
+            || self.hole.iter().enumerate().any(|(player, cards)| {
+                self.hole_known[player]
+                    .into_iter()
+                    .zip(cards)
+                    .any(|(known, value)| known && *value == card)
+            })
     }
 
     fn start_round(&mut self) {

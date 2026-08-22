@@ -33,6 +33,25 @@ import {
 import { proveChallenge, type ProofStatus } from "@/lib/challenge-proof";
 import { verifyPublishedProof } from "@/lib/receipt";
 import {
+  bytes as deckBytes,
+  decryptionShare,
+  hex as deckHex,
+  keyPayload,
+  keyProof,
+  openCard,
+  publicKey,
+  randomScalar,
+  shuffleDeck,
+  transcriptNext,
+  verifyKey,
+  verifyShare,
+  type CipherValue,
+  type PointValue,
+  type ShareProof,
+} from "@/lib/deck-crypto";
+import { proveShuffle } from "@/lib/deck-proof";
+import { cardValue } from "@/lib/deal";
+import {
   freshEntropy,
   loadPublishedProof,
   loadSeat,
@@ -49,7 +68,13 @@ type ServerMessage =
   | { type: "snapshot"; rev: number; view: View }
   | { type: "proof_accepted"; kind: ProofKind }
   | { type: "proof_error"; kind: ProofKind; message: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "deck_wait"; hand_no: number; stage: string }
+  | { type: "deck_key"; hand_no: number; start: string; context: string; server_key: PointValue; server_proof: ShareProof }
+  | { type: "deck_shuffle"; hand_no: number; participant: number; context: string; key: PointValue; deck: CipherValue[] }
+  | { type: "deck_shares"; hand_no: number; context: string; deck: CipherValue[]; positions: number[] }
+  | { type: "deck_private"; hand_no: number; context: string; keys: PointValue[]; cards: Array<{ position: number; card: CipherValue; shares: Array<{ participant: number; position: number; context: string; value: PointValue; proof: ShareProof }> }> }
+  | { type: "deck_open"; hand_no: number };
 type ClientAction =
   | { type: "fold" }
   | { type: "check" }
@@ -59,7 +84,12 @@ type ClientAction =
   | { type: "challenge_draw"; hand_no: number; proof: string; public_inputs: string }
   | { type: "challenge_claim"; hand_no: number; proof: string; public_inputs: string }
   | { type: "ready"; entropy: string }
-  | { type: "deal_entropy"; entropy: string };
+  | { type: "deal_entropy"; entropy: string }
+  | { type: "deck_key"; hand_no: number; key: PointValue; proof: ShareProof }
+  | { type: "deck_shuffle"; hand_no: number; context: string; output: CipherValue[]; proof: string; public_inputs: string }
+  | { type: "deck_shares"; hand_no: number; context: string; shares: Array<{ participant: number; position: number; context: string; value: PointValue; proof: ShareProof }> }
+  | { type: "deck_private_ready"; hand_no: number }
+  | { type: "deck_open"; hand_no: number; secret: string };
 type Assignment = {
   hand_no: number;
   hand_tag: string;
@@ -72,6 +102,16 @@ type PrivateObjective = { objective?: string; index?: number; error?: string };
 type ContractCompletion = { completed?: boolean; error?: string };
 
 const proofKey = (seat: number, hand: number, kind: ProofKind) => `${seat}:${hand}:${kind}`;
+const deckSecretKey = (room: string, hand: number) => `noir-poker-deck-${room}-${hand}`;
+
+function deckSecret(room: string, hand: number) {
+  const key = deckSecretKey(room, hand);
+  const stored = sessionStorage.getItem(key);
+  if (stored) return stored;
+  const secret = randomScalar();
+  sessionStorage.setItem(key, secret);
+  return secret;
+}
 
 function challengeAssignment(challenge: ChallengeView | undefined): Assignment | undefined {
   if (
@@ -173,6 +213,8 @@ export function MultiplayerGame({ room }: { room: string }) {
   const claiming = useRef(false);
   const dealing = useRef(false);
   const committing = useRef(false);
+  const deckBusy = useRef(false);
+  const localHole = useRef<{ hand: number; cards: [string, string] } | undefined>(undefined);
   const seenAction = useRef<string | undefined>(undefined);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const finishTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -195,6 +237,7 @@ export function MultiplayerGame({ room }: { room: string }) {
   const [localProofs, setLocalProofs] = useState<Record<string, LocalProofState>>({});
   const [notice, setNotice] = useState<ActionNoticeView>();
   const [finish, setFinish] = useState(false);
+  const [deckStage, setDeckStage] = useState<string>();
 
   useEffect(() => {
     if (!error && !challengeError) return;
@@ -229,6 +272,98 @@ export function MultiplayerGame({ room }: { room: string }) {
     }
     socket.current = next;
     next.onopen = () => next.send(JSON.stringify({ type: "auth", token: current.token }));
+    const handleDeck = async (message: Extract<ServerMessage, { type: `deck_${string}` }>) => {
+      if (message.type === "deck_wait") {
+        setDeckStage(message.stage);
+        return;
+      }
+      if (deckBusy.current) return;
+      deckBusy.current = true;
+      setDeckStage(
+        message.type === "deck_key"
+          ? "creating private key"
+          : message.type === "deck_shuffle"
+            ? "proving private shuffle"
+            : message.type === "deck_shares"
+              ? "opening dealt cards"
+              : message.type === "deck_private"
+                ? "decrypting your cards"
+                : "publishing final opening",
+      );
+      try {
+        const secret = deckSecret(room, message.hand_no);
+        if (message.type === "deck_key") {
+          const start = deckBytes(message.start);
+          if (!(await verifyKey(message.server_key, message.server_proof, start))) {
+            throw new Error("invalid server deck key");
+          }
+          const head = transcriptNext(start, 0, "key", undefined, keyPayload(message.server_key, message.server_proof));
+          if (deckHex(head) !== message.context) throw new Error("invalid deck transcript");
+          const key = await publicKey(secret);
+          const proof = await keyProof(secret, deckBytes(message.context));
+          next.send(JSON.stringify({ type: "deck_key", hand_no: message.hand_no, key, proof } satisfies ClientAction));
+        } else if (message.type === "deck_shuffle") {
+          const shuffled = await shuffleDeck(message.deck, message.key);
+          const proof = await proveShuffle({
+            hand: message.hand_no,
+            seat: message.participant,
+            context: message.context,
+            input: message.deck,
+            output: shuffled.output,
+            key: message.key,
+            permutation: shuffled.permutation,
+            masks: shuffled.masks,
+          }, setDeckStage);
+          next.send(JSON.stringify({
+            type: "deck_shuffle",
+            hand_no: message.hand_no,
+            context: message.context,
+            output: shuffled.output,
+            proof: proof.proof,
+            public_inputs: proof.public_inputs,
+          } satisfies ClientAction));
+        } else if (message.type === "deck_shares") {
+          const participant = current.seat + 1;
+          const shares = await Promise.all(message.positions.map(async (position) => ({
+            participant,
+            position,
+            context: message.context,
+            ...await decryptionShare(message.deck[position], secret, deckBytes(message.context)),
+          })));
+          next.send(JSON.stringify({
+            type: "deck_shares",
+            hand_no: message.hand_no,
+            context: message.context,
+            shares,
+          } satisfies ClientAction));
+        } else if (message.type === "deck_private") {
+          const cards = [] as string[];
+          for (const entry of message.cards) {
+            for (const share of entry.shares) {
+              if (!(await verifyShare(
+                entry.card,
+                message.keys[share.participant],
+                share.value,
+                share.proof,
+                deckBytes(share.context),
+              ))) throw new Error("invalid card opening");
+            }
+            const mine = await decryptionShare(entry.card, secret, deckBytes(message.context));
+            const card = await openCard(entry.card, entry.shares.map((share) => share.value).concat(mine.value));
+            cards.push(cardValue(card));
+          }
+          if (cards.length !== 2) throw new Error("private cards missing");
+          localHole.current = { hand: message.hand_no, cards: [cards[0], cards[1]] };
+          next.send(JSON.stringify({ type: "deck_private_ready", hand_no: message.hand_no } satisfies ClientAction));
+        } else {
+          next.send(JSON.stringify({ type: "deck_open", hand_no: message.hand_no, secret } satisfies ClientAction));
+        }
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "deck protocol failed");
+      } finally {
+        deckBusy.current = false;
+      }
+    };
     next.onmessage = (event) => {
       if (socket.current !== next || typeof event.data !== "string") return;
       let message: ServerMessage;
@@ -238,6 +373,11 @@ export function MultiplayerGame({ room }: { room: string }) {
         actionWait.current = undefined;
         setActionPending(false);
         setError("Invalid server message");
+        return;
+      }
+
+      if (message.type.startsWith("deck_")) {
+        void handleDeck(message as Extract<ServerMessage, { type: `deck_${string}` }>);
         return;
       }
 
@@ -271,6 +411,10 @@ export function MultiplayerGame({ room }: { room: string }) {
       if (message.type === "snapshot") {
         dealing.current = false;
         if (message.rev < rev.current) return;
+        const local = localHole.current;
+        if (local?.hand === message.view.hand_no) {
+          message.view.hole = [{ value: local.cards[0] }, { value: local.cards[1] }];
+        }
         viewRef.current = message.view;
         const actionKey = message.view.last_action
           ? `${message.view.hand_no}:${message.view.last_action.seq}`
@@ -309,6 +453,7 @@ export function MultiplayerGame({ room }: { room: string }) {
         } else if (!claiming.current) setClaimState("idle");
 
         setWaiting(undefined);
+        setDeckStage(undefined);
         setView(message.view);
         setRaiseTo(message.view.actions?.raise?.min_to ?? 0);
         setObjective(currentChallenge.objective);
@@ -598,7 +743,7 @@ export function MultiplayerGame({ room }: { room: string }) {
       </div>
     );
   }
-  if (!view) return <div className={`room-status${error ? " ui-shake" : ""}`}><strong>{error ?? "Connecting to table"}</strong>{!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><Keycap>Reconnect</Keycap></button>}</div>;
+  if (!view) return <div className={`room-status${error ? " ui-shake" : ""}`}><strong>{error ?? deckStage ?? "Connecting to table"}</strong>{!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><Keycap>Reconnect</Keycap></button>}</div>;
 
   const contract: ContractView = {
     assignment: !view.challenge

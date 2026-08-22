@@ -25,6 +25,18 @@ impl Deck {
         Self { cards }
     }
 
+    pub(crate) fn from_cards(cards: [Card; 52]) -> Option<Self> {
+        let mut seen = [false; 52];
+        for card in cards {
+            let slot = &mut seen[card.id() as usize];
+            if *slot {
+                return None;
+            }
+            *slot = true;
+        }
+        Some(Self { cards })
+    }
+
     pub fn cards(&self) -> &[Card; CARD_COUNT] {
         &self.cards
     }

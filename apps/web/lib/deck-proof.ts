@@ -41,6 +41,28 @@ export async function proveShuffle(input: ShuffleInput, status: (value: string) 
   }
 }
 
+export async function verifyShuffle(
+  input: Omit<ShuffleInput, "permutation" | "masks">,
+  proofValue: string,
+  publicValue: string,
+) {
+  const [{ BackendType, Barretenberg, UltraHonkBackend }] = await Promise.all([
+    import("@aztec/bb.js"),
+  ]);
+  const publicInputs = split(unbase64(publicValue));
+  const expected = publicFields(input);
+  if (publicInputs.length !== expected.length || publicInputs.some((value, index) => value !== expected[index])) {
+    throw new Error("shuffle public inputs mismatch");
+  }
+  const api = await Barretenberg.new({ backend: BackendType.WasmWorker });
+  try {
+    const backend = new UltraHonkBackend(circuit.bytecode, api);
+    return backend.verifyProof({ proof: unbase64(proofValue), publicInputs });
+  } finally {
+    await api.destroy();
+  }
+}
+
 function noirInput(input: ShuffleInput) {
   const coord = (deck: readonly CipherValue[], side: "left" | "right", axis: "x" | "y") =>
     deck.map((card) => card[side][axis]);
@@ -65,6 +87,27 @@ function noirInput(input: ShuffleInput) {
   };
 }
 
+function publicFields(input: Omit<ShuffleInput, "permutation" | "masks">) {
+  const value = noirInput({ ...input, permutation: [], masks: [] });
+  const fields = [
+    value.protocol_version,
+    value.hand_no,
+    value.seat,
+    ...value.context,
+    ...value.input_left_x,
+    ...value.input_left_y,
+    ...value.input_right_x,
+    ...value.input_right_y,
+    ...value.output_left_x,
+    ...value.output_left_y,
+    ...value.output_right_x,
+    ...value.output_right_y,
+    value.key_x,
+    value.key_y,
+  ];
+  return fields.map((field) => `0x${BigInt(field).toString(16).padStart(64, "0")}`);
+}
+
 function flatten(fields: string[]) {
   const output = new Uint8Array(fields.length * 32);
 
@@ -80,4 +123,16 @@ function base64(value: Uint8Array) {
   let raw = "";
   for (const byte of value) raw += String.fromCharCode(byte);
   return btoa(raw);
+}
+
+function unbase64(value: string) {
+  const raw = atob(value);
+  return Uint8Array.from(raw, (char) => char.charCodeAt(0));
+}
+
+function split(value: Uint8Array) {
+  if (value.length % 32 !== 0) throw new Error("invalid public inputs");
+  return Array.from({ length: value.length / 32 }, (_, index) =>
+    `0x${Array.from(value.slice(index * 32, index * 32 + 32), (byte) => byte.toString(16).padStart(2, "0")).join("")}`,
+  );
 }

@@ -1,192 +1,131 @@
 "use client";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+
+import { useEffect, useState, type CSSProperties } from "react";
 
 import { Card } from "@/components/card";
-import styles from "@/components/crypto.module.css";
 import { SiteHeader } from "@/components/site-header";
-import { cardValue, verifyDealAudit, type DealVerification } from "@/lib/deal";
+import { verifyDeck, type DeckCheck } from "@/lib/deck-audit";
+import { cardValue } from "@/lib/deal";
 import { loadDealAudit, type DealAudit } from "@/lib/server";
 
 type AuditState = "loading" | "verified" | "failed";
 
 export function DealAuditView({ room, hand }: { room: string; hand: number }) {
   const [audit, setAudit] = useState<DealAudit>();
-  const [verification, setVerification] = useState<DealVerification>();
+  const [check, setCheck] = useState<DeckCheck>();
   const [state, setState] = useState<AuditState>("loading");
+  const [step, setStep] = useState("loading transcript");
   const [error, setError] = useState<string>();
-  const [replay, setReplay] = useState(0);
+  const [all, setAll] = useState(false);
 
   useEffect(() => {
     let live = true;
     void loadDealAudit(room, hand)
-      .then((value) => {
-        const result = verifyDealAudit(value);
+      .then(async (value) => {
         if (!live) return;
         setAudit(value);
-        setVerification(result);
+        const result = await verifyDeck(value, (next) => live && setStep(next));
+        if (!live) return;
+        setCheck(result);
         setState("verified");
       })
       .catch((cause) => {
         if (!live) return;
         setState("failed");
-        setError(cause instanceof Error ? cause.message : "deal verification failed");
+        setError(cause instanceof Error ? cause.message : "deck verification failed");
       });
     return () => { live = false; };
   }, [hand, room]);
 
-  const layout = verification?.layout;
-  const dealt = useMemo(() => {
-    if (!layout) return [];
-    return layout.hole.flat().concat(layout.burns, layout.board).map(cardValue);
-  }, [layout]);
-
-  function exportAudit() {
-    if (!audit) return;
-    const url = URL.createObjectURL(
-      new Blob([JSON.stringify(audit, null, 2)], { type: "application/json" }),
-    );
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `noir-poker-deal-${audit.room.slice(0, 8)}-${audit.hand_no}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-  }
+  const shown = check?.deck.slice(0, all ? 52 : 20) ?? [];
 
   return (
-    <main className="site-shell audit-page">
+    <main className="site-shell audit-page deck-proof-page">
       <SiteHeader compact />
       <header className="audit-hero">
         <div>
-          <p className="eyebrow">Independent deal audit</p>
-          <h1>{state === "verified"
-            ? "52 / 52 positions reproduced."
-            : state === "failed"
-              ? "Verification failed."
-              : "Verifying locally."}</h1>
-          <p>The browser recomputes the commitment, seed, shuffle and deal locally.</p>
+          <p className="eyebrow">Deck Randomness Verification</p>
+          <h1>{state === "verified" ? "Every shuffle checks out" : state === "failed" ? "Verification failed" : "Checking the encrypted deck"}</h1>
+          <p>Proves that the deck was randomly sampled and that the server did not cheat or deal unfair cards to a chosen player</p>
         </div>
-        <div className="audit-deck" data-state={state} data-replay={replay}>
-          {Array.from({ length: 9 }, (_, index) => <i key={index} style={{ "--card-index": index } as CSSProperties} />)}
-          <strong>{state === "verified" ? "52 / 52" : "…"}</strong>
+        <div className="deck-proof-seal" data-state={state}>
+          <span>{state === "verified" ? "VALID" : state === "failed" ? "FAILED" : "CHECKING"}</span>
+          <small>{state === "loading" ? step : `${audit?.shuffles.length ?? 0} shuffle proofs`}</small>
         </div>
       </header>
 
-      <section className="audit-steps" aria-live="polite">
-        {[
-          ["01", "Open commitment", verification?.commitment],
-          ["02", "Combine player entropy", verification?.seed],
-          ["03", "Replay unbiased shuffle", verification?.shuffle],
-          ["04", "Map seats and board", verification?.seats],
-        ].map(([number, label, passed]) => (
-          <div key={String(number)} data-state={passed ? "verified" : state}>
-            <span>{number}</span><strong>{label}</strong><i>{passed ? "pass" : state}</i>
-          </div>
-        ))}
-      </section>
-
       {error && <p className="proof-error">{error}</p>}
 
-      <div className={styles.verifyState} data-state={state} aria-live="polite">
-        {state === "loading" ? "VERIFYING LOCALLY" : state === "verified" ? "52 / 52 POSITIONS REPRODUCED" : "VERIFICATION FAILED"}
-      </div>
-
-      {audit && layout && (
-        <>
-          <section className="audit-transcript">
-            <div className="section-index"><span>Transcript</span><p>Public after settlement</p></div>
-            <dl>
-              <div><dt>room / hand</dt><dd>{audit.room} / {audit.hand_no}</dd></div>
-              <div><dt>server commitment</dt><dd>{audit.commitment}</dd></div>
-              <div><dt>revealed server secret</dt><dd>{audit.server_secret}</dd></div>
-              <div><dt>combined seed</dt><dd>{audit.seed}</dd></div>
-              <div><dt>player shares</dt><dd>{audit.contributions.length} ordered contributions</dd></div>
-              <div><dt>algorithm</dt><dd>{audit.algorithm}</dd></div>
-              <div><dt>starting stacks</dt><dd>{audit.starting_stacks.join(" / ")}</dd></div>
-            </dl>
-          </section>
-
-          <section className={styles.dealSequence} key={`sequence-${replay}`}>
-            <header>
-              <p className={styles.label}>COMMITTED DECK SEQUENCE</p>
-              <h2>FIRST 17 CARDS</h2>
-              <p>Each card comes from the reconstructed shuffle in fixed order</p>
-            </header>
-            <div className={styles.cardStream}>
-              {audit.deck.slice(0, 17).map((card, index) => (
-                <div className={styles.streamCard} key={`${index}-${card.value}`}>
-                  <span>{String(index + 1).padStart(2, "0")}</span>
-                  <Card value={card.value} delay={index * 110} />
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="deal-replay" key={replay}>
-            <header>
-              <div><p className="protocol-label">Deterministic deal map</p><h2>Verified deal</h2></div>
-              <button type="button" onClick={() => setReplay((value) => value + 1)}>Replay motion ↻</button>
-            </header>
-            <div className="audit-table">
-              <div className="audit-board">
-                {layout.board.map((card, index) => <Card key={card} value={cardValue(card)} delay={1200 + index * 210} />)}
-              </div>
-              {layout.hole.map((cards, seat) => (
-                <div className={`audit-seat audit-seat-${seat}`} key={seat}>
-                  <span>Seat {seat + 1}{audit.dealer === seat ? " (dealer)" : ""}</span>
-                  <div><Card value={cardValue(cards[0])} delay={seat * 170} /><Card value={cardValue(cards[1])} delay={seat * 170 + 420} /></div>
-                </div>
-              ))}
-              <div className="burn-cards"><span>burns</span>{layout.burns.map(cardValue).join("  ")}</div>
-            </div>
-            <p className="audit-footnote">The first {dealt.length} consumed positions match the engine&apos;s clockwise deal and three burn rules.</p>
-          </section>
-
-          <section className={styles.public}>
-            <h2>RECORDED ACTIONS</h2>
-            <div className={styles.list}>
-              {audit.actions.map((action) => (
-                <div className={styles.entry} key={action.seq}>
-                  <strong>{String(action.seq + 1).padStart(2, "0")}</strong>
-                  <span>PLAYER {action.player + 1}&nbsp;&nbsp;&nbsp;{action.action === "raise_to" ? `RAISE TO ${action.raise_to}` : action.action.toUpperCase()}</span>
-                </div>
-              ))}
-              {!audit.actions.length && <p>NO PLAYER ACTIONS</p>}
-            </div>
-            <p>These commands come from the durable server log. Their legality is not part of the deck verification above.</p>
-          </section>
-
-          <section className={styles.public}>
-            <h2>VERIFICATION SEQUENCE</h2>
-            <p>The server commits to its secret before final player randomness determines the deck. This browser then rebuilds every shuffle choice after settlement.</p>
-            <details>
-              <summary>SERVER COMMITMENT AND FINAL SEED</summary>
-              <p><code>C = SHA256(&quot;NPDEAL01&quot; || room || hand || server_secret)</code></p>
-              <p><code>seed = SHA256(&quot;NPSEED01&quot; || room || hand || share_count || seat_0 || share_0 || ... || server_secret)</code></p>
-              <p>Each human share contains 32 bytes from crypto.getRandomValues and remains bound to its seat.</p>
-            </details>
-            <details>
-              <summary>CARD SAMPLING AND REPLAY</summary>
-              <p><code>block = SHA256(&quot;NPSTRM01&quot; || seed || counter)</code></p>
-              <p>SHA-256 counter blocks provide 32-bit words. Values outside the largest exact multiple of each shrinking range are rejected. Fisher-Yates then reproduces all 52 card positions without modulo bias.</p>
-            </details>
-            <details>
-              <summary>ASSUMPTIONS</summary>
-              <p>The check relies on SHA-256 commitment security and pseudorandom hash output. At least one contribution must remain unpredictable before the server commitment. A server can still abort or stop serving a room. Verification becomes available after settlement.</p>
-            </details>
-            <details>
-              <summary>FULL TECHNICAL VALUES</summary>
-              <p><strong>ORDERED SHARES</strong></p>
-              {audit.contributions.map((entry) => <p key={entry.seat}><code>seat {entry.seat} {entry.share}</code></p>)}
-              <p><strong>FULL DECK</strong></p>
-              <p><code>{audit.deck.map((card) => card.value).join("  ")}</code></p>
-            </details>
-          </section>
-        </>
+      {audit && (
+        <section className="audit-transcript">
+          <div className="section-index"><span>Transcript</span><p>One completed hand</p></div>
+          <dl>
+            <div><dt>room and hand</dt><dd>{audit.room} / {audit.hand_no + 1}</dd></div>
+            <div><dt>SHA 256 fingerprint</dt><dd>{audit.transcript_hash}</dd></div>
+            <div><dt>participants</dt><dd>{audit.keys.length} independent deck keys</dd></div>
+            <div><dt>shuffle proofs</dt><dd>{audit.shuffles.length} UltraHonk proofs</dd></div>
+            <div><dt>final openings</dt><dd>{audit.openings.length} keys matched</dd></div>
+          </dl>
+        </section>
       )}
 
-      <section className="receipt-actions">
-        <button type="button" onClick={exportAudit} disabled={!audit}>DOWNLOAD JSON</button>
-        <details><summary>CLI verifier</summary><code>npm --prefix apps/web run deal:verify -- audit.json</code></details>
+      {check && (
+        <section className="deck-opening">
+          <header>
+            <p className="protocol-label">Deterministic reconstruction</p>
+            <h2>{all ? "All 52 cards" : "First 20 cards"}</h2>
+            <p>Cards open in their final encrypted deck positions after every proof and final key opening passes</p>
+          </header>
+          <div className="deck-opening-stream">
+            {shown.map((card, index) => (
+              <div key={`${index}-${card}`} style={{ "--open-index": index } as CSSProperties}>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <Card value={cardValue(card)} delay={index * 125} />
+              </div>
+            ))}
+          </div>
+          <button type="button" className="proof-link" onClick={() => setAll((value) => !value)}>
+            {all ? "Show First 20" : "Open All 52"}
+          </button>
+        </section>
+      )}
+
+      <section className="deck-protocol-blocks">
+        <article>
+          <span>01</span>
+          <h2>Joint deck key</h2>
+          <p>Every human browser creates a private Grumpkin key for this hand. The server creates one more. Their public points combine into one deck key. No participant holds the full private key.</p>
+        </article>
+        <article>
+          <span>02</span>
+          <h2>Encrypted cards</h2>
+          <p>The canonical 52 cards begin as curve points under the joint key. Ciphertexts hide card identities while preserving a form that supports fresh encryption during each shuffle.</p>
+        </article>
+        <article>
+          <span>03</span>
+          <h2>Private shuffles</h2>
+          <p>The server shuffles first. Every human browser shuffles after it. Each participant chooses a secret permutation and fresh masks. A Noir UltraHonk proof binds the new encrypted deck to a valid permutation of the prior deck without revealing that permutation.</p>
+        </article>
+        <article>
+          <span>04</span>
+          <h2>Selective dealing</h2>
+          <p>Decryption shares open only the positions needed at that moment. A player finishes their own hole card decryption locally. Community positions open when each street begins. DLEQ proofs bind every share to the participant key.</p>
+        </article>
+        <article>
+          <span>05</span>
+          <h2>Final reconstruction</h2>
+          <p>After settlement each participant opens the hand key. This page checks every key proof and shuffle proof then decrypts all 52 positions. One honest private shuffle makes the final order unpredictable to every earlier participant including the server.</p>
+        </article>
+        <article>
+          <span>06</span>
+          <h2>Transcript fingerprint</h2>
+          <p>SHA 256 covers the ordered transcript records and their payloads. It identifies this exact encrypted shuffle and proof chain. The fingerprint alone does not prove fairness. The cryptographic checks performed on this page provide that evidence.</p>
+        </article>
+      </section>
+
+      <section className="deck-limit">
+        <strong>Abort boundary</strong>
+        <p>A server or player can still disconnect. No protocol can force another machine to send a packet. An abort cannot secretly replace the proven deck and remains visible as an incomplete transcript.</p>
       </section>
     </main>
   );

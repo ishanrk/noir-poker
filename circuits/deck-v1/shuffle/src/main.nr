@@ -27,7 +27,7 @@ fn main(
 
     let mut context_nonzero = false;
     for byte in context {
-        context_nonzero = context_nonzero | byte != 0;
+        context_nonzero = context_nonzero | (byte != 0);
     }
     assert(context_nonzero);
 
