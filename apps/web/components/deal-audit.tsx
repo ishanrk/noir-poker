@@ -105,6 +105,22 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
             </dl>
           </section>
 
+          <section className={styles.dealSequence} key={`sequence-${replay}`}>
+            <header>
+              <p className={styles.label}>COMMITTED DECK SEQUENCE</p>
+              <h2>FIRST 17 CARDS</h2>
+              <p>Each card comes from the reconstructed shuffle in fixed order</p>
+            </header>
+            <div className={styles.cardStream}>
+              {audit.deck.slice(0, 17).map((card, index) => (
+                <div className={styles.streamCard} key={`${index}-${card.value}`}>
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <Card value={card.value} delay={index * 110} />
+                </div>
+              ))}
+            </div>
+          </section>
+
           <section className="deal-replay" key={replay}>
             <header>
               <div><p className="protocol-label">Deterministic deal map</p><h2>Verified deal</h2></div>
@@ -120,7 +136,7 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
                   <div><Card value={cardValue(cards[0])} delay={seat * 170} /><Card value={cardValue(cards[1])} delay={seat * 170 + 420} /></div>
                 </div>
               ))}
-              <div className="burn-cards"><span>burns</span>{layout.burns.map(cardValue).join(", ")}</div>
+              <div className="burn-cards"><span>burns</span>{layout.burns.map(cardValue).join("  ")}</div>
             </div>
             <p className="audit-footnote">The first {dealt.length} consumed positions match the engine&apos;s clockwise deal and three burn rules.</p>
           </section>
@@ -140,7 +156,7 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
           </section>
 
           <section className={styles.public}>
-            <h2>WHY THIS CHECK WORKS</h2>
+            <h2>VERIFICATION SEQUENCE</h2>
             <p>The server commits to its secret before final player randomness determines the deck. This browser then rebuilds every shuffle choice after settlement.</p>
             <details>
               <summary>SERVER COMMITMENT AND FINAL SEED</summary>

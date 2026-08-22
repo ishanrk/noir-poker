@@ -111,6 +111,17 @@
   border-top: 1px solid var(--line-strong);
 }
 
+.proofPlayer > strong {
+  display: grid;
+  gap: 5px;
+}
+
+.proofPlayer > strong a {
+  width: fit-content;
+  color: var(--blue);
+  font-size: 10px;
+}
+
 .proofItem {
   display: flex;
   align-items: baseline;
@@ -176,6 +187,19 @@
   color: var(--blue);
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.historyProofs {
+  display: grid;
+  gap: 7px;
+  font: 700 13px/1.4 ui-sans-serif, system-ui, sans-serif;
+}
+
+.historyProofs span {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .verifyState {
@@ -247,6 +271,59 @@
   font-weight: 800;
 }
 
+.dealSequence {
+  width: min(1120px, calc(100% - 32px));
+  margin: 54px auto;
+  padding-block: 24px 30px;
+  border-block: 2px solid var(--blue);
+  font-family: "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
+}
+
+.dealSequence header {
+  margin-bottom: 26px;
+}
+
+.dealSequence h2 {
+  margin: 0;
+  font-size: clamp(30px, 5vw, 54px);
+}
+
+.dealSequence header > p:last-child {
+  font: 650 15px/1.5 ui-sans-serif, system-ui, sans-serif;
+}
+
+.cardStream {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 18px 10px;
+}
+
+.streamCard {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.streamCard > span:first-child {
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.streamCard :global(.card) {
+  transform-origin: center bottom;
+  animation: stream-deal 440ms both;
+  animation-delay: var(--deal-delay);
+}
+
+@keyframes stream-deal {
+  from {
+    opacity: 0;
+    transform: translateY(-30px) rotate(-5deg);
+  }
+}
+
 @media (max-width: 680px) {
   .stripHead,
   .private,
@@ -269,5 +346,9 @@
 
   .entry {
     gap: 8px;
+  }
+
+  .cardStream {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }

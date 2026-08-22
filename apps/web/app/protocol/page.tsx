@@ -173,7 +173,7 @@ export default function ProtocolPage() {
         <header className="story-section-head">
           <p className="story-index">04</p>
           <div>
-            <h2 id="proof-statements-title">What each proof says</h2>
+            <h2 id="proof-statements-title">Proof statements</h2>
             <p>The circuit has two modes with the same assignment checks.</p>
           </div>
         </header>
@@ -228,7 +228,7 @@ export default function ProtocolPage() {
           <details open>
             <summary>
               <span>Deal commitment and seed</span>
-              <small>How the final deck is fixed</small>
+              <small>Final deck construction</small>
             </summary>
             <div>
               <p>
@@ -259,7 +259,7 @@ export default function ProtocolPage() {
           <details>
             <summary>
               <span>Challenge assignment</span>
-              <small>How one hidden rule is selected</small>
+              <small>Hidden rule selection</small>
             </summary>
             <div>
               <p>
@@ -288,7 +288,7 @@ export default function ProtocolPage() {
           <details>
             <summary>
               <span>Challenge completion</span>
-              <small>How the hidden rule is checked</small>
+              <small>Hidden rule completion</small>
             </summary>
             <div>
               <p>The six private facts are:</p>

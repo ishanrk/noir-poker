@@ -199,6 +199,7 @@ pub struct StoredHandMeta {
 pub struct StoredProofMeta {
     pub hand_no: i64,
     pub seat: i32,
+    pub finished: bool,
     pub draw_published: bool,
     pub completion_published: bool,
     pub nullifier: Option<Vec<u8>>,
@@ -813,7 +814,8 @@ impl Db {
 
     pub async fn proof_history(&self, room: Uuid) -> DbResult<Vec<StoredProofMeta>> {
         query(
-            "SELECT hand_no, seat, draw_verified_at IS NOT NULL AS draw_published, \
+            "SELECT hand_no, seat, facts_hash IS NOT NULL AS finished, \
+             draw_verified_at IS NOT NULL AS draw_published, \
              claimed_at IS NOT NULL AS completion_published, nullifier, points \
              FROM challenge_assignments WHERE room_id = $1 ORDER BY hand_no, seat",
         )
@@ -825,6 +827,7 @@ impl Db {
             Ok(StoredProofMeta {
                 hand_no: row.try_get("hand_no")?,
                 seat: row.try_get("seat")?,
+                finished: row.try_get("finished")?,
                 draw_published: row.try_get("draw_published")?,
                 completion_published: row.try_get("completion_published")?,
                 nullifier: row.try_get("nullifier")?,

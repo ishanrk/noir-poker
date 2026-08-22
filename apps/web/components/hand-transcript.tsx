@@ -23,7 +23,7 @@ export function HandTranscript({ room, hand, deal, settled }: {
       </div>
       {settled && deal?.audit && (
         <nav className={styles.links} aria-label="Transcript links">
-          <Link href={`/audit/${room}/${hand}`} target="_blank">VERIFY LAST HAND</Link>
+          <Link href={`/audit/${room}/${hand}`} target="_blank">VIEW MORE</Link>
           <Link href={`/room/${room}/hands`} target="_blank">HAND HISTORY</Link>
         </nav>
       )}

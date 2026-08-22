@@ -104,6 +104,7 @@ export type HandMeta = { hand_no: number; dealer: number };
 export type ProofMeta = {
   hand_no: number;
   seat: number;
+  finished: boolean;
   draw_published: boolean;
   completion_published: boolean;
   nullifier?: string;

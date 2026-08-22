@@ -128,7 +128,15 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
   await waitForEnabled(fold, "bot did not return action");
   await fold.click();
   await page.getByText("Hand complete", { exact: true }).waitFor({ state: "visible", timeout: 15_000 });
-  await page.getByText("PRIVATE CHALLENGE", { exact: true }).waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByText("TRANSCRIPT READY", { exact: true }).waitFor({ state: "visible", timeout: 15_000 });
+  assert.equal(await page.getByText("PRIVATE CHALLENGE", { exact: true }).count(), 0);
+  assert.equal(await page.getByText("CHALLENGE PROOFS", { exact: true }).count(), 0);
+  await page.waitForTimeout(1200);
+  assert.equal(frames.some((frame) => {
+    if (frame.direction !== "sent" || typeof frame.payload !== "string") return false;
+    const message = JSON.parse(frame.payload);
+    return message.type === "challenge_draw" || message.type === "challenge_claim";
+  }), false);
   await visit("/", "home-after-single", ["Create a game"]);
 }
 

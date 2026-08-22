@@ -552,18 +552,23 @@ export function MultiplayerGame({ room }: { room: string }) {
   }, [connected, room, seat, view?.claim]);
 
   useEffect(() => {
-    if (drawState !== "idle") return;
+    if (view?.mode !== "multiplayer" || drawState !== "idle") return;
     const assignment = challengeAssignment(view?.challenge);
     if (!assignment || assignment.draw_verified) return;
     queueMicrotask(() => void drawChallenge());
-  }, [drawChallenge, drawState, view?.challenge]);
+  }, [drawChallenge, drawState, view?.challenge, view?.mode]);
 
   useEffect(() => {
-    if (claimState !== "idle" || claimCompleted !== true || view?.claim?.status !== "claimable") {
+    if (
+      view?.mode !== "multiplayer" ||
+      claimState !== "idle" ||
+      claimCompleted !== true ||
+      view?.claim?.status !== "claimable"
+    ) {
       return;
     }
     queueMicrotask(() => void claimChallenge());
-  }, [claimChallenge, claimCompleted, claimState, view?.claim?.status]);
+  }, [claimChallenge, claimCompleted, claimState, view?.claim?.status, view?.mode]);
 
   async function verifyProof(owner: number, hand: number, kind: ProofKind) {
     const key = proofKey(owner, hand, kind);
@@ -652,13 +657,15 @@ export function MultiplayerGame({ room }: { room: string }) {
     <div className={`game-view${error || challengeError ? " ui-shake" : ""}`}>
       {!connected && <div className="connection-bar"><span>{connecting ? "Connecting" : "Disconnected"}</span>{!connecting && <button type="button" onClick={connect}>Reconnect</button>}</div>}
       <HandTranscript room={room} hand={view.hand_no} deal={view.deal} settled={view.settled} />
-      <PrivateChallengeBar
-        view={contract}
-        onRetry={(kind) => {
-          if (kind === "draw") void drawChallenge();
-          else void claimChallenge();
-        }}
-      />
+      {view.mode === "multiplayer" && (
+        <PrivateChallengeBar
+          view={contract}
+          onRetry={(kind) => {
+            if (kind === "draw") void drawChallenge();
+            else void claimChallenge();
+          }}
+        />
+      )}
       <Table
         view={view}
         viewer={seat}
@@ -680,7 +687,7 @@ export function MultiplayerGame({ room }: { room: string }) {
         onGenerateProof={() => void claimChallenge()}
         onVerifyProof={(owner, hand, kind) => void verifyProof(owner, hand, kind)}
       />
-      <PlayProofs room={room} view={contract} />
+      {view.mode === "multiplayer" && <PlayProofs room={room} view={contract} />}
     </div>
   );
 }

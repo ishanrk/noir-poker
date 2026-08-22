@@ -65,13 +65,13 @@ export function PublishedProofPage({ room, hand, seat, kind }: {
 
       <div className={styles.detailGrid}>
         <section>
-          <h2>WHAT THIS PROOF SAYS</h2>
+          <h2>PUBLIC STATEMENT</h2>
           <p>{draw
             ? `Player ${seat + 1}'s hidden challenge came from their committed secret the public server nonce and the fixed challenge catalog`
             : `Player ${seat + 1} satisfied the same hidden challenge against the committed hand facts`}</p>
         </section>
         <section>
-          <h2>WHAT STAYS PRIVATE</h2>
+          <h2>PRIVATE WITNESS</h2>
           <p>{draw
             ? "Challenge browser secret selected index and Merkle path"
             : "Challenge browser secret selected index Merkle path private fact witness and fact salt"}</p>

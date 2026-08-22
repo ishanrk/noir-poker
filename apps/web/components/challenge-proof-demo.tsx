@@ -49,7 +49,7 @@ export function ChallengeProofDemo() {
       </div>
       <div className="challenge-demo-stage" data-step={step}>
         <div className="challenge-demo-cards" aria-hidden="true">
-          <span className="challenge-demo-secret">?</span>
+          <span className="challenge-demo-secret">SECRET</span>
           <span className="challenge-demo-hole">A♠</span>
           <span className="challenge-demo-proof">ZK</span>
         </div>

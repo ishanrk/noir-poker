@@ -281,6 +281,7 @@ struct ProofHistoryView {
 struct ProofHistoryMetaView {
     hand_no: u64,
     seat: usize,
+    finished: bool,
     draw_published: bool,
     completion_published: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -667,6 +668,7 @@ async fn proof_history(
             Ok(ProofHistoryMetaView {
                 hand_no: u64::try_from(proof.hand_no).map_err(|_| ())?,
                 seat: usize::try_from(proof.seat).map_err(|_| ())?,
+                finished: proof.finished,
                 draw_published: proof.draw_published,
                 completion_published: proof.completion_published,
                 nullifier: proof.nullifier.map(encode_hex_vec).transpose()?,
@@ -3844,6 +3846,7 @@ mod tests {
             proofs: vec![ProofHistoryMetaView {
                 hand_no: 4,
                 seat: 2,
+                finished: true,
                 draw_published: true,
                 completion_published: true,
                 nullifier: Some(encode_hex([9; 32])),
@@ -3853,7 +3856,7 @@ mod tests {
         .unwrap();
         let proof = &value["proofs"][0];
 
-        assert_eq!(proof.as_object().unwrap().len(), 6);
+        assert_eq!(proof.as_object().unwrap().len(), 7);
         for private in [
             "objective",
             "objective_index",

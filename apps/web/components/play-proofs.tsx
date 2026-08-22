@@ -12,7 +12,10 @@ export function PlayProofs({ room, view }: { room: string; view: ContractView })
       <div className={styles.proofRows}>
         {view.proofs.map((proof) => (
           <div className={styles.proofPlayer} key={proof.seat}>
-            <strong>{proof.name.toUpperCase()}</strong>
+            <strong>
+              {proof.name.toUpperCase()}
+              <Link href={`/room/${room}/proofs/player/${proof.seat}`} target="_blank">HISTORY</Link>
+            </strong>
             <ProofItem room={room} seat={proof.seat} kind="draw" proof={proof.draw} />
             <ProofItem room={room} seat={proof.seat} kind="completion" proof={proof.completion} />
           </div>
