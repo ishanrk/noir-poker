@@ -8,12 +8,13 @@ use std::collections::HashMap;
 use std::env;
 use std::io;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State as AxumState};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderValue, Method, StatusCode};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
@@ -27,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, broadcast};
+use tokio::time::sleep;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
 
@@ -39,9 +41,9 @@ use crate::proof::{
     decode_bytes, decode_proof,
 };
 use crate::room::{
-    Ceremony, Challenge, Challenges, HandResult, HandResultKind, LiveHand, PendingClaim,
-    PendingDraw, PlayedAction, Room, RoomConfig, RoomMode, Seat, TokenHash, bind_facts,
-    replay_hand, start_game,
+    ActionNotice, Ceremony, Challenge, Challenges, HandResult, HandResultKind, LiveHand,
+    PendingClaim, PendingDraw, PlayedAction, Room, RoomConfig, RoomMode, Seat, TokenHash,
+    bind_facts, replay_hand, start_game,
 };
 
 type HttpError = (StatusCode, &'static str);
@@ -75,7 +77,8 @@ impl AppState {
 
 #[derive(Serialize)]
 struct SeatResponse {
-    room: Uuid,
+    room: String,
+    room_id: Uuid,
     seat: usize,
     token: Uuid,
 }
@@ -87,17 +90,19 @@ struct CreateRoomRequest {
     stack: u32,
     small_blind: u32,
     big_blind: u32,
+    hands: Option<u32>,
     entropy: Option<String>,
     mode: Option<RoomMode>,
 }
 
 impl CreateRoomRequest {
-    const fn config(&self) -> RoomConfig {
+    fn config(&self) -> RoomConfig {
         RoomConfig {
             players: self.players,
             stack: self.stack,
             small_blind: self.small_blind,
             big_blind: self.big_blind,
+            hands: self.hands.unwrap_or(5),
         }
     }
 
@@ -175,6 +180,7 @@ struct SeatView {
     mode: RoomMode,
     players: Vec<PlayerView>,
     hand_no: u64,
+    total_hands: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     deal: Option<DealView>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -188,6 +194,10 @@ struct SeatView {
     street: &'static str,
     round_complete: bool,
     settled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    game_over: Option<GameOverView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_action: Option<ActionNoticeView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     actions: Option<ActionView>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -349,6 +359,21 @@ struct ReadyView {
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
+struct GameOverView {
+    winners: Vec<usize>,
+    chips: u32,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct ActionNoticeView {
+    seq: u64,
+    player: usize,
+    action: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    amount: Option<u32>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
 struct PlayerView {
     stack: u32,
     bet: u32,
@@ -449,8 +474,11 @@ async fn health() -> &'static str {
 
 async fn deal_audit(
     AxumState(state): AxumState<AppState>,
-    Path((room, hand_no)): Path<(Uuid, u64)>,
+    Path((code, hand_no)): Path<(String, u64)>,
 ) -> Result<Json<AuditView>, HttpError> {
+    let (room, _) = resolve_room(&state, &code)
+        .await
+        .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
     let stored = fairness::audit(&state.db, room, hand_no)
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot load deal audit"))?
@@ -528,8 +556,11 @@ async fn proof_receipt(
 
 async fn published_proof(
     AxumState(state): AxumState<AppState>,
-    Path((room, hand_no, seat, kind)): Path<(Uuid, u64, usize, String)>,
+    Path((code, hand_no, seat, kind)): Path<(String, u64, usize, String)>,
 ) -> Result<Json<PublishedProofView>, HttpError> {
+    let (room, _) = resolve_room(&state, &code)
+        .await
+        .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
     let completion = match kind.as_str() {
         "draw" => false,
         "completion" => true,
@@ -636,7 +667,7 @@ async fn create_room(
         .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
     let token = Uuid::new_v4();
     let token_hash = hash_token(token);
-    let id = Uuid::new_v4();
+    let id = new_room_id(&state).await;
     let ceremony = fairness::random_ceremony(id, 0, config.players).map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -684,7 +715,8 @@ async fn create_room(
     Ok((
         StatusCode::CREATED,
         Json(SeatResponse {
-            room: id,
+            room: room_code(id),
+            room_id: id,
             seat: 0,
             token,
         }),
@@ -693,12 +725,12 @@ async fn create_room(
 
 async fn join_room(
     AxumState(state): AxumState<AppState>,
-    Path(id): Path<Uuid>,
+    Path(code): Path<String>,
     Json(request): Json<EntropyRequest>,
 ) -> Result<Json<SeatResponse>, HttpError> {
     let share =
         decode_hex(&request.entropy).ok_or((StatusCode::BAD_REQUEST, "invalid deal entropy"))?;
-    let room = find_room(&state, id)
+    let (id, room) = resolve_room(&state, &code)
         .await
         .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
     let mut room = room.lock().await;
@@ -714,7 +746,8 @@ async fn join_room(
         })?;
 
     Ok(Json(SeatResponse {
-        room: id,
+        room: room_code(id),
+        room_id: id,
         seat,
         token,
     }))
@@ -758,8 +791,9 @@ async fn join_fair(
         result: None,
         next_seq: 0,
         actions: Vec::new(),
+        last_action: None,
     });
-    let next = if final_join {
+    let next = if final_join && !room.config.last_hand(0) {
         Some(
             fairness::random_ceremony(id, 1, room.config.players)
                 .map_err(|_| "cannot create deal ceremony")?,
@@ -854,8 +888,11 @@ async fn single_entropy(
         result: None,
         next_seq: 0,
         actions: Vec::new(),
+        last_action: None,
     };
-    let next = fairness::random_ceremony(id, 1, room.config.players)
+    let next = (!room.config.last_hand(0))
+        .then(|| fairness::random_ceremony(id, 1, room.config.players))
+        .transpose()
         .map_err(|_| "cannot create deal ceremony")?;
     let new_hand = NewHand {
         id: hand.id,
@@ -866,7 +903,15 @@ async fn single_entropy(
     };
 
     fairness::start_single(
-        &state.db, id, &tokens, share, room.rev, next_rev, &ceremony, new_hand, &next,
+        &state.db,
+        id,
+        &tokens,
+        share,
+        room.rev,
+        next_rev,
+        &ceremony,
+        new_hand,
+        next.as_ref(),
     )
     .await
     .map_err(|_| "cannot start single deal")?;
@@ -876,10 +921,14 @@ async fn single_entropy(
 }
 
 async fn room_ws(
-    Path(id): Path<Uuid>,
+    Path(code): Path<String>,
     AxumState(state): AxumState<AppState>,
     ws: WebSocketUpgrade,
 ) -> Response {
+    let Some((id, _)) = resolve_room(&state, &code).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
     ws.on_upgrade(move |socket| socket_loop(socket, state, id))
 }
 
@@ -1026,6 +1075,41 @@ async fn find_room(state: &AppState, id: Uuid) -> Option<Arc<Mutex<Room>>> {
     state.rooms.lock().await.get(&id).cloned()
 }
 
+fn room_code(id: Uuid) -> String {
+    id.simple().to_string()[..8].to_ascii_uppercase()
+}
+
+async fn resolve_room(state: &AppState, value: &str) -> Option<(Uuid, Arc<Mutex<Room>>)> {
+    let rooms = state.rooms.lock().await;
+
+    if let Ok(id) = Uuid::parse_str(value) {
+        return rooms.get(&id).cloned().map(|room| (id, room));
+    }
+
+    if value.len() != 8 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+
+    let mut found = rooms
+        .iter()
+        .filter(|(id, _)| room_code(**id).eq_ignore_ascii_case(value));
+    let (&id, room) = found.next()?;
+
+    found.next().is_none().then(|| (id, room.clone()))
+}
+
+async fn new_room_id(state: &AppState) -> Uuid {
+    loop {
+        let id = Uuid::new_v4();
+        let code = room_code(id);
+        let rooms = state.rooms.lock().await;
+
+        if rooms.keys().all(|stored| room_code(*stored) != code) {
+            return id;
+        }
+    }
+}
+
 async fn apply_action(
     state: &AppState,
     id: Uuid,
@@ -1093,6 +1177,7 @@ async fn drive_bots(state: &AppState, id: Uuid) -> Result<(), &'static str> {
             return Ok(());
         };
 
+        sleep(Duration::from_millis(650)).await;
         apply_action_once(state, id, seat, action).await?;
     }
 
@@ -1419,7 +1504,7 @@ async fn ready_room_entropy_once(
         stacks: &hand.starting_stacks,
     });
     let next = match next_hand.as_ref() {
-        Some(hand) => Some(
+        Some(hand) if !room.config.last_hand(hand.no) => Some(
             fairness::random_ceremony(
                 id,
                 hand.no.checked_add(1).ok_or("hand limit reached")?,
@@ -1428,6 +1513,7 @@ async fn ready_room_entropy_once(
             .map_err(|_| "cannot create deal ceremony")?,
         ),
         None => None,
+        Some(_) => None,
     };
     fairness::ready(
         &state.db,
@@ -1517,6 +1603,8 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
 
     view.mode = room.mode;
     view.hand_no = hand.no;
+    view.total_hands = room.config.hands;
+    view.last_action = hand.last_action.map(action_notice_view);
     view.deal = room.current_commitment.map(|commitment| DealView {
         hand_no: hand.no,
         commitment: encode_hex(commitment),
@@ -1541,6 +1629,26 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
             &hand.game,
             hand.result.as_ref().expect("settled result"),
         ));
+        if room.game_complete() {
+            let chips = hand
+                .game
+                .players
+                .iter()
+                .map(|player| player.stack)
+                .max()
+                .expect("players");
+            let winners = hand
+                .game
+                .players
+                .iter()
+                .enumerate()
+                .filter_map(|(seat, player)| (player.stack == chips).then_some(seat))
+                .collect();
+
+            view.game_over = Some(GameOverView { winners, chips });
+            return view;
+        }
+
         let count = room
             .seats
             .iter()
@@ -1819,6 +1927,8 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
             .map_err(|_| recovery_error(id, "invalid small blind"))?,
         big_blind: u32::try_from(stored.big_blind)
             .map_err(|_| recovery_error(id, "invalid big blind"))?,
+        hands: u32::try_from(stored.total_hands)
+            .map_err(|_| recovery_error(id, "invalid hand count"))?,
     };
     let rev = u64::try_from(stored.rev).map_err(|_| recovery_error(id, "invalid revision"))?;
 
@@ -1992,7 +2102,8 @@ fn restore_hand(
 
     if stacks.len() != config.players
         || dealer >= config.players
-        || stacks.iter().any(|&stack| stack < config.big_blind)
+        || stacks.get(dealer).copied().unwrap_or(0) == 0
+        || stacks.iter().filter(|&&stack| stack > 0).count() < 2
         || total > u64::from(u32::MAX)
     {
         return Err(recovery_error(id, "invalid hand inputs"));
@@ -2037,6 +2148,7 @@ fn restore_hand(
             result,
             next_seq,
             actions,
+            last_action: None,
         },
         facts,
     ))
@@ -2322,6 +2434,7 @@ fn seat_view(game: &State, seat: usize) -> SeatView {
         mode: RoomMode::Multiplayer,
         players,
         hand_no: 0,
+        total_hands: 1,
         deal: None,
         next_deal: None,
         hole: game.hole[seat].map(card_view),
@@ -2332,12 +2445,28 @@ fn seat_view(game: &State, seat: usize) -> SeatView {
         street: street_view(game.street),
         round_complete: game.round_complete,
         settled: game.settled,
+        game_over: None,
+        last_action: None,
         actions: game.legal_actions(seat).map(action_view),
         result: None,
         ready: None,
         challenge: None,
         claim: None,
         proofs: Vec::new(),
+    }
+}
+
+fn action_notice_view(notice: ActionNotice) -> ActionNoticeView {
+    ActionNoticeView {
+        seq: notice.seq,
+        player: notice.player,
+        action: match notice.action {
+            Action::Fold => "fold",
+            Action::Check => "check",
+            Action::Call => "call",
+            Action::RaiseTo(_) => "raise_to",
+        },
+        amount: notice.amount,
     }
 }
 
@@ -2394,7 +2523,6 @@ fn street_view(street: Street) -> &'static str {
 mod tests {
     use crate::db::StoredSeat;
     use crate::room::JoinError;
-    use game_core::NextHandError;
     use sqlx::Row;
 
     use super::*;
@@ -2409,6 +2537,7 @@ mod tests {
             stack: 1000,
             small_blind: 5,
             big_blind: 10,
+            hands: 5,
         }
     }
 
@@ -2484,6 +2613,7 @@ mod tests {
             result: None,
             next_seq: 0,
             actions: Vec::new(),
+            last_action: None,
         }
     }
 
@@ -2567,6 +2697,7 @@ mod tests {
             stack: 1000,
             small_blind: 5,
             big_blind: 10,
+            total_hands: 5,
             rev: 1,
             seats: vec![
                 StoredSeat {
@@ -2733,6 +2864,14 @@ mod tests {
         .unwrap();
 
         assert_eq!(request.mode(), RoomMode::Multiplayer);
+        assert_eq!(request.config().hands, 5);
+
+        let request: CreateRoomRequest = serde_json::from_str(
+            r#"{"players":2,"stack":100,"small_blind":5,"big_blind":10,"hands":10}"#,
+        )
+        .unwrap();
+
+        assert_eq!(request.config().hands, 10);
 
         for (text, mode) in [
             ("single", RoomMode::Single),
@@ -2922,6 +3061,14 @@ mod tests {
                 stack: u32::MAX,
                 ..config(6)
             },
+            RoomConfig {
+                hands: 0,
+                ..config(2)
+            },
+            RoomConfig {
+                hands: 21,
+                ..config(2)
+            },
         ];
 
         for config in invalid {
@@ -3086,6 +3233,7 @@ mod tests {
         assert_eq!(game.pot, 0);
         assert_eq!(game.players[1].stack, 105);
         assert_eq!(result.kind, "fold");
+        assert_eq!(hand.last_action.unwrap().action, Action::Fold);
         assert_eq!(
             result.awards,
             vec![AwardView {
@@ -3095,6 +3243,39 @@ mod tests {
         );
         assert!(result.revealed.iter().all(Option::is_none));
         assert_eq!(room.rev, 2);
+    }
+
+    #[test]
+    fn final_hand() {
+        let mut room = started(100);
+
+        room.config.hands = 1;
+        apply(&mut room, 0, Action::Fold).unwrap();
+
+        let hand = room.hand.as_ref().unwrap();
+        let view = room_view(TEST_ROOM, &room, hand, 0);
+
+        assert_eq!(room.stage_ready(0).err(), Some("game complete"));
+        assert!(view.ready.is_none());
+        assert!(view.challenge.is_none());
+        assert_eq!(view.total_hands, 1);
+        assert_eq!(view.game_over.unwrap().winners, vec![1]);
+    }
+
+    #[test]
+    fn last_stack_wins() {
+        let mut room = started(100);
+
+        apply(&mut room, 0, Action::Fold).unwrap();
+        let hand = room.hand.as_mut().unwrap();
+        hand.game.players[0].stack = 0;
+        hand.game.players[1].stack = 200;
+
+        let hand = room.hand.as_ref().unwrap();
+        let view = room_view(TEST_ROOM, &room, hand, 0);
+
+        assert_eq!(room.stage_ready(0).err(), Some("game complete"));
+        assert_eq!(view.game_over.unwrap().winners, vec![1]);
     }
 
     #[test]
@@ -3503,6 +3684,7 @@ mod tests {
             stack: 100,
             small_blind: 5,
             big_blind: 10,
+            hands: 5,
         };
         let stacks = [100, 100];
         let actions = [
@@ -3731,6 +3913,7 @@ mod tests {
             result: None,
             next_seq: 0,
             actions: Vec::new(),
+            last_action: None,
         };
 
         assert!(ready.all);
@@ -3756,31 +3939,38 @@ mod tests {
     }
 
     #[test]
-    fn short_table() {
+    fn short_stack_continues() {
         let mut room = started(10);
 
         apply(&mut room, 0, Action::Fold).unwrap();
-        let game = room.hand.as_ref().unwrap().game.clone();
         assign_all(&mut room, TEST_ROOM);
 
         let ready = room.stage_ready(0).unwrap();
         room.commit_ready(0, None, ready.rev);
         let ready = room.stage_ready(1).unwrap();
 
-        assert_eq!(
-            room.hand.as_ref().unwrap().game.next_hand(NEXT_SEED),
-            Err(NextHandError::CannotStart)
-        );
+        let old = room.hand.as_ref().unwrap().game.clone();
+        let game = old.next_hand(NEXT_SEED).unwrap();
+        let stacks = old.players.iter().map(|player| player.stack).collect();
+        let next = LiveHand {
+            id: Uuid::new_v4(),
+            no: 1,
+            seed: NEXT_SEED,
+            starting_stacks: stacks,
+            game,
+            result: None,
+            next_seq: 0,
+            actions: Vec::new(),
+            last_action: None,
+        };
 
-        room.commit_ready(1, None, ready.rev);
+        room.commit_ready(1, Some(next), ready.rev);
 
         let hand = room.hand.as_ref().unwrap();
-        let view = room_view(TEST_ROOM, &room, hand, 0).ready.unwrap();
 
-        assert_eq!(hand.game, game);
-        assert_eq!(hand.no, 0);
-        assert!(view.complete);
-        assert_eq!(view.count, 2);
+        assert_ne!(hand.game, old);
+        assert_eq!(hand.no, 1);
+        assert_eq!(hand.game.players[0].stack, 0);
     }
 
     #[tokio::test]
@@ -3881,7 +4071,7 @@ mod tests {
             .unwrap();
 
         let row = sqlx::query(
-            "SELECT players, stack, small_blind, big_blind, rev FROM rooms WHERE id = $1",
+            "SELECT players, stack, small_blind, big_blind, total_hands, rev FROM rooms WHERE id = $1",
         )
         .bind(id)
         .fetch_one(db.pool())
@@ -3892,6 +4082,7 @@ mod tests {
         assert_eq!(row.get::<i64, _>("stack"), 1000);
         assert_eq!(row.get::<i64, _>("small_blind"), 5);
         assert_eq!(row.get::<i64, _>("big_blind"), 10);
+        assert_eq!(row.get::<i32, _>("total_hands"), 5);
         assert_eq!(row.get::<i64, _>("rev"), 0);
 
         let mut room = Room::new(config, first_hash).unwrap();
@@ -4261,6 +4452,7 @@ mod tests {
             stack: 100,
             small_blind: 5,
             big_blind: 10,
+            hands: 5,
         };
         let ready_stacks = vec![100, 100];
         let ready_first_hash = hash_token(ready_first);

@@ -19,6 +19,7 @@ export type RoomConfig = {
   stack: number;
   small_blind: number;
   big_blind: number;
+  hands: number;
   mode?: RoomMode;
 };
 
@@ -29,7 +30,7 @@ export type RoomSeat = {
   token: string;
 };
 
-type SeatResponse = RoomSeat & { room: string };
+type SeatResponse = RoomSeat & { room: string; room_id: string };
 
 export type ProofReceipt = {
   protocol_version: number;

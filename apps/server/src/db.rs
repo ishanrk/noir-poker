@@ -106,6 +106,7 @@ pub struct StoredRoom {
     pub stack: i64,
     pub small_blind: i64,
     pub big_blind: i64,
+    pub total_hands: i32,
     pub rev: i64,
     pub seats: Vec<StoredSeat>,
     pub hand: Option<StoredHand>,
@@ -212,8 +213,8 @@ impl Db {
         let mut tx = self.pool.begin().await?;
 
         query(
-            "INSERT INTO rooms (id, mode, players, stack, small_blind, big_blind, rev) \
-             VALUES ($1, $2, $3, $4, $5, $6, 0)",
+            "INSERT INTO rooms (id, mode, players, stack, small_blind, big_blind, total_hands, rev) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 0)",
         )
         .bind(id)
         .bind(mode.text())
@@ -221,6 +222,7 @@ impl Db {
         .bind(i64::from(config.stack))
         .bind(i64::from(config.small_blind))
         .bind(i64::from(config.big_blind))
+        .bind(i32::try_from(config.hands)?)
         .execute(&mut *tx)
         .await?;
         query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, 0, $2)")
@@ -553,7 +555,7 @@ impl Db {
 
     pub async fn load_rooms(&self) -> DbResult<Vec<StoredRoom>> {
         let rows = query(
-            "SELECT id, mode, players, stack, small_blind, big_blind, rev FROM rooms ORDER BY id",
+            "SELECT id, mode, players, stack, small_blind, big_blind, total_hands, rev FROM rooms ORDER BY id",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -572,6 +574,7 @@ impl Db {
                 stack: row.try_get("stack")?,
                 small_blind: row.try_get("small_blind")?,
                 big_blind: row.try_get("big_blind")?,
+                total_hands: row.try_get("total_hands")?,
                 rev: row.try_get("rev")?,
                 seats,
                 hand,

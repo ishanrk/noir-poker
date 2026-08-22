@@ -40,6 +40,7 @@ pub(super) struct RoomConfig {
     pub(super) stack: u32,
     pub(super) small_blind: u32,
     pub(super) big_blind: u32,
+    pub(super) hands: u32,
 }
 
 impl RoomConfig {
@@ -60,6 +61,10 @@ impl RoomConfig {
             return Err("stack must cover big blind");
         }
 
+        if !(1..=20).contains(&self.hands) {
+            return Err("hands must be 1 through 20");
+        }
+
         let total = self.players as u64 * u64::from(self.stack);
 
         if total > u64::from(u32::MAX) {
@@ -67,6 +72,10 @@ impl RoomConfig {
         }
 
         Ok(())
+    }
+
+    pub(super) const fn last_hand(self, no: u64) -> bool {
+        no >= self.hands as u64 - 1
     }
 }
 
@@ -84,6 +93,20 @@ pub(super) struct Room {
 }
 
 impl Room {
+    pub(super) fn game_complete(&self) -> bool {
+        self.hand.as_ref().is_some_and(|hand| {
+            hand.game.settled
+                && (self.config.last_hand(hand.no)
+                    || hand
+                        .game
+                        .players
+                        .iter()
+                        .filter(|player| player.stack > 0)
+                        .count()
+                        < 2)
+        })
+    }
+
     #[cfg(test)]
     pub(super) fn new(config: RoomConfig, token_hash: TokenHash) -> Result<Self, &'static str> {
         Self::new_with_mode(config, RoomMode::Multiplayer, token_hash)
@@ -191,7 +214,7 @@ impl Room {
         &mut self,
         tokens: Vec<TokenHash>,
         hand: LiveHand,
-        next: Ceremony,
+        next: Option<Ceremony>,
         rev: u64,
     ) {
         let commitment = self
@@ -210,7 +233,7 @@ impl Room {
 
         self.current_commitment = Some(commitment);
         self.hand = Some(hand);
-        self.ceremony = Some(next);
+        self.ceremony = next;
         self.changed(rev);
     }
 
@@ -220,6 +243,10 @@ impl Room {
 
         if !hand.game.settled {
             return Err("hand not settled");
+        }
+
+        if self.game_complete() {
+            return Err("game complete");
         }
 
         if player.ready_hand == Some(hand.id) {
@@ -283,6 +310,11 @@ impl Room {
 
     pub(super) fn stage_next_hand(&self, seed: [u8; 32]) -> Result<Option<LiveHand>, &'static str> {
         let hand = self.hand.as_ref().ok_or("game not started")?;
+
+        if self.game_complete() {
+            return Err("game complete");
+        }
+
         let stacks = hand
             .game
             .players
@@ -301,6 +333,7 @@ impl Room {
                 result: None,
                 next_seq: 0,
                 actions: Vec::new(),
+                last_action: None,
             })),
             Err(NextHandError::CannotStart) => Ok(None),
             Err(NextHandError::NotSettled) => Err("hand not settled"),
@@ -364,6 +397,10 @@ impl Room {
 
         if !hand.game.settled {
             return Err("hand not settled");
+        }
+
+        if self.game_complete() {
+            return Err("game complete");
         }
 
         let next_no = hand.no.checked_add(1).ok_or("hand limit reached")?;
@@ -519,6 +556,15 @@ impl Room {
     ) -> Result<PendingAction, &'static str> {
         let hand = self.hand.as_ref().ok_or("game not started")?;
 
+        let amount = match action {
+            Action::Call => hand
+                .game
+                .legal_actions(seat)
+                .and_then(|actions| actions.call),
+            Action::RaiseTo(to) => Some(to),
+            Action::Fold | Action::Check => None,
+        };
+
         // action staged on state clone
         let mut game = hand.game.clone();
 
@@ -554,6 +600,12 @@ impl Room {
             rev: self.rev.checked_add(1).ok_or("revision limit reached")?,
             player: seat,
             action,
+            notice: ActionNotice {
+                seq: hand.next_seq,
+                player: seat,
+                action,
+                amount,
+            },
             game,
             result,
             actions,
@@ -569,6 +621,7 @@ impl Room {
         hand.result = action.result;
         hand.next_seq = action.next_seq;
         hand.actions = action.actions;
+        hand.last_action = Some(action.notice);
 
         if let (Some(facts), Some(commits)) = (action.facts, action.fact_commitments) {
             for commit in commits {
@@ -646,6 +699,15 @@ pub(super) struct LiveHand {
     pub(super) result: Option<HandResult>,
     pub(super) next_seq: u64,
     pub(super) actions: Vec<PlayedAction>,
+    pub(super) last_action: Option<ActionNotice>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct ActionNotice {
+    pub(super) seq: u64,
+    pub(super) player: usize,
+    pub(super) action: Action,
+    pub(super) amount: Option<u32>,
 }
 
 #[derive(Clone, Copy)]
@@ -726,6 +788,7 @@ pub(super) struct PendingAction {
     pub(super) rev: u64,
     pub(super) player: usize,
     pub(super) action: Action,
+    pub(super) notice: ActionNotice,
     pub(super) game: State,
     pub(super) result: Option<HandResult>,
     pub(super) actions: Vec<PlayedAction>,

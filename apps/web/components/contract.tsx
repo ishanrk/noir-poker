@@ -49,6 +49,7 @@ export type ContractView = {
 type PrivateProps = {
   view: ContractView;
   disabled?: boolean;
+  showProofs?: boolean;
   onCommit: () => void;
   onDraw: () => void;
   onClaim: () => void;
@@ -80,6 +81,7 @@ const localLabel = (proof: ProofMeta | undefined) => {
 export function PrivateChallenge({
   view,
   disabled = false,
+  showProofs = true,
   onCommit,
   onDraw,
   onClaim,
@@ -99,7 +101,7 @@ export function PrivateChallenge({
                 : "Available after this hand"}
           </strong>
         </div>
-        {assignment.kind === "assigned" && <b>+{assignment.reward}</b>}
+        {showProofs && assignment.kind === "assigned" && <b>+{assignment.reward}</b>}
       </header>
 
       {assignment.kind === "draw" && (
@@ -108,7 +110,7 @@ export function PrivateChallenge({
         </button>
       )}
 
-      {assignment.kind === "assigned" && (
+      {showProofs && assignment.kind === "assigned" && (
         <div className="private-proof">
           <span>Fair draw proof</span>
           <strong>{assignment.drawVerified ? "published" : proofLabel(assignment.drawState)}</strong>
@@ -123,7 +125,7 @@ export function PrivateChallenge({
         </div>
       )}
 
-      {claim && (
+      {showProofs && claim && (
         <div className="private-proof">
           <span>Completion</span>
           {claim.state === "verified" ? (
@@ -153,7 +155,7 @@ export function PrivateChallenge({
         </div>
       )}
 
-      {assignment.kind === "assigned" && (
+      {showProofs && assignment.kind === "assigned" && (
         <details>
           <summary>Public bindings</summary>
           <dl>

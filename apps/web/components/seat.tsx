@@ -10,6 +10,7 @@ type SeatProps = {
   awards?: readonly number[];
   acting?: boolean;
   dealer?: boolean;
+  out?: boolean;
   empty?: boolean;
 };
 
@@ -23,6 +24,7 @@ export function Seat({
   awards,
   acting = false,
   dealer = false,
+  out = false,
   empty = false,
 }: SeatProps) {
   const won = !!awards?.length;
@@ -38,7 +40,6 @@ export function Seat({
       )}
       <div className="seat-panel">
         <div className="seat-line" aria-hidden="true" />
-        {dealer && <span className="dealer-marker">D</span>}
         {empty ? (
           <>
             <strong>Open</strong>
@@ -47,7 +48,7 @@ export function Seat({
         ) : (
           <>
             <strong>{name}</strong>
-            <span>{stack?.toLocaleString("en-US")}</span>
+            <span>{out ? "Out" : stack?.toLocaleString("en-US")}</span>
             {!!bet && <small>bet {bet.toLocaleString("en-US")}</small>}
             {!!proofPoints && <small>{proofPoints} proof pts</small>}
             {awards?.map((amount, index) => (
@@ -59,6 +60,7 @@ export function Seat({
           </>
         )}
       </div>
+      {dealer && <span className="dealer-marker">D</span>}
     </section>
   );
 }

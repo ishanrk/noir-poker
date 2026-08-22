@@ -22,9 +22,9 @@ pub struct StoredAudit {
 
 pub async fn ensure_pending(db: &Db) -> FairResult<()> {
     let rows = query(
-        "SELECT rooms.id, rooms.players, COALESCE(MAX(hands.hand_no) + 1, 0) AS next_hand \
+        "SELECT rooms.id, rooms.players, rooms.total_hands, COALESCE(MAX(hands.hand_no) + 1, 0) AS next_hand \
          FROM rooms LEFT JOIN hands ON hands.room_id = rooms.id \
-         GROUP BY rooms.id, rooms.players ORDER BY rooms.id",
+         GROUP BY rooms.id, rooms.players, rooms.total_hands ORDER BY rooms.id",
     )
     .fetch_all(db.pool())
     .await?;
@@ -33,6 +33,11 @@ pub async fn ensure_pending(db: &Db) -> FairResult<()> {
         let room: Uuid = row.try_get("id")?;
         let players = usize::try_from(row.try_get::<i32, _>("players")?)?;
         let hand_no = u64::try_from(row.try_get::<i64, _>("next_hand")?)?;
+        let total_hands = u64::try_from(row.try_get::<i32, _>("total_hands")?)?;
+
+        if hand_no >= total_hands {
+            continue;
+        }
         let exists = query("SELECT 1 FROM hand_ceremonies WHERE room_id = $1 AND hand_no = $2")
             .bind(room)
             .bind(i64::try_from(hand_no)?)
@@ -105,8 +110,8 @@ pub async fn create_room(
     let mut tx = db.pool().begin().await?;
 
     query(
-        "INSERT INTO rooms (id, mode, players, stack, small_blind, big_blind, rev) \
-         VALUES ($1, $2, $3, $4, $5, $6, 0)",
+        "INSERT INTO rooms (id, mode, players, stack, small_blind, big_blind, total_hands, rev) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 0)",
     )
     .bind(id)
     .bind(mode.text())
@@ -114,6 +119,7 @@ pub async fn create_room(
     .bind(i64::from(config.stack))
     .bind(i64::from(config.small_blind))
     .bind(i64::from(config.big_blind))
+    .bind(i32::try_from(config.hands)?)
     .execute(&mut *tx)
     .await?;
     query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, 0, $2)")
@@ -137,8 +143,8 @@ pub async fn create_pending_room(
     let mut tx = db.pool().begin().await?;
 
     query(
-        "INSERT INTO rooms (id, mode, players, stack, small_blind, big_blind, rev) \
-         VALUES ($1, $2, $3, $4, $5, $6, 0)",
+        "INSERT INTO rooms (id, mode, players, stack, small_blind, big_blind, total_hands, rev) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 0)",
     )
     .bind(id)
     .bind(RoomMode::Single.text())
@@ -146,6 +152,7 @@ pub async fn create_pending_room(
     .bind(i64::from(config.stack))
     .bind(i64::from(config.small_blind))
     .bind(i64::from(config.big_blind))
+    .bind(i32::try_from(config.hands)?)
     .execute(&mut *tx)
     .await?;
     query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, 0, $2)")
@@ -168,7 +175,7 @@ pub async fn start_single(
     next_rev: u64,
     ceremony: &Ceremony,
     hand: NewHand<'_>,
-    next: &Ceremony,
+    next: Option<&Ceremony>,
 ) -> FairResult<()> {
     if tokens.len() + 1 != ceremony.shares.len() {
         return Err(io::Error::other("single seat count mismatch").into());
@@ -196,7 +203,9 @@ pub async fn start_single(
     }
     finalize_ceremony(&mut tx, room, &completed, hand.seed).await?;
     insert_hand(&mut tx, room, &hand).await?;
-    insert_ceremony(&mut tx, room, next).await?;
+    if let Some(next) = next {
+        insert_ceremony(&mut tx, room, next).await?;
+    }
     update_rev(&mut tx, room, rev, next_rev).await?;
     tx.commit().await?;
     Ok(())
@@ -229,12 +238,9 @@ pub async fn join_room(
         let completed = ceremony_with_share(ceremony, seat, share)?;
         finalize_ceremony(&mut tx, room, &completed, hand.seed).await?;
         insert_hand(&mut tx, room, &hand).await?;
-        insert_ceremony(
-            &mut tx,
-            room,
-            next.ok_or_else(|| io::Error::other("next deal ceremony missing"))?,
-        )
-        .await?;
+        if let Some(next) = next {
+            insert_ceremony(&mut tx, room, next).await?;
+        }
     }
 
     update_rev(&mut tx, room, rev, next_rev).await?;
@@ -276,12 +282,9 @@ pub async fn ready(
         let completed = ceremony_with_share(ceremony, seat, share)?;
         finalize_ceremony(&mut tx, room, &completed, hand.seed).await?;
         insert_hand(&mut tx, room, &hand).await?;
-        insert_ceremony(
-            &mut tx,
-            room,
-            next.ok_or_else(|| io::Error::other("next deal ceremony missing"))?,
-        )
-        .await?;
+        if let Some(next) = next {
+            insert_ceremony(&mut tx, room, next).await?;
+        }
         query("UPDATE seats SET ready_hand = NULL WHERE room_id = $1")
             .bind(room)
             .execute(&mut *tx)
@@ -349,7 +352,7 @@ pub async fn current_commitment(db: &Db, room: Uuid) -> FairResult<Option<[u8; 3
 
 pub async fn audit(db: &Db, room: Uuid, hand_no: u64) -> FairResult<Option<StoredAudit>> {
     let Some(row) = query(
-        "SELECT rooms.players, rooms.stack, rooms.small_blind, rooms.big_blind, \
+        "SELECT rooms.players, rooms.stack, rooms.small_blind, rooms.big_blind, rooms.total_hands, \
          hands.id, hands.seed, hands.dealer, hands.starting_stacks, \
          ceremony.server_secret, ceremony.commitment, ceremony.final_seed \
          FROM rooms JOIN hands ON hands.room_id = rooms.id \
@@ -414,6 +417,7 @@ pub async fn audit(db: &Db, room: Uuid, hand_no: u64) -> FairResult<Option<Store
             stack: u32::try_from(row.try_get::<i64, _>("stack")?)?,
             small_blind: u32::try_from(row.try_get::<i64, _>("small_blind")?)?,
             big_blind: u32::try_from(row.try_get::<i64, _>("big_blind")?)?,
+            hands: u32::try_from(row.try_get::<i32, _>("total_hands")?)?,
         },
         hand: StoredHand {
             id,

@@ -64,6 +64,7 @@ export type View = {
   mode: RoomMode;
   players: PlayerView[];
   hand_no: number;
+  total_hands: number;
   deal?: DealView;
   next_deal?: DealView;
   hole: [CardView, CardView];
@@ -74,6 +75,8 @@ export type View = {
   street: string;
   round_complete: boolean;
   settled: boolean;
+  game_over?: { winners: number[]; chips: number };
+  last_action?: ActionNoticeView;
   actions: ActionView | undefined;
   result?: HandResultView;
   ready?: ReadyView;
@@ -82,12 +85,21 @@ export type View = {
   proofs: PlayerProofView[];
 };
 
+export type ActionNoticeView = {
+  seq: number;
+  player: number;
+  action: "fold" | "check" | "call" | "raise_to";
+  amount?: number;
+};
+
 type TableProps = {
   view: View;
   viewer: number;
   room: string;
   error?: string;
   disabled?: boolean;
+  notice?: ActionNoticeView;
+  finish?: boolean;
   raiseTo: number;
   setRaiseTo: (to: number) => void;
   onFold: () => void;
@@ -103,6 +115,7 @@ type TableProps = {
 };
 
 const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
+const PROOF_UI = false;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const playerName = (player: number, viewer: number, mode: RoomMode) =>
   player === viewer ? "You" : mode === "single" ? `Bot ${player}` : `Player ${player + 1}`;
@@ -197,6 +210,8 @@ export function Table({
   room,
   error,
   disabled = false,
+  notice,
+  finish = false,
   raiseTo,
   setRaiseTo,
   onFold,
@@ -225,34 +240,66 @@ export function Table({
   const rangePos = range && range.max_to > range.min_to
     ? ((raiseTo - range.min_to) / (range.max_to - range.min_to)) * 100
     : 0;
+  const handWinners = result
+    ? [...new Set(result.awards.map((award) => award.player))]
+    : [];
   let status = actions ? "Your turn" : "Waiting";
   let message = actions
     ? "Choose an action"
     : view.turn === undefined
       ? "Waiting"
       : `${playerName(view.turn, viewer, view.mode)} to act`;
+  let noticeName: string | undefined;
+  let noticeAction: string | undefined;
 
   if (view.settled) [status, message] = ["Hand complete", "Pot settled"];
   if (result?.kind === "showdown") status = "Showdown";
+  if (notice) {
+    const mine = notice.player === viewer;
+    noticeName = playerName(notice.player, viewer, view.mode);
+    noticeAction = notice.action === "raise_to"
+      ? `${mine ? "raise" : "raises"} to ${notice.amount?.toLocaleString("en-US")}`
+      : notice.action === "call"
+        ? `${mine ? "call" : "calls"} ${notice.amount?.toLocaleString("en-US")}`
+        : `${notice.action}${mine ? "" : "s"}`;
+
+    [status, message] = [noticeName, noticeAction];
+  }
 
   return (
-    <section className="table-shell" aria-label="Six-max poker table">
-      {view.deal && <DealIntegrity deal={view.deal} room={room} compact />}
+    <section className={`table-shell${finish ? " table-game-over" : ""}`} aria-label="Six-max poker table">
+      <div className="table-hand-count">Hand {view.hand_no + 1} / {view.total_hands}</div>
+      {view.deal?.audit && <DealIntegrity deal={view.deal} room={room} compact />}
 
-      <PrivateChallenge
-        view={contract}
-        disabled={disabled}
-        onCommit={onCommitContract}
-        onDraw={onVerifyDraw}
-        onClaim={onGenerateProof}
-      />
+      {PROOF_UI && (
+        <PrivateChallenge
+          view={contract}
+          disabled={disabled}
+          showProofs
+          onCommit={onCommitContract}
+          onDraw={onVerifyDraw}
+          onClaim={onGenerateProof}
+        />
+      )}
 
       <div className="table-stage">
+        {noticeName && noticeAction && (
+          <div className="table-action-notice" role="status" aria-live="polite">
+            <strong>{noticeName}</strong>
+            <span>{noticeAction}</span>
+          </div>
+        )}
         <div className="table-surface">
           <div className="table-watermark" aria-hidden="true">
             NP
           </div>
           <div className={`board-area${result?.kind === "showdown" ? " board-area-showdown" : ""}`}>
+            {handWinners.length > 0 && (
+              <span className="hand-winner">
+                {handWinners.map((seat) => playerName(seat, viewer, view.mode)).join(" and ")}
+                {handWinners.length > 1 || handWinners[0] === viewer ? " win" : " wins"}
+              </span>
+            )}
             <div className="pot">
               <span>Pot</span>
               <strong>{view.pot.toLocaleString("en-US")}</strong>
@@ -273,8 +320,9 @@ export function Table({
         {POSITIONS.map((position) => {
           const player = view.players[position];
           const revealed = result?.revealed[position];
+          const out = !!player && player.folded && player.stack === 0;
           const cards =
-            position === viewer
+            position === viewer && !out
               ? hole
               : revealed
                 ? ([revealed[0].value, revealed[1].value] as const)
@@ -291,15 +339,29 @@ export function Table({
               name={playerName(position, viewer, view.mode)}
               stack={player?.stack}
               bet={player?.bet}
-              proofPoints={player?.proof_points}
               cards={player ? cards : undefined}
               awards={total === undefined ? undefined : [total]}
               acting={view.turn === position}
               dealer={view.dealer === position}
+              out={out}
               empty={!player}
             />
           );
         })}
+
+        {finish && view.game_over && (
+          <div className="game-finish" role="status" aria-live="polite">
+            <span>Game Complete</span>
+            <strong>
+              {view.game_over.winners.map((seat) => playerName(seat, viewer, view.mode)).join(" and ")}
+              {view.game_over.winners.length > 1
+                ? " tie"
+                : view.game_over.winners[0] === viewer
+                  ? " win"
+                  : " wins"}
+            </strong>
+          </div>
+        )}
       </div>
 
       <div className="action-bar" aria-label="Player actions" aria-busy={disabled}>
@@ -350,7 +412,7 @@ export function Table({
 
           {error && <p className="form-error" role="alert">{error}</p>}
 
-          {view.settled && view.ready && (
+          {view.settled && !view.game_over && view.ready && (
             <button
               className="next-hand-action key-action key-primary key-space"
               type="button"
@@ -369,12 +431,13 @@ export function Table({
         </div>
       </div>
 
-      {view.next_deal && <DealIntegrity deal={view.next_deal} room={room} />}
-      <ChallengeProofs
-        proofs={contract.proofs}
-        disabled={disabled}
-        onVerify={onVerifyProof}
-      />
+      {PROOF_UI && (
+        <ChallengeProofs
+          proofs={contract.proofs}
+          disabled={disabled}
+          onVerify={onVerifyProof}
+        />
+      )}
     </section>
   );
 }

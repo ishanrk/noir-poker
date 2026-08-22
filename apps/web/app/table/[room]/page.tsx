@@ -20,11 +20,7 @@ export default async function TablePage({ params, searchParams }: TablePageProps
           </p>
           <h1>Noir Poker</h1>
         </div>
-        <p>
-          {aztec
-            ? "private PLAY buy-in recorded on Aztec testnet"
-            : "server-authoritative hold’em with auditable deals and local zero-knowledge proving"}
-        </p>
+        {aztec && <p>private PLAY buy-in recorded on Aztec testnet</p>}
       </header>
       <MultiplayerGame key={room} room={room} />
     </main>

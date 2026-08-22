@@ -18,23 +18,37 @@ import { createRoom, joinRoom, saveSeat, type RoomMode } from "@/lib/server";
 const STACKS = [100, 250, 500, 1000, 2000, 5000] as const;
 const SMALL_BLINDS = [1, 2, 5, 10, 25, 50] as const;
 const BIG_BLINDS = [2, 5, 10, 20, 50, 100] as const;
+const HANDS = [1, 3, 5, 10, 20] as const;
 
 function Scale({
   label,
   values,
   index,
   setIndex,
+  card = false,
 }: {
   label: string;
   values: readonly number[];
   index: number;
   setIndex: (index: number) => void;
+  card?: boolean;
 }) {
   return (
-    <label className="scale-control">
+    <label className={`scale-control${card ? " hand-scale" : ""}`}>
       <span>
         <span className="scale-label">{label}</span>
-        <output>{values[index].toLocaleString("en-US")}</output>
+        {card ? (
+          <output className="hand-count">
+            <i aria-hidden="true" />
+            <i aria-hidden="true" />
+            <span>
+              <strong>{values[index]}</strong>
+              <small>hands</small>
+            </span>
+          </output>
+        ) : (
+          <output>{values[index].toLocaleString("en-US")}</output>
+        )}
       </span>
       <input
         type="range"
@@ -60,6 +74,7 @@ export function Lobby() {
   const [stackIndex, setStackIndex] = useState(3);
   const [smallIndex, setSmallIndex] = useState(2);
   const [bigIndex, setBigIndex] = useState(2);
+  const [handsIndex, setHandsIndex] = useState(2);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [shake, setShake] = useState(false);
@@ -110,11 +125,12 @@ export function Lobby() {
         stack,
         small_blind: smallBlind,
         big_blind: bigBlind,
+        hands: HANDS[handsIndex],
         mode,
       });
 
       if (mode === "aztec" && aztec) {
-        await enterAztec(aztec, result.room, result.seat, AZTEC_TABLE_STACK);
+        await enterAztec(aztec, result.room_id, result.seat, AZTEC_TABLE_STACK);
       }
 
       saveSeat(result.room, result);
@@ -140,7 +156,7 @@ export function Lobby() {
       const result = await joinRoom(room);
 
       if (mode === "aztec" && aztec) {
-        await enterAztec(aztec, result.room, result.seat, AZTEC_TABLE_STACK);
+        await enterAztec(aztec, result.room_id, result.seat, AZTEC_TABLE_STACK);
       }
 
       saveSeat(result.room, result);
@@ -243,6 +259,14 @@ export function Lobby() {
             </div>
           </fieldset>
           {mode === "single" && <p className="seat-help">One human plus {players - 1} bots.</p>}
+
+          <Scale
+            label="Total Number of Hands"
+            values={HANDS}
+            index={handsIndex}
+            setIndex={setHandsIndex}
+            card
+          />
 
           {mode !== "aztec" ? (
             <>

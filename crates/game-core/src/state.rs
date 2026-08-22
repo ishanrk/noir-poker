@@ -112,14 +112,25 @@ impl State {
         assert!(dealer < n);
         assert!(sb > 0);
         assert!(bb >= sb);
-        assert!(stacks.iter().all(|&stack| stack >= bb));
+        assert!(stacks.iter().filter(|&&stack| stack > 0).count() >= 2);
+        assert!(stacks[dealer] > 0);
         assert!(total <= u64::from(u32::MAX));
+
+        let live = stacks.iter().filter(|&&stack| stack > 0).count();
 
         // heads up dealer posts small blind
         // three plus starts blinds left of dealer
-        let sb_pos = if n == 2 { dealer } else { (dealer + 1) % n };
-        let bb_pos = (sb_pos + 1) % n;
-        let turn = if n == 2 { dealer } else { (bb_pos + 1) % n };
+        let sb_pos = if live == 2 {
+            dealer
+        } else {
+            Self::next_funded(stacks, dealer)
+        };
+        let bb_pos = Self::next_funded(stacks, sb_pos);
+        let turn = if live == 2 {
+            dealer
+        } else {
+            Self::next_funded(stacks, bb_pos)
+        };
         let deck = Deck::from_seed(seed);
         let cards = deck.cards();
         let mut players: Vec<_> = stacks
@@ -128,18 +139,20 @@ impl State {
                 stack,
                 bet: 0,
                 contributed: 0,
-                folded: false,
+                folded: stack == 0,
                 acted_bet: None,
             })
             .collect();
         let mut hole = vec![[cards[0]; 2]; n];
 
-        players[sb_pos].stack -= sb;
-        players[sb_pos].bet = sb;
-        players[sb_pos].contributed = sb;
-        players[bb_pos].stack -= bb;
-        players[bb_pos].bet = bb;
-        players[bb_pos].contributed = bb;
+        let sb_paid = players[sb_pos].stack.min(sb);
+        players[sb_pos].stack -= sb_paid;
+        players[sb_pos].bet = sb_paid;
+        players[sb_pos].contributed = sb_paid;
+        let bb_paid = players[bb_pos].stack.min(bb);
+        players[bb_pos].stack -= bb_paid;
+        players[bb_pos].bet = bb_paid;
+        players[bb_pos].contributed = bb_paid;
 
         // deal clockwise from left of dealer for two rounds
         let first = (dealer + 1) % n;
@@ -156,7 +169,7 @@ impl State {
             players,
             hole,
             board: Vec::with_capacity(5),
-            pot: sb + bb,
+            pot: sb_paid + bb_paid,
             min_raise: bb,
             small_blind: sb,
             big_blind: bb,
@@ -477,13 +490,15 @@ impl State {
             || self
                 .players
                 .iter()
-                .any(|player| player.stack < self.big_blind)
+                .filter(|player| player.stack > 0)
+                .count()
+                < 2
         {
             return Err(NextHandError::CannotStart);
         }
 
-        let dealer = (self.dealer + 1) % n;
         let stacks: Vec<_> = self.players.iter().map(|player| player.stack).collect();
+        let dealer = Self::next_funded(&stacks, self.dealer);
 
         Ok(Self::new(
             seed,
@@ -492,6 +507,13 @@ impl State {
             self.small_blind,
             self.big_blind,
         ))
+    }
+
+    fn next_funded(stacks: &[u32], player: usize) -> usize {
+        (1..=stacks.len())
+            .map(|offset| (player + offset) % stacks.len())
+            .find(|&next| stacks[next] > 0)
+            .expect("funded player")
     }
 
     fn start_round(&mut self) {
@@ -2830,9 +2852,40 @@ mod tests {
         state.settle().unwrap();
 
         assert_eq!(state.players[0].stack, 5);
-        assert_eq!(state.next_hand(NEXT_SEED), Err(NextHandError::CannotStart));
+        let next = state.next_hand(NEXT_SEED).unwrap();
+
+        assert_eq!(next.dealer, 1);
+        assert_eq!(next.players[0].stack, 0);
+        assert_eq!(next.players[0].bet, 5);
+        assert_eq!(next.players[1].stack, 10);
         assert_eq!(state.players[0].stack, 5);
         assert!(state.settled);
+    }
+
+    #[test]
+    fn busted_seat_skipped() {
+        let mut state = fold_hand(3, 0);
+
+        state.players[1].stack = 0;
+        state.players[2].stack += 100;
+
+        let next = state.next_hand(NEXT_SEED).unwrap();
+
+        assert_eq!(next.dealer, 2);
+        assert!(next.players[1].folded);
+        assert_eq!(next.players[1].stack, 0);
+        assert_ne!(next.turn, 1);
+    }
+
+    #[test]
+    fn sole_stack_stops() {
+        let mut state = fold_hand(3, 0);
+
+        state.players[0].stack = 0;
+        state.players[1].stack = 0;
+        state.players[2].stack = 300;
+
+        assert_eq!(state.next_hand(NEXT_SEED), Err(NextHandError::CannotStart));
     }
 
     #[test]
