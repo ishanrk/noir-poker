@@ -36,6 +36,11 @@ fi
     "$nargo" compile --force
 )
 
+(
+    cd "$root/circuits/deck-v1"
+    "$nargo" compile --force
+)
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -44,16 +49,29 @@ trap 'rm -rf "$tmp"' EXIT
     -o "$tmp/vk" \
     -t noir-recursive
 
+"$bb" write_vk \
+    -b "$root/circuits/deck-v1/target/deck_shuffle.json" \
+    -o "$tmp/deck-vk" \
+    -t noir-recursive
+
 mkdir -p "$root/apps/web/zk" "$root/apps/server/zk"
 cp "$tmp/vk/vk" "$root/apps/server/zk/challenge_v2.vk"
+cp "$tmp/deck-vk/vk" "$root/apps/server/zk/deck_shuffle.vk"
 
 # remove checkout path from debug metadata
 sed -E 's#"path":"[^"]*/circuits/challenge-v2/src/main.nr"#"path":"/repo/circuits/challenge-v2/src/main.nr"#g' \
     "$root/circuits/challenge-v2/target/challenge_v2.json" > "$tmp/challenge_v2.json"
 cp "$tmp/challenge_v2.json" "$root/apps/web/zk/challenge_v2.json"
 
+sed -E 's#"path":"[^"]*/circuits/deck-v1/#"path":"/repo/circuits/deck-v1/#g' \
+    "$root/circuits/deck-v1/target/deck_shuffle.json" > "$tmp/deck_shuffle.json"
+cp "$tmp/deck_shuffle.json" "$root/apps/web/zk/deck_shuffle.json"
+cp "$tmp/deck_shuffle.json" "$root/apps/server/zk/deck_shuffle.json"
+
 artifact_digest="$(sha256sum "$root/apps/web/zk/challenge_v2.json" | awk '{print $1}')"
 vk_digest="$(sha256sum "$root/apps/server/zk/challenge_v2.vk" | awk '{print $1}')"
+deck_artifact_digest="$(sha256sum "$root/apps/web/zk/deck_shuffle.json" | awk '{print $1}')"
+deck_vk_digest="$(sha256sum "$root/apps/server/zk/deck_shuffle.vk" | awk '{print $1}')"
 
 if test "$artifact_digest" != "1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d"; then
     echo "challenge artifact digest mismatch" >&2
@@ -67,3 +85,5 @@ fi
 
 echo "$artifact_digest  $root/apps/web/zk/challenge_v2.json"
 echo "$vk_digest  $root/apps/server/zk/challenge_v2.vk"
+echo "$deck_artifact_digest  $root/apps/web/zk/deck_shuffle.json"
+echo "$deck_vk_digest  $root/apps/server/zk/deck_shuffle.vk"

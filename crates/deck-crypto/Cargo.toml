@@ -1,0 +1,10 @@
+[package]
+name = "deck-crypto"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ark-ec = "0.6.0"
+ark-ff = "0.6.0"
+ark-grumpkin = "0.6.0"
+sha2 = "0.10.9"

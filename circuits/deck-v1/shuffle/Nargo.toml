@@ -1,0 +1,7 @@
+[package]
+name = "deck_shuffle"
+type = "bin"
+
+[dependencies]
+deck_shared = { path = "../shared" }
+

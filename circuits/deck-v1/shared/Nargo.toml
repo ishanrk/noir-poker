@@ -1,0 +1,6 @@
+[package]
+name = "deck_shared"
+type = "lib"
+
+[dependencies]
+
