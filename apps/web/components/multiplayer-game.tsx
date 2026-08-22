@@ -6,7 +6,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ContractView, LocalProofState, ProofState } from "@/components/contract";
 import type { DealView } from "@/components/deal-integrity";
-import { HandTranscript } from "@/components/hand-transcript";
 import { Keycap } from "@/components/keycap";
 import { PlayProofs } from "@/components/play-proofs";
 import { PrivateChallengeBar } from "@/components/private-challenge";
@@ -656,7 +655,6 @@ export function MultiplayerGame({ room }: { room: string }) {
   return (
     <div className={`game-view${error || challengeError ? " ui-shake" : ""}`}>
       {!connected && <div className="connection-bar"><span>{connecting ? "Connecting" : "Disconnected"}</span>{!connecting && <button type="button" onClick={connect}>Reconnect</button>}</div>}
-      <HandTranscript room={room} hand={view.hand_no} deal={view.deal} settled={view.settled} />
       {view.mode === "multiplayer" && (
         <PrivateChallengeBar
           view={contract}
