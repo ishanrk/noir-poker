@@ -1,10 +1,12 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useMemo, useState } from "react";
 
 import { AztecConnect } from "@/components/aztec-connect";
 import { Keycap } from "@/components/keycap";
+import { playErrorSound } from "@/components/ui-sounds";
 import {
   AZTEC_BIG_BLIND,
   AZTEC_SMALL_BLIND,
@@ -31,7 +33,7 @@ function Scale({
   return (
     <label className="scale-control">
       <span>
-        {label}
+        <span className="scale-label">{label}</span>
         <output>{values[index].toLocaleString("en-US")}</output>
       </span>
       <input
@@ -60,20 +62,37 @@ export function Lobby() {
   const [bigIndex, setBigIndex] = useState(2);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [shake, setShake] = useState(false);
+  const [moved, setMoved] = useState(false);
   const normalStack = STACKS[stackIndex];
   const normalSmallBlind = SMALL_BLINDS[smallIndex];
   const normalBigBlind = BIG_BLINDS[bigIndex];
   const stack = mode === "aztec" ? AZTEC_TABLE_STACK : normalStack;
   const smallBlind = mode === "aztec" ? AZTEC_SMALL_BLIND : normalSmallBlind;
   const bigBlind = mode === "aztec" ? AZTEC_BIG_BLIND : normalBigBlind;
-  const normalValid = useMemo(
-    () => normalBigBlind >= normalSmallBlind && normalStack >= normalBigBlind,
+  const normalError = useMemo(
+    () => normalBigBlind < normalSmallBlind
+      ? "Big blind must be at least the small blind"
+      : normalStack < normalBigBlind
+        ? "Starting stack must cover the big blind"
+        : undefined,
     [normalBigBlind, normalSmallBlind, normalStack],
   );
   const aztecValid = Boolean(
     aztec?.ready && aztec.balance >= BigInt(AZTEC_TABLE_STACK),
   );
-  const valid = mode === "aztec" ? aztecValid : normalValid;
+
+  function showError(message: string) {
+    setError(message);
+    playErrorSound();
+    setShake(true);
+  }
+
+  function select(next: RoomMode) {
+    setMoved(true);
+    setMode(next);
+    setError(undefined);
+  }
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -81,6 +100,7 @@ export function Lobby() {
     setError(undefined);
 
     try {
+      if (mode !== "aztec" && normalError) throw new Error(normalError);
       if (mode === "aztec" && !aztecValid) {
         throw new Error("Connect Aztec and claim PLAY first");
       }
@@ -100,7 +120,7 @@ export function Lobby() {
       saveSeat(result.room, result);
       router.push(`/table/${result.room}${mode === "aztec" ? "?mode=aztec" : ""}`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "server unavailable");
+      showError(cause instanceof Error ? cause.message : "server unavailable");
       setBusy(false);
     }
   }
@@ -126,13 +146,19 @@ export function Lobby() {
       saveSeat(result.room, result);
       router.push(`/table/${result.room}${mode === "aztec" ? "?mode=aztec" : ""}`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "server unavailable");
+      showError(cause instanceof Error ? cause.message : "server unavailable");
       setBusy(false);
     }
   }
 
   return (
-    <>
+    <section
+      className={`lobby-panel${shake ? " ui-shake" : ""}`}
+      data-mode-motion={moved || undefined}
+      onAnimationEnd={(event) => {
+        if (event.currentTarget === event.target) setShake(false);
+      }}
+    >
       <fieldset className="mode-switch">
         <legend>Mode</legend>
         <div>
@@ -142,10 +168,7 @@ export function Lobby() {
               name="mode"
               value="single"
               checked={mode === "single"}
-              onChange={() => {
-                setMode("single");
-                setError(undefined);
-              }}
+              onChange={() => select("single")}
             />
             <span>
               <strong>Single Player</strong>
@@ -158,10 +181,7 @@ export function Lobby() {
               name="mode"
               value="multiplayer"
               checked={mode === "multiplayer"}
-              onChange={() => {
-                setMode("multiplayer");
-                setError(undefined);
-              }}
+              onChange={() => select("multiplayer")}
             />
             <span>
               <strong>Multiplayer</strong>
@@ -174,10 +194,7 @@ export function Lobby() {
               name="mode"
               value="aztec"
               checked={mode === "aztec"}
-              onChange={() => {
-                setMode("aztec");
-                setError(undefined);
-              }}
+              onChange={() => select("aztec")}
             />
             <span>
               <strong>Aztec Poker</strong>
@@ -189,15 +206,23 @@ export function Lobby() {
 
       {mode === "aztec" && <AztecConnect compact onSession={setAztec} />}
 
-      <div className="lobby">
+      <div className={`lobby lobby-${mode}`}>
         <form className="lobby-create" onSubmit={create}>
-          <div className="form-heading">
+          <div className="form-heading form-heading-new">
             <h3>
               New Game{" "}
               <span>
                 — {mode === "single" ? "Single Player" : mode === "multiplayer" ? "Multiplayer" : "Aztec Poker"}
               </span>
             </h3>
+            <span className="lobby-computer" aria-hidden="true">
+              <Image
+                src="/images/comp-transparent.png"
+                alt=""
+                width={240}
+                height={160}
+              />
+            </span>
           </div>
 
           <fieldset className="seat-scale">
@@ -255,10 +280,7 @@ export function Lobby() {
             </dl>
           )}
 
-          {mode !== "aztec" && !normalValid && (
-            <p className="form-error">Big blind must cover the small blind and stack.</p>
-          )}
-          <button className="primary-action key-action key-primary key-create" type="submit" disabled={busy || !valid}>
+          <button className="primary-action key-action key-primary key-create" type="submit" disabled={busy}>
             <Keycap>
               {busy
                 ? "Working"
@@ -277,7 +299,7 @@ export function Lobby() {
             Room ID
             <input name="room" type="text" autoComplete="off" spellCheck="false" required />
           </label>
-          <button className="text-action key-action key-join" type="submit" disabled={busy || !valid}>
+          <button className="text-action key-action key-join" type="submit" disabled={busy}>
             <Keycap>{busy ? "Working" : mode === "aztec" ? "Join with PLAY" : "Join Game"}</Keycap>
           </button>
           <p>
@@ -288,12 +310,12 @@ export function Lobby() {
         </form>}
 
         {error && (
-          <p className="lobby-error" aria-live="polite">
+          <p className="lobby-error" role="alert">
             {error}
           </p>
         )}
       </div>
-    </>
+    </section>
   );
 }
 

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import { SiteFooter } from "@/components/site-footer";
+import { UiSounds } from "@/components/ui-sounds";
 
 import "./globals.css";
 import "./pages.css";
@@ -27,6 +28,7 @@ export default function RootLayout({ children }: LayoutProps) {
   return (
     <html lang="en">
       <body>
+        <UiSounds />
         {children}
         <SiteFooter />
       </body>

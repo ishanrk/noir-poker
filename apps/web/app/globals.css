@@ -251,8 +251,16 @@ code { font-family: "Courier New", ui-monospace, monospace; }
   font-weight: 700;
   letter-spacing: 0.03em;
 }
-.primary-action { color: white; background: var(--blue); box-shadow: 6px 6px 0 var(--lime); }
-.primary-action:hover { background: var(--blue-dark); transform: translate(2px, 2px); box-shadow: 4px 4px 0 var(--lime); }
+.primary-action {
+  border: 2px solid var(--blue);
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+  color: var(--ink);
+  background: var(--lime);
+  box-shadow: none;
+  filter: drop-shadow(5px 5px 0 #2449c7);
+}
+.primary-action:hover { color: var(--ink); background: #ddff78; box-shadow: none; }
+.primary-action:active { transform: translate(4px, 4px); filter: drop-shadow(1px 1px 0 #2449c7); }
 .text-action { min-height: auto; padding: 0 0 3px; border-width: 0 0 2px; }
 .lobby-join > p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .form-error, .lobby-error, .proof-error { margin: 0; color: var(--danger); font-size: 12px; line-height: 1.5; }
@@ -284,7 +292,6 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .deal-stack i:nth-child(2) { left: 7px; top: -4px; background: var(--blue); }
 .deal-stack i:nth-child(3) { left: 14px; top: -8px; background: var(--lime); }
 .deal-stack span { position: absolute; z-index: 2; top: 6px; left: 26px; display: grid; width: 21px; height: 21px; place-items: center; color: var(--blue-dark); font-size: 12px; font-weight: 800; }
-.deal-stack[data-state="sealed"] i:nth-child(3) { animation: seal-breathe 2.6s ease-in-out infinite; }
 .deal-stack[data-state="revealed"] i:nth-child(3) { background: var(--paper); }
 .deal-copy { min-width: 0; display: grid; gap: 4px; }
 .deal-copy strong { font-family: Georgia, "Times New Roman", serif; font-size: 18px; font-weight: 500; }
@@ -321,8 +328,7 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .seat-cards .card { width: 35px; font-size: 13px; }
 .seat-panel { position: relative; display: grid; min-height: 64px; align-content: center; justify-items: center; gap: 3px; padding: 11px 9px 9px; border: 1px solid var(--ink); background: var(--paper); text-align: center; }
 .seat-line { position: absolute; top: -1px; right: -1px; left: -1px; height: 3px; background: transparent; overflow: hidden; }
-.seat-acting .seat-line { background: var(--lime); }
-.seat-acting .seat-line::after { display: block; width: 38%; height: 100%; background: var(--blue); content: ""; animation: acting-line 1.35s linear infinite; }
+.seat-acting .seat-line { background: var(--blue); }
 .seat-winner .seat-panel { box-shadow: 6px 6px 0 var(--lime); }
 .seat-panel strong { overflow: hidden; max-width: 100%; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .seat-panel > span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -386,7 +392,6 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .contract-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 42px; margin-top: 32px; }
 .sealed-bounty { position: relative; height: 292px; perspective: 900px; }
 .sealed-bounty-face { position: relative; z-index: 2; display: grid; height: 268px; align-content: space-between; padding: 22px; border: 1px solid var(--ink); color: white; background: var(--blue); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 28%), 7px 7px 0 var(--lime); overflow: hidden; }
-.sealed-bounty-face::after { position: absolute; top: -30%; left: -65%; width: 45%; height: 160%; background: rgb(255 255 255 / 18%); content: ""; transform: rotate(14deg); animation: proof-scan 3.8s ease-in-out infinite; }
 .sealed-bounty-face span, .sealed-bounty-face small { position: relative; z-index: 2; font-family: "Courier New", monospace; font-size: 9px; letter-spacing: 0.09em; text-transform: uppercase; }
 .sealed-bounty-face strong { position: relative; z-index: 2; justify-self: center; font-family: Georgia, "Times New Roman", serif; font-size: 90px; font-weight: 500; }
 .sealed-bounty[data-verified="true"] .sealed-bounty-face { color: var(--ink); background: var(--lime); }
@@ -408,7 +413,7 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .proof-rail li::before { position: absolute; top: -1px; right: 0; left: 0; height: 2px; background: transparent; content: ""; }
 .proof-rail li i { position: absolute; top: -4px; left: 0; width: 7px; height: 7px; background: var(--line-strong); }
 .proof-rail li[data-active="true"]::before, .proof-rail li[data-complete="true"]::before { background: var(--blue); }
-.proof-rail li[data-active="true"] i { background: var(--lime); animation: proof-dot 900ms ease-in-out infinite alternate; }
+.proof-rail li[data-active="true"] i { background: var(--lime); }
 .proof-rail li[data-complete="true"] i { background: var(--blue); }
 .proof-award { display: grid; grid-template-columns: 1fr auto; gap: 8px 20px; align-items: baseline; }
 .proof-award > strong { color: var(--success); font-family: Georgia, "Times New Roman", serif; font-size: 26px; font-weight: 500; }
@@ -427,7 +432,7 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .receipt-seal { position: relative; display: grid; width: 220px; height: 292px; align-content: space-between; justify-self: end; padding: 20px; border: 2px solid var(--ink); color: white; background: var(--blue); box-shadow: 10px 10px 0 var(--lime); overflow: hidden; }
 .receipt-seal span, .receipt-seal small { z-index: 2; font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
 .receipt-seal strong { z-index: 2; justify-self: center; font-family: Georgia, "Times New Roman", serif; font-size: 86px; font-weight: 500; }
-.receipt-seal i { position: absolute; top: -20%; left: -70%; width: 45%; height: 150%; background: rgb(255 255 255 / 18%); transform: rotate(14deg); animation: proof-scan 3.2s ease-in-out infinite; }
+.receipt-seal i { display: none; }
 .receipt-seal[data-verified="true"] { color: var(--ink); background: var(--lime); }
 .verification-timeline, .audit-steps { display: grid; grid-template-columns: repeat(4, 1fr); width: min(100% - 40px, 1040px); margin: 34px auto 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
 .verification-timeline > div, .audit-steps > div { display: grid; min-height: 112px; align-content: center; gap: 6px; padding: 18px; }
@@ -559,10 +564,6 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 @keyframes hero-card-two { 0%, 100% { transform: rotate(5deg); } 50% { transform: rotate(8deg) translateX(5px); } }
 @keyframes hero-card-three { 0%, 100% { transform: rotate(16deg); } 50% { transform: rotate(20deg) translateX(8px); } }
 @keyframes card-deal { from { opacity: 0; transform: translateY(-38px) rotate(-5deg) scale(0.88); } to { opacity: 1; transform: none; } }
-@keyframes acting-line { from { transform: translateX(-100%); } to { transform: translateX(360%); } }
-@keyframes seal-breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-@keyframes proof-scan { 0%, 20% { transform: translateX(0) rotate(14deg); } 72%, 100% { transform: translateX(520%) rotate(14deg); } }
-@keyframes proof-dot { from { transform: scale(0.8); } to { transform: scale(1.5); } }
 @keyframes audit-riffle { from { opacity: 0; transform: translateX(-70px) rotate(-20deg); } to { opacity: 1; transform: rotate(calc((var(--card-index) - 4) * 1.8deg)); } }
 @keyframes demo-shuffle { 0% { transform: translateX(0) rotate(0); } 50% { transform: translateX(calc((var(--i, 1)) * 7px)) rotate(8deg); } 100% { transform: translateX(0) rotate(0); } }
 

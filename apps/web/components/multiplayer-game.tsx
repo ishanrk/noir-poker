@@ -7,6 +7,7 @@ import type { ContractView, LocalProofState, ProofState } from "@/components/con
 import { DealIntegrity, type DealView } from "@/components/deal-integrity";
 import { Keycap } from "@/components/keycap";
 import { Table, type ChallengeView, type ClaimView, type View } from "@/components/table";
+import { playErrorSound } from "@/components/ui-sounds";
 import {
   CHALLENGE_VERSION,
   CHALLENGE_POINTS,
@@ -163,6 +164,11 @@ export function MultiplayerGame({ room }: { room: string }) {
   const [drawState, setDrawState] = useState<ProofState>("idle");
   const [claimState, setClaimState] = useState<ProofState>("idle");
   const [localProofs, setLocalProofs] = useState<Record<string, LocalProofState>>({});
+
+  useEffect(() => {
+    if (!error && !challengeError) return;
+    playErrorSound();
+  }, [error, challengeError]);
 
   const connect = useCallback(() => {
     const current = auth.current;
@@ -461,7 +467,7 @@ export function MultiplayerGame({ room }: { room: string }) {
   if (seat === null) return <div className="room-status"><strong>No seat for this room</strong><Link href="/">Back to lobby</Link></div>;
   if (waiting) {
     return (
-      <div className="waiting-room">
+      <div className={`waiting-room${error ? " ui-shake" : ""}`}>
         <p className="protocol-label">Room {room}</p>
         <h2>Waiting for the table.</h2>
         <strong>{waiting.joined} / {waiting.players} seats</strong>
@@ -472,7 +478,7 @@ export function MultiplayerGame({ room }: { room: string }) {
       </div>
     );
   }
-  if (!view) return <div className="room-status"><strong>{error ?? "Connecting to table"}</strong>{!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><Keycap>Reconnect</Keycap></button>}</div>;
+  if (!view) return <div className={`room-status${error ? " ui-shake" : ""}`}><strong>{error ?? "Connecting to table"}</strong>{!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><Keycap>Reconnect</Keycap></button>}</div>;
 
   const contract: ContractView = {
     assignment: !view.challenge
@@ -527,7 +533,7 @@ export function MultiplayerGame({ room }: { room: string }) {
   };
 
   return (
-    <>
+    <div className={`game-view${error || challengeError ? " ui-shake" : ""}`}>
       {!connected && <div className="connection-bar"><span>{connecting ? "Connecting" : "Disconnected"}</span>{!connecting && <button type="button" onClick={connect}>Reconnect</button>}</div>}
       <Table
         view={view}
@@ -548,6 +554,6 @@ export function MultiplayerGame({ room }: { room: string }) {
         onGenerateProof={() => void claimChallenge()}
         onVerifyProof={(owner, hand, kind) => void verifyProof(owner, hand, kind)}
       />
-    </>
+    </div>
   );
 }

@@ -3,30 +3,6 @@ import Link from "next/link";
 import { Lobby } from "@/components/lobby";
 import { SiteHeader } from "@/components/site-header";
 
-const PROOFS = [
-  {
-    number: "01",
-    title: "Replay the deal",
-    copy: "A completed hand exposes the commitment, entropy shares, seed and 52-card permutation.",
-    href: "/protocol#deal",
-    link: "Deal protocol",
-  },
-  {
-    number: "02",
-    title: "Keep the objective private",
-    copy: "The player browser holds the challenge secret and private witness.",
-    href: "/rules",
-    link: "Challenge rules",
-  },
-  {
-    number: "03",
-    title: "Verify accepted proofs",
-    copy: "Anyone can check the exact proof bytes published by the server.",
-    href: "/protocol",
-    link: "Verification guide",
-  },
-] as const;
-
 export default function Home() {
   return (
     <main className="site-shell home-page home-story">
@@ -52,9 +28,12 @@ export default function Home() {
             </span>
             <span className="hero-title-poker">Poker</span>
           </h1>
-          <p className="hero-tagline">Play poker with a deck anyone can replay after the hand.</p>
+          <p className="hero-tagline">Poker where the server cannot cheat even if it wanted to.</p>
           <p className="hero-tech">
-            Rust settles the game. Browser randomness fixes the deck. Noir proves private challenges.
+            Written in <span className="tech-rust">Rust</span> and{" "}
+            <span className="tech-typescript">TypeScript</span> with{" "}
+            <a className="tech-noir" href="https://github.com/noir-lang/noir" target="_blank" rel="noreferrer">Noir</a> and{" "}
+            <a className="tech-barretenberg" href="https://github.com/AztecProtocol/aztec-packages/tree/next/barretenberg" target="_blank" rel="noreferrer">Barretenberg</a> for ZK protocols
           </p>
           <div className="home-actions">
             <a href="#play">Create a game</a>
@@ -67,17 +46,6 @@ export default function Home() {
           <div className="hero-card hero-card-2">?</div>
           <div className="hero-card hero-card-1">?</div>
         </div>
-      </section>
-
-      <section className="home-proof-strip" aria-label="Project verification paths">
-        {PROOFS.map((item) => (
-          <article key={item.number}>
-            <span>{item.number}</span>
-            <h2>{item.title}</h2>
-            <p>{item.copy}</p>
-            <Link href={item.href}>{item.link}</Link>
-          </article>
-        ))}
       </section>
 
       <section className="lobby-wrap" id="play" aria-labelledby="lobby-title">
