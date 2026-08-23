@@ -22,6 +22,7 @@
     "aztec:test": "node --experimental-strip-types lib/aztec/ids.test.ts",
     "proof:smoke": "node --experimental-strip-types scripts/proof-smoke.mts",
     "browser:smoke": "node scripts/browser-smoke.mjs",
+    "ui:stress": "node scripts/ui-stress.mjs",
     "deal:verify": "node --experimental-strip-types scripts/verify-deal.mjs",
     "proof:verify": "node scripts/verify-receipt.mjs"
   },

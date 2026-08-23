@@ -16,9 +16,19 @@ type Point = Curve["Point"]["prototype"];
 type Scalar = InstanceType<Curve["Scalar"]>;
 
 export function randomScalar() {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes.subarray(1));
-  return `0x${hex(bytes)}`;
+  let value: string;
+  do {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes.subarray(1));
+    value = `0x${hex(bytes)}`;
+  } while (!validScalar(value));
+  return value;
+}
+
+export function validScalar(value: string) {
+  if (!/^0x[0-9a-f]{64}$/.test(value)) return false;
+  const raw = BigInt(value);
+  return raw > 0n && raw < SCALAR_MODULUS;
 }
 
 export async function publicKey(secret: string): Promise<PointValue> {

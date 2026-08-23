@@ -22,7 +22,7 @@
 
 .story-page code,
 .chips-story code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
 }
 
 .story-hero,
@@ -166,9 +166,12 @@
 
 .case-grid,
 .statement-grid-story,
-.protocol-demo-grid,
 .challenge-state-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.protocol-demo-grid {
+  grid-template-columns: 1fr;
 }
 
 .case-card,
@@ -1105,8 +1108,7 @@
   .story-hero h1 { font-size: clamp(42px, 13vw, 62px); }
   .challenge-catalog,
   .poker-flow,
-  .proof-puzzle,
-  .story-link-grid { grid-template-columns: 1fr; }
+  .proof-puzzle { grid-template-columns: 1fr; }
   .poker-flow li,
   .poker-flow li:nth-child(even) { border-left: 0; }
   .case-card,
@@ -1301,6 +1303,11 @@
   --bp-tick-y: 72%;
 }
 
+.proof-page,
+.proof-page :where(*) {
+  font-family: "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif !important;
+}
+
 .table-page,
 .table-page :where(.table-page-header, .waiting-room, .room-status, .private-challenge, .challenge-proofs, .table-shell, .action-bar),
 .table-page :where(.table-page-header, .waiting-room, .room-status, .private-challenge, .challenge-proofs, .table-shell, .action-bar) :where(h1, h2, h3, p, strong, span, small, label, button, input, output, summary, dt, dd) {
@@ -1336,6 +1343,11 @@
       linear-gradient(90deg, transparent calc(var(--bp-line-x) - 0.5px), rgb(31 11 209 / 4%) var(--bp-line-x), transparent calc(var(--bp-line-x) + 0.5px)),
       linear-gradient(0deg, transparent calc(var(--bp-line-y) - 0.5px), rgb(31 11 209 / 4%) var(--bp-line-y), transparent calc(var(--bp-line-y) + 0.5px));
   }
+}
+
+.story-page,
+.story-page :where(h1, h2, h3, p, strong, span, small, button, output, dt, dd, a, li) {
+  font-family: "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif !important;
 }
 
 /* dark page frame */

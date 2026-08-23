@@ -659,7 +659,7 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .deck-proof-seal[data-state="verified"] { background: var(--blue); }
 .deck-proof-seal[data-state="verified"] span { color: var(--lime); }
 .deck-proof-page { --retro-font: "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; font-family: var(--retro-font); }
-.deck-proof-page :where(h1, h2, h3, p, strong, span, small, button, output, dt, dd, a) { font-family: var(--retro-font); }
+.deck-proof-page :where(h1, h2, h3, p, strong, span, small, button, output, dt, dd, a) { font-family: var(--retro-font) !important; }
 .deck-proof-page .audit-hero h1 { font-family: var(--retro-font); font-size: clamp(42px, 6vw, 68px); font-weight: 800; letter-spacing: 0; }
 .deck-unavailable { width: min(100% - 40px, 1040px); margin: 0 auto; padding: 28px 0 30px 26px; border-bottom: 1px solid var(--blue); border-left: 5px solid var(--blue); }
 .deck-unavailable strong { color: var(--blue); font-size: 19px; }

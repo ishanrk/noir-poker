@@ -4,7 +4,6 @@ import {
   type ChallengePublicInputs,
 } from "./challenge-proof.ts";
 import {
-  CHALLENGE_POINTS,
   CHALLENGE_VERSION,
   catalogRoot,
   decodeHex,
@@ -53,7 +52,6 @@ export function validateReceipt(receipt: ProofReceipt) {
     receipt.bb_version !== BB_VERSION ||
     receipt.artifact_sha256 !== ARTIFACT_SHA256 ||
     receipt.vk_sha256 !== VK_SHA256 ||
-    receipt.points !== CHALLENGE_POINTS ||
     receipt.seat < 0 ||
     receipt.seat > 5 ||
     !Number.isInteger(receipt.seat) ||

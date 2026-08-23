@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useMemo, useRef, useState } from "react";
 
 import { AztecConnect } from "@/components/aztec-connect";
 import { Keycap } from "@/components/keycap";
@@ -75,7 +75,9 @@ export function Lobby() {
   const [smallIndex, setSmallIndex] = useState(2);
   const [bigIndex, setBigIndex] = useState(2);
   const [handsIndex, setHandsIndex] = useState(2);
+  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [error, setError] = useState<string>();
   const [shake, setShake] = useState(false);
   const [moved, setMoved] = useState(false);
@@ -111,6 +113,8 @@ export function Lobby() {
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError(undefined);
 
@@ -127,6 +131,7 @@ export function Lobby() {
         big_blind: bigBlind,
         hands: HANDS[handsIndex],
         mode,
+        name: mode === "multiplayer" ? name.trim() || undefined : undefined,
       });
 
       if (mode === "aztec" && aztec) {
@@ -137,12 +142,15 @@ export function Lobby() {
       router.push(`/table/${result.room}${mode === "aztec" ? "?mode=aztec" : ""}`);
     } catch (cause) {
       showError(cause instanceof Error ? cause.message : "server unavailable");
+      busyRef.current = false;
       setBusy(false);
     }
   }
 
   async function join(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError(undefined);
 
@@ -153,7 +161,10 @@ export function Lobby() {
         throw new Error("Connect Aztec and claim PLAY first");
       }
 
-      const result = await joinRoom(room);
+      const result = await joinRoom(
+        room,
+        mode === "multiplayer" ? name.trim() || undefined : undefined,
+      );
 
       if (mode === "aztec" && aztec) {
         await enterAztec(aztec, result.room_id, result.seat, AZTEC_TABLE_STACK);
@@ -163,6 +174,7 @@ export function Lobby() {
       router.push(`/table/${result.room}${mode === "aztec" ? "?mode=aztec" : ""}`);
     } catch (cause) {
       showError(cause instanceof Error ? cause.message : "server unavailable");
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -240,6 +252,22 @@ export function Lobby() {
               />
             </span>
           </div>
+
+          {mode === "multiplayer" && (
+            <label className="line-input lobby-name">
+              Player Name
+              <input
+                name="name"
+                type="text"
+                value={name}
+                maxLength={20}
+                autoComplete="nickname"
+                spellCheck="false"
+                placeholder="Player 1"
+                onChange={(event) => setName(event.target.value)}
+              />
+            </label>
+          )}
 
           <fieldset className="seat-scale">
             <legend>{mode === "single" ? "Total Seats" : "Seats"}</legend>
@@ -319,6 +347,21 @@ export function Lobby() {
           <div className="form-heading">
             <h3>Join Game</h3>
           </div>
+          {mode === "multiplayer" && (
+            <label className="line-input">
+              Player Name
+              <input
+                name="player_name"
+                type="text"
+                value={name}
+                maxLength={20}
+                autoComplete="nickname"
+                spellCheck="false"
+                placeholder="Player 2"
+                onChange={(event) => setName(event.target.value)}
+              />
+            </label>
+          )}
           <label className="line-input">
             Room ID
             <input name="room" type="text" autoComplete="off" spellCheck="false" required />

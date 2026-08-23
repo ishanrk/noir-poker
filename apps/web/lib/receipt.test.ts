@@ -36,7 +36,6 @@ const receipt = {
   facts_hash: encodeHex(facts),
   nullifier: encodeHex(nullifier),
   catalog_root: encodeHex(root),
-  points: 20,
   draw_proof: "AA==",
   draw_public_inputs: publicInputs(0, new Uint8Array(32), new Uint8Array(32)),
   completion_proof: "AA==",
@@ -50,7 +49,6 @@ assert.doesNotThrow(() =>
 assert.throws(() => validateReceipt({ ...receipt, draw_proof: undefined }));
 assert.throws(() => validateReceipt({ ...receipt, room: "10112233-4455-6677-8899-aabbccddeeff" }));
 assert.throws(() => validateReceipt({ ...receipt, hand_no: handNo + 1 }));
-assert.throws(() => validateReceipt({ ...receipt, points: 40 }));
 assert.throws(() => validateReceipt({ ...receipt, completion_public_inputs: receipt.draw_public_inputs }));
 
 const published = {

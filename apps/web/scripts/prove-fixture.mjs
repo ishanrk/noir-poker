@@ -76,7 +76,6 @@ try {
       facts_hash: fixture.facts_hash,
       nullifier: fixture.nullifier,
       catalog_root: fixture.catalog_root,
-      points: 20,
       draw_proof: drawEncoded.proof,
       draw_public_inputs: drawEncoded.public_inputs,
       completion_proof: completionEncoded.proof,

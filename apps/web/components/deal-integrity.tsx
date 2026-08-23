@@ -34,7 +34,7 @@ export function DealIntegrity({
       </div>
       <div className="deal-actions">
         {deal.audit ? (
-          <Link href={`/audit/${room}/${deal.hand_no}`}>Verify Deck →</Link>
+          <Link href={`/audit/${room}/${deal.hand_no}`} target="_blank">Verify Deck →</Link>
         ) : (
           <span>Available after hand</span>
         )}

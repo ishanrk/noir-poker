@@ -3,19 +3,29 @@ import Link from "next/link";
 import styles from "@/components/crypto.module.css";
 import type { ContractView } from "@/components/contract";
 
-export function PlayProofs({ room, view }: { room: string; view: ContractView }) {
+export function PlayProofs({ room, view }: {
+  room: string;
+  view: ContractView;
+}) {
   if (!view.proofs.length) return null;
 
   return (
     <section className={styles.strip} aria-label="Challenge proofs">
-      <p className={styles.label}>CHALLENGE PROOFS</p>
+      <header className={styles.stripHead}>
+        <div>
+          <p className={styles.label}>CHALLENGE PROOFS</p>
+          <h2>PUBLIC PROOF HISTORY</h2>
+        </div>
+        <p className={styles.proofPrivacy}>PRIVATE OBJECTIVES STAY HIDDEN</p>
+      </header>
       <div className={styles.proofRows}>
         {view.proofs.map((proof) => (
           <div className={styles.proofPlayer} key={proof.seat}>
-            <strong>
-              {proof.name.toUpperCase()}
-              <Link href={`/room/${room}/proofs/player/${proof.seat}`} target="_blank">HISTORY</Link>
-            </strong>
+            <div className={styles.proofOwner}>
+              <strong>{proof.name.toUpperCase()}</strong>
+              <span>{proof.completed} COMPLETED</span>
+              <Link href={`/room/${room}/proofs/player/${proof.seat}`} target="_blank">FULL HISTORY</Link>
+            </div>
             <ProofItem room={room} seat={proof.seat} kind="draw" proof={proof.draw} />
             <ProofItem room={room} seat={proof.seat} kind="completion" proof={proof.completion} />
           </div>
@@ -32,17 +42,39 @@ function ProofItem({ room, seat, kind, proof }: {
   room: string;
   seat: number;
   kind: "draw" | "completion";
-  proof?: { handNo: number; published: boolean };
+  proof?: ContractView["proofs"][number]["draw"];
 }) {
-  const label = kind === "draw" ? "DRAW PROOF" : "COMPLETION PROOF";
+  const label = kind === "draw" ? "FAIR DRAW" : "COMPLETION";
+  const local = proof?.local === "verified"
+    ? "VERIFIED LOCALLY"
+    : proof?.local === "failed"
+      ? "INVALID LOCALLY"
+      : proof?.local === "verifying"
+        ? "VERIFYING"
+        : undefined;
 
   return (
     <div className={styles.proofItem}>
-      <span>{label}</span>
+      <div>
+        <span>{label}</span>
+        {proof && <small>HAND {proof.handNo + 1}</small>}
+      </div>
       {proof?.published ? (
-        <Link href={`/room/${room}/proofs/${proof.handNo}/${seat}/${kind}`} target="_blank">PUBLISHED&nbsp;&nbsp;VIEW</Link>
+        <div className={styles.proofStatus}>
+          <strong>{local ?? "PUBLISHED"}</strong>
+          {local !== "VERIFYING" && (
+            <Link
+              href={`/room/${room}/proofs/${proof.handNo}/${seat}/${kind}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              VERIFY
+            </Link>
+          )}
+          {proof.receipt && <Link href={proof.receipt} target="_blank" rel="noreferrer">PUBLIC RECEIPT</Link>}
+        </div>
       ) : (
-        <span>NOT PUBLISHED</span>
+        <strong>NOT PUBLISHED</strong>
       )}
     </div>
   );

@@ -16,12 +16,12 @@ const status = (state: State) =>
     failed: "invalid",
   })[state];
 
-function ReceiptSeal({ verified, points = 20 }: { verified: boolean; points?: number }) {
+function ReceiptSeal({ verified }: { verified: boolean }) {
   return (
     <div className="receipt-seal" data-verified={verified}>
       <span>Hidden challenge</span>
       <strong>{verified ? "VALID" : "?"}</strong>
-      <small>{verified ? `+${points} proof points` : "still private"}</small>
+      <small>{verified ? "challenge completed" : "still private"}</small>
       <i aria-hidden="true" />
     </div>
   );
@@ -47,7 +47,7 @@ function VerificationTimeline({
       </div>
       <div data-state={draw}>
         <span>02</span>
-        <p>Private selection proof</p>
+        <p>Optional fair draw proof</p>
         <strong>{status(draw)}</strong>
       </div>
       <div data-state={completion}>
@@ -57,8 +57,8 @@ function VerificationTimeline({
       </div>
       <div data-state={verified ? "verified" : "waiting"}>
         <span>04</span>
-        <p>One-time award</p>
-        <strong>{verified ? "accepted once" : "waiting"}</strong>
+        <p>Challenge win</p>
+        <strong>{verified ? "counted for leaderboard" : "waiting"}</strong>
       </div>
     </section>
   );
@@ -130,13 +130,21 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
   useEffect(() => {
     mounted.current = true;
     let live = true;
+    receiptRef.current = undefined;
+    queueMicrotask(() => {
+      if (!live) return;
+      setReceipt(undefined);
+      setDraw("waiting");
+      setCompletion("waiting");
+      setError(undefined);
+    });
 
     void loadProofReceipt(nullifier)
       .then((value) => {
         if (!live) return;
         receiptRef.current = value;
         setReceipt(value);
-        return verify(value);
+        setDraw(value.draw_proof && value.draw_public_inputs ? "waiting" : "skipped");
       })
       .catch((cause) => {
         if (!live) return;
@@ -148,7 +156,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
       live = false;
       mounted.current = false;
     };
-  }, [nullifier, verify]);
+  }, [nullifier]);
 
   async function copyLink() {
     await navigator.clipboard.writeText(window.location.href);
@@ -176,18 +184,22 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
       <header className="receipt-hero">
         <div>
           <p className="eyebrow">Public challenge verifier</p>
-          <h1>{verified ? "The challenge was completed." : "Verifying a private challenge."}</h1>
+          <h1>{verified ? "The challenge was completed." : receipt ? "Proof ready to verify." : "Loading proof."}</h1>
           <p>
             This browser checks every published UltraHonk proof. The challenge and private fact
             vector never appear in the receipt.
           </p>
         </div>
-        <ReceiptSeal verified={verified} points={receipt?.points} />
+        <ReceiptSeal verified={verified} />
       </header>
 
       <VerificationTimeline receipt={Boolean(receipt)} draw={draw} completion={completion} />
 
       <p className="story-note">A completion proof does not require a previous draw proof</p>
+      <p className="story-note">
+        The completion circuit checks server derived facts against their public commitment It does
+        not replay the poker action log
+      </p>
 
       {error && <p className="proof-error">{error}</p>}
 
@@ -206,7 +218,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
               <article>
                 <span>Public</span>
                 <strong>
-                  Room {receipt.room.slice(0, 8)}, hand {receipt.hand_no}, seat {receipt.seat + 1}
+                  Room {receipt.room.slice(0, 8)} hand {receipt.hand_no + 1} seat {receipt.seat + 1}
                 </strong>
               </article>
               <article>
@@ -231,7 +243,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
           {copied ? "Link copied" : "Share verifier"}
         </button>
         <button type="button" onClick={() => void verify()} disabled={!receipt || busy}>
-          Run again
+          {verified || error ? "Run again" : "Verify proof"}
         </button>
         <details>
           <summary>Developer verification</summary>
@@ -240,6 +252,9 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
             Export JSON
           </button>
         </details>
+        <a href="/protocol#challenge-proofs" target="_blank" rel="noreferrer">
+          Protocol and references
+        </a>
       </section>
     </main>
   );

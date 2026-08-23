@@ -20,10 +20,12 @@ export type HandResultView = {
   revealed: Array<[CardView, CardView] | null | undefined>;
 };
 type PlayerView = {
+  name: string;
   stack: number;
   bet: number;
   folded: boolean;
-  proof_points?: number;
+  challenge_wins: number;
+  challenge_bonus: number;
 };
 type ActionView = {
   fold: boolean;
@@ -43,6 +45,7 @@ export type ChallengeView = {
 };
 export type ClaimView = {
   hand_no: number;
+  draw_verified: boolean;
   hand_tag: string;
   commitment: string;
   nonce: string;
@@ -51,7 +54,6 @@ export type ClaimView = {
   facts_hash: string;
   facts: [number, number, number, number, number, number];
   status: "claimable" | "claimed";
-  points?: number;
   nullifier?: string;
 };
 export type ProofMetaView = { hand_no: number; published: boolean; nullifier?: string };
@@ -81,6 +83,7 @@ export type View = {
   actions: ActionView | undefined;
   result?: HandResultView;
   ready?: ReadyView;
+  finish?: ReadyView;
   challenge?: ChallengeView;
   claim?: ClaimView;
   proofs: PlayerProofView[];
@@ -109,6 +112,7 @@ type TableProps = {
   onCall: () => void;
   onRaise: () => void;
   onReady: () => void;
+  onFinish: () => void;
   contract: ContractView;
   onCommitContract: () => void;
   onVerifyDraw: () => void;
@@ -119,19 +123,29 @@ type TableProps = {
 const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
 const PROOF_UI = false;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-const playerName = (player: number, viewer: number, mode: RoomMode) =>
-  player === viewer ? "You" : mode === "single" ? `Bot ${player}` : `Player ${player + 1}`;
+const playerName = (
+  player: number,
+  viewer: number,
+  mode: RoomMode,
+  players?: PlayerView[],
+) => player === viewer
+  ? "You"
+  : mode === "single"
+    ? `Bot ${player}`
+    : players?.[player]?.name ?? `Player ${player + 1}`;
 
 function Showdown({
   result,
   board,
   viewer,
   mode,
+  players,
 }: {
   result: HandResultView;
   board: CardView[];
   viewer: number;
   mode: RoomMode;
+  players: PlayerView[];
 }) {
   const boardCards = board.map((card) => card.value);
   const hands = result.revealed.map((cards) =>
@@ -159,11 +173,11 @@ function Showdown({
               style={{ "--show-delay": `${index * 120}ms` } as CSSProperties}
             >
               <div className="showdown-winner-copy">
-                <span>{playerName(seat, viewer, mode)}</span>
+                <span>{playerName(seat, viewer, mode, players)}</span>
                 <strong>{hand?.name ?? "Best hand"}</strong>
                 <b>+{won.toLocaleString("en-US")}</b>
               </div>
-              <div className="showdown-hole" aria-label={`${playerName(seat, viewer, mode)} cards`}>
+              <div className="showdown-hole" aria-label={`${playerName(seat, viewer, mode, players)} cards`}>
                 <Card value={cards[0].value} delay={index * 120} />
                 <Card value={cards[1].value} delay={index * 120 + 80} />
               </div>
@@ -185,8 +199,8 @@ function Showdown({
 
           return (
             <div key={seat}>
-              <span>{playerName(seat, viewer, mode)} · {hand.name}</span>
-              <div aria-label={`${playerName(seat, viewer, mode)} best five`}>
+              <span>{playerName(seat, viewer, mode, players)} · {hand.name}</span>
+              <div aria-label={`${playerName(seat, viewer, mode, players)} best five`}>
                 {hand.cards.map((value, index) => (
                   <Card key={`${seat}-${value}-${index}`} value={value} delay={320 + index * 70} />
                 ))}
@@ -222,6 +236,7 @@ export function Table({
   onCall,
   onRaise,
   onReady,
+  onFinish,
   contract,
   onCommitContract,
   onVerifyDraw,
@@ -246,12 +261,15 @@ export function Table({
   const handWinners = result
     ? [...new Set(result.awards.map((award) => award.player))]
     : [];
+  const leaders = view.players
+    .map((player, seat) => ({ ...player, seat }))
+    .sort((a, b) => b.challenge_wins - a.challenge_wins || a.seat - b.seat);
   let status = actions ? "Your turn" : "Waiting";
   let message = actions
     ? "Choose an action"
     : view.turn === undefined
       ? "Waiting"
-      : `${playerName(view.turn, viewer, view.mode)} to act`;
+      : `${playerName(view.turn, viewer, view.mode, view.players)} to act`;
   let noticeName: string | undefined;
   let noticeAction: string | undefined;
 
@@ -260,7 +278,7 @@ export function Table({
   if (stage) [status, message] = ["Dealing", stage];
   if (notice) {
     const mine = notice.player === viewer;
-    noticeName = playerName(notice.player, viewer, view.mode);
+    noticeName = playerName(notice.player, viewer, view.mode, view.players);
     noticeAction = notice.action === "raise_to"
       ? `${mine ? "raise" : "raises"} to ${notice.amount?.toLocaleString("en-US")}`
       : notice.action === "call"
@@ -273,6 +291,20 @@ export function Table({
   return (
     <section className={`table-shell${finish ? " table-game-over" : ""}`} aria-label="Six-max poker table">
       <div className="table-hand-count">Hand {view.hand_no + 1} / {view.total_hands}</div>
+      {view.mode === "multiplayer" && (
+        <aside className="challenge-leaderboard" aria-label="Challenge leaderboard">
+          <strong>Challenge Leaderboard</strong>
+          <ol>
+            {leaders.map((player) => (
+              <li key={player.seat}>
+                <span>{playerName(player.seat, viewer, view.mode, view.players)}</span>
+                <b>{player.challenge_wins}</b>
+                {player.challenge_bonus > 0 && <small>+{player.challenge_bonus.toLocaleString("en-US")}</small>}
+              </li>
+            ))}
+          </ol>
+        </aside>
+      )}
       {view.deal?.audit && <DealIntegrity deal={view.deal} room={room} compact />}
 
       {PROOF_UI && (
@@ -288,7 +320,14 @@ export function Table({
 
       <div className="table-stage">
         {noticeName && noticeAction && (
-          <div key={`${view.hand_no}:${notice?.seq}`} className="table-action-notice" role="status" aria-live="polite">
+          <div
+            key={`${view.hand_no}:${notice?.seq}`}
+            className="table-action-notice"
+            data-hand={view.hand_no}
+            data-seq={notice?.seq}
+            role="status"
+            aria-live="polite"
+          >
             <strong>{noticeName}</strong>
             <span>{noticeAction}</span>
           </div>
@@ -300,7 +339,9 @@ export function Table({
           <div className={`board-area${result?.kind === "showdown" ? " board-area-showdown" : ""}`}>
             {handWinners.length > 0 && (
               <span className="hand-winner">
-                {handWinners.map((seat) => playerName(seat, viewer, view.mode)).join(" and ")}
+                {handWinners
+                  .map((seat) => playerName(seat, viewer, view.mode, view.players))
+                  .join(" and ")}
                 {handWinners.length > 1 || handWinners[0] === viewer ? " win" : " wins"}
               </span>
             )}
@@ -309,7 +350,13 @@ export function Table({
               <strong>{view.pot.toLocaleString("en-US")}</strong>
             </div>
             {result?.kind === "showdown" ? (
-              <Showdown result={result} board={view.board} viewer={viewer} mode={view.mode} />
+              <Showdown
+                result={result}
+                board={view.board}
+                viewer={viewer}
+                mode={view.mode}
+                players={view.players}
+              />
             ) : (
               <div className="board" aria-label="Community cards">
                 {[0, 1, 2, 3, 4].map((index) => (
@@ -340,7 +387,7 @@ export function Table({
             <Seat
               key={position}
               position={position}
-              name={playerName(position, viewer, view.mode)}
+              name={playerName(position, viewer, view.mode, view.players)}
               stack={player?.stack}
               bet={player?.bet}
               cards={player ? cards : undefined}
@@ -357,7 +404,9 @@ export function Table({
           <div className="game-finish" role="status" aria-live="polite">
             <span>Game Complete</span>
             <strong>
-              {view.game_over.winners.map((seat) => playerName(seat, viewer, view.mode)).join(" and ")}
+              {view.game_over.winners
+                .map((seat) => playerName(seat, viewer, view.mode, view.players))
+                .join(" and ")}
               {view.game_over.winners.length > 1
                 ? " tie"
                 : view.game_over.winners[0] === viewer
@@ -375,20 +424,20 @@ export function Table({
         </div>
         <div className="action-controls">
           <div className="plain-actions">
-            <button className="key-action key-fold" type="button" onClick={onFold} disabled={!actions?.fold}>
+            <button className="key-action key-fold" type="button" onClick={onFold} disabled={disabled || !actions?.fold}>
               <Keycap>Fold</Keycap>
             </button>
-            <button className="key-action key-check" type="button" onClick={onCheck} disabled={!actions?.check}>
+            <button className="key-action key-check" type="button" onClick={onCheck} disabled={disabled || !actions?.check}>
               <Keycap>Check</Keycap>
             </button>
-            <button className="key-action key-call" type="button" onClick={onCall} disabled={actions?.call === undefined}>
+            <button className="key-action key-call" type="button" onClick={onCall} disabled={disabled || actions?.call === undefined}>
               <Keycap>
                 {actions?.call === undefined ? "Call" : `Call ${actions.call.toLocaleString("en-US")}`}
               </Keycap>
             </button>
           </div>
 
-          <div className="raise-control" data-disabled={!range}>
+          <div className="raise-control" data-disabled={disabled || !range}>
             <div className="raise-heading">
               <span>Raise</span>
               <output>{range ? raiseTo.toLocaleString("en-US") : "—"}</output>
@@ -400,16 +449,16 @@ export function Table({
               max={range?.max_to ?? 1}
               value={range ? raiseTo : 0}
               onChange={(event) => setRaiseTo(Number(event.target.value))}
-              disabled={!range}
+              disabled={disabled || !range}
               style={{ "--range-pos": `${rangePos}%` } as CSSProperties}
             />
             <div className="raise-presets">
-              <button className="key-action key-small" type="button" onClick={() => range && setRaiseTo(range.min_to)} disabled={!range}><Keycap>Min</Keycap></button>
-              <button className="key-action key-small" type="button" onClick={() => setRaiseTo(halfPotTarget)} disabled={!range}><Keycap>½ Pot</Keycap></button>
-              <button className="key-action key-small" type="button" onClick={() => setRaiseTo(potTarget)} disabled={!range}><Keycap>Pot</Keycap></button>
-              <button className="key-action key-small" type="button" onClick={() => range && setRaiseTo(range.max_to)} disabled={!range}><Keycap>All In</Keycap></button>
+              <button className="key-action key-small" type="button" onClick={() => range && setRaiseTo(range.min_to)} disabled={disabled || !range}><Keycap>Min</Keycap></button>
+              <button className="key-action key-small" type="button" onClick={() => setRaiseTo(halfPotTarget)} disabled={disabled || !range}><Keycap>½ Pot</Keycap></button>
+              <button className="key-action key-small" type="button" onClick={() => setRaiseTo(potTarget)} disabled={disabled || !range}><Keycap>Pot</Keycap></button>
+              <button className="key-action key-small" type="button" onClick={() => range && setRaiseTo(range.max_to)} disabled={disabled || !range}><Keycap>All In</Keycap></button>
             </div>
-            <button className="raise-submit key-action key-primary" type="button" onClick={onRaise} disabled={!range}>
+            <button className="raise-submit key-action key-primary" type="button" onClick={onRaise} disabled={disabled || !range}>
               <Keycap>Raise</Keycap>
             </button>
           </div>
@@ -421,7 +470,12 @@ export function Table({
               className="next-hand-action key-action key-primary key-space"
               type="button"
               onClick={onReady}
-              disabled={disabled || view.ready.mine || view.ready.complete || !view.challenge?.assigned}
+              disabled={
+                disabled ||
+                view.ready.mine ||
+                view.ready.complete ||
+                (view.mode === "multiplayer" && !view.challenge?.assigned)
+              }
             >
               <Keycap wide>
                 {view.ready.complete
@@ -429,6 +483,20 @@ export function Table({
                   : view.ready.mine
                     ? `Ready ${view.ready.count}/${view.ready.players}`
                     : "Ready for Next Hand"}
+              </Keycap>
+            </button>
+          )}
+          {view.settled && !view.game_over && view.finish && (
+            <button
+              className="next-hand-action key-action key-primary key-space"
+              type="button"
+              onClick={onFinish}
+              disabled={disabled || view.finish.mine || view.finish.complete}
+            >
+              <Keycap wide>
+                {view.finish.mine
+                  ? `Finished ${view.finish.count}/${view.finish.players}`
+                  : "Finish Game"}
               </Keycap>
             </button>
           )}

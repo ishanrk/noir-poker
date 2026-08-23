@@ -11,7 +11,6 @@ export type ContractAssignment =
       kind: "assigned";
       handNo: number;
       objective: string;
-      reward: number;
       active: boolean;
       drawVerified: boolean;
       drawState: ProofState;
@@ -22,9 +21,10 @@ export type ContractAssignment =
 export type ContractClaim = {
   handNo: number;
   objective?: string;
-  reward: number;
   completed?: boolean;
   state: ProofState;
+  drawVerified: boolean;
+  drawState: ProofState;
 };
 export type ProofMeta = {
   handNo: number;
@@ -35,7 +35,7 @@ export type ProofMeta = {
 export type PlayerProof = {
   seat: number;
   name: string;
-  points: number;
+  completed: number;
   draw?: ProofMeta;
   completion?: ProofMeta;
 };
@@ -101,7 +101,6 @@ export function PrivateChallenge({
                 : "Available after this hand"}
           </strong>
         </div>
-        {showProofs && assignment.kind === "assigned" && <b>+{assignment.reward}</b>}
       </header>
 
       {assignment.kind === "draw" && (
@@ -131,12 +130,12 @@ export function PrivateChallenge({
           {claim.state === "verified" ? (
             <>
               <strong>published</strong>
-              <small>+{claim.reward} proof points</small>
+              <small>challenge completed</small>
             </>
           ) : claim.completed === false ? (
             <>
               <strong>Challenge missed</strong>
-              <small>No completion proof +0</small>
+              <small>No completion proof</small>
             </>
           ) : claim.completed ? (
             <>
@@ -218,7 +217,7 @@ export function ChallengeProofs({ proofs, disabled = false, onVerify }: ProofPro
           <article key={player.seat}>
             <header>
               <strong>{player.name}</strong>
-              <span>{player.points} proof points</span>
+              <span>{player.completed} completed</span>
             </header>
             <ProofLine
               label="Fair draw"

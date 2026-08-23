@@ -12,50 +12,53 @@ type AuditState = "loading" | "verified" | "unavailable" | "failed";
 
 const protocol = [
   {
-    title: "Every player starts with a cryptographic key",
-    text: "The server and every player create a new secret key for the hand. Only the public keys leave their devices. Each key proof shows that its owner knows the secret without revealing it. The public keys combine into one deck key.",
-    check: "One public key and one key proof for each deck participant",
+    title: "Each participant creates a key",
+    text: "The server and every human browser create a secret key for this hand. The transcript publishes each Grumpkin public key with a proof that its owner knows the matching secret. The secrets stay private during play. The public keys combine into one shared deck key.",
+    check: "The keys field stores public curve points and key_proofs stores ownership proofs",
     source: "Barnett and Smart on mental poker",
     href: "https://research-information.bris.ac.uk/en/publications/mental-poker-revisited/",
   },
   {
-    title: "The deck starts encrypted",
-    text: "The protocol starts with the standard 52 cards. Each card becomes a curve point encrypted with the shared deck key. The first encrypted deck stays public so every verifier starts from the same cards.",
-    check: "52 encrypted card points in canonical order before shuffling",
-    source: "Mental Poker Revisited",
-    href: "https://research-information.bris.ac.uk/en/publications/mental-poker-revisited/",
-  },
-  {
-    title: "Every player shuffles the deck",
-    text: "The server shuffles first. Every player then changes the order and refreshes the encryption. Each UltraHonk proof connects one input deck to one output deck without exposing the secret order.",
-    check: "One accepted shuffle proof for every participant",
+    title: "Each participant proves one shuffle",
+    text: "Every shuffle entry contains the 52 input ciphertexts and the 52 output ciphertexts. Its UltraHonk proof shows that the output contains the same cards under a hidden permutation with fresh encryption. If one human browser samples its permutation honestly then the server cannot choose the final order. The secret permutation and encryption masks never enter the transcript.",
+    check: "The shuffles field connects each public input deck to its public output deck",
     source: "Neff on verifiable secret shuffles",
     href: "https://dl.acm.org/doi/10.1145/501983.502000",
   },
   {
-    title: "Only dealt cards get opened",
-    text: "Players release key shares only for cards needed in the game. Each share proof shows that the share came from the same secret as the published key. Hole cards open for their owner and board cards open for everyone.",
-    check: "Share records open dealt positions without opening the remaining deck",
-    source: "Chaum and Pedersen equality proofs",
-    href: "https://chaum.com/wp-content/uploads/2021/12/Wallet_Databases.pdf",
-  },
-  {
-    title: "Every shuffle gets checked",
-    text: "The proof bytes contain the private shuffle argument. The public inputs name the hand the transcript state the shared key and both encrypted decks. Barretenberg checks them against the pinned verification key.",
-    check: "Proof bytes stay compact while public inputs bind the exact shuffle",
+    title: "Public inputs pin every shuffle",
+    text: "Each proof publishes exactly 453 field values. They bind the protocol version the hand number the participant the prior transcript context all coordinates from both 52 card decks and the aggregate deck key. The proof bytes are the compact UltraHonk argument checked against the pinned verification key.",
+    check: "The public_inputs field binds the proof to this hand and these exact ciphertexts",
     source: "Noir proving and verification",
     href: "https://noir-lang.org/docs/getting_started_manually",
   },
   {
-    title: "The final deck gets reconstructed",
-    text: "After the hand every player opens their key. The verifier matches each opening to its public key then decrypts all 52 cards. The SHA 256 fingerprint identifies the exact ordered transcript. Changing any record changes that fingerprint.",
-    check: "Key openings reconstruct the deck while SHA 256 identifies the transcript",
+    title: "Ordered records preserve the deal",
+    text: "The records array stores each key shuffle decryption share card reveal opening and completion in sequence. Share proofs connect every decryption share to its published key. Reveal records open only the card positions needed during play.",
+    check: "The records field preserves the exact event order and each encoded payload",
+    source: "Chaum and Pedersen equality proofs",
+    href: "https://chaum.com/wp-content/uploads/2021/12/Wallet_Databases.pdf",
+  },
+  {
+    title: "Final openings reconstruct the deck",
+    text: "After settlement each participant publishes their secret key opening. The verifier derives its public key again and requires an exact match. Those openings decrypt the final ciphertext deck. The deck field records the resulting 52 card identifiers in order.",
+    check: "The openings field matches every public key and deck contains one full permutation",
+    source: "Mental Poker Revisited",
+    href: "https://research-information.bris.ac.uk/en/publications/mental-poker-revisited/",
+  },
+  {
+    title: "The hash chain identifies the transcript",
+    text: "The verifier starts with a domain separated hash of the room and hand. Every ordered record hashes the previous head its sequence type seat and payload hash. transcript_hash is the final SHA 256 chain head. It identifies this record chain and is not a direct hash of the downloaded JSON file.",
+    check: "Changing one ordered record changes the final hash chain head",
     source: "NIST SHA 256 standard",
     href: "https://csrc.nist.gov/pubs/fips/180-4/upd1/final",
   },
 ] as const;
 
-const verifierSource = "https://github.com/ishanrk/noir-poker/blob/crypto-verification/apps/web/lib/deck-audit.ts";
+const verifierSource = "https://github.com/ishanrk/noir-poker/blob/main/apps/web/scripts/verify-deal.mjs";
+const browserVerifier = "https://github.com/ishanrk/noir-poker/blob/main/apps/web/lib/deck-audit.ts";
+const circuitSource = "https://github.com/ishanrk/noir-poker/blob/main/circuits/deck-v1/shuffle/src/main.nr";
+const noirDocs = "https://noir-lang.org/docs/getting_started_manually";
 
 function downloadProofs(audit: DealAudit) {
   const file = new Blob([JSON.stringify(audit, null, 2)], { type: "application/json" });
@@ -91,30 +94,35 @@ function cardMarker(index: number, audit: DealAudit) {
 
 function proofDetails(step: number, audit: DealAudit) {
   const records = (kind: string) => audit.records.filter((record) => record.kind === kind).length;
+  const proofBytes = audit.shuffles.reduce((size, shuffle) => size + atob(shuffle.proof).length, 0);
+  const publicBytes = audit.shuffles.reduce(
+    (size, shuffle) => size + atob(shuffle.public_inputs).length,
+    0,
+  );
   const values = [
     [
       ["Public keys", `${audit.keys.length} combined for this hand`],
       ["Key proofs", `${audit.key_proofs.length} proofs of secret key ownership`],
     ],
     [
-      ["Encrypted cards", `${audit.shuffles[0]?.input.length ?? 0} canonical card points`],
-      ["Shared key", `${audit.keys.length} public keys added together`],
+      ["Deck transitions", `${audit.shuffles.length} proven input and output deck pairs`],
+      ["Proof bytes", `${proofBytes.toLocaleString("en-US")} decoded bytes in total`],
     ],
     [
-      ["Shuffle proofs", `${audit.shuffles.length} accepted UltraHonk proofs`],
-      ["Deck transitions", `${audit.shuffles.length} proven input to output changes`],
+      ["Public fields", `453 fields for each of ${audit.shuffles.length} shuffles`],
+      ["Public input bytes", `${publicBytes.toLocaleString("en-US")} decoded bytes in total`],
     ],
     [
-      ["Share records", `${records("share")} groups of proven key shares`],
-      ["Reveal records", `${records("reveal")} groups of opened card positions`],
-    ],
-    [
-      ["Proof bytes", `${audit.shuffles.length} accepted proof payloads`],
-      ["Public inputs", `${audit.shuffles.length} hand and deck bindings`],
+      ["Ordered records", `${audit.records.length} chained transcript entries`],
+      ["Shares and reveals", `${records("share")} share groups and ${records("reveal")} reveal groups`],
     ],
     [
       ["Key openings", `${audit.openings.length} secrets matched to public keys`],
-      ["SHA 256", audit.transcript_hash],
+      ["Final deck", `${audit.deck.length} unique ordered card identifiers`],
+    ],
+    [
+      ["Final chain head", audit.transcript_hash],
+      ["Complete records", `${records("complete")} final deck record`],
     ],
   ];
 
@@ -134,9 +142,10 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
     void loadDealAudit(room, hand)
       .then(async (value) => {
         if (!live) return;
+        if (value.hand_no !== hand) throw new Error("deck proof mismatch");
+        setAudit(value);
         const result = await verifyDeck(value, (next) => live && setStep(next));
         if (!live) return;
-        setAudit(value);
         setCheck(result);
         setState("verified");
       })
@@ -179,7 +188,7 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
           <div className="section-index"><span>Transcript</span><p>One completed hand</p></div>
           <dl>
             <div><dt>room and hand</dt><dd>{audit.room} / {audit.hand_no + 1}</dd></div>
-            <div><dt>SHA 256 fingerprint</dt><dd>{audit.transcript_hash}</dd></div>
+            <div><dt>SHA 256 chain head</dt><dd>{audit.transcript_hash}</dd></div>
             <div><dt>participants</dt><dd>{audit.keys.length} independent deck keys</dd></div>
             <div><dt>shuffle proofs</dt><dd>{audit.shuffles.length} UltraHonk proofs</dd></div>
             <div><dt>final openings</dt><dd>{audit.openings.length} keys matched</dd></div>
@@ -190,6 +199,15 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
             </button>
             <a className="text-action" href={verifierSource} target="_blank" rel="noreferrer">
               Inspect Verification Script
+            </a>
+            <a className="text-action" href={browserVerifier} target="_blank" rel="noreferrer">
+              Inspect Browser Verifier
+            </a>
+            <a className="text-action" href={circuitSource} target="_blank" rel="noreferrer">
+              Inspect Shuffle Circuit
+            </a>
+            <a className="text-action" href={noirDocs} target="_blank" rel="noreferrer">
+              Noir Documentation
             </a>
           </div>
         </section>

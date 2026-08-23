@@ -3,27 +3,29 @@ import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
 
 const ULTIMATE_BET =
-  "https://www.pokernews.com/news/2022/11/ultimate-bet-scandal-42623.htm";
+  "https://kahnawakenews.com/gaming-commission-releases-final-decision-on-ultimate-bet-cheating-p421-1.htm";
 const FULL_TILT =
-  "https://www.justice.gov/usao-sdny/pr/former-full-tilt-poker-ceo-pleads-guilty-and-sentenced-manhattan-federal-court";
-const RANDOMNESS =
-  "https://developer.mozilla.org/en-US/docs/Web/API/Crypto/getRandomValues";
+  "https://www.justice.gov/usao-sdny/united-states-v-pokerstars-et-al-11-civ-2564-lbsfull-tilt-poker-information";
+const MENTAL_POKER =
+  "https://research-information.bris.ac.uk/en/publications/mental-poker-revisited/";
+const VERIFIABLE_SHUFFLE = "https://doi.org/10.1145/501983.502000";
+const NOIR = "https://noir-lang.org/docs/";
 
-const TRUST_STEPS = [
+const DECK_STEPS = [
   {
     number: "01",
-    title: "Commit first",
-    copy: "The server publishes a commitment to its secret before any player entropy is accepted.",
+    title: "Encrypt every card",
+    copy: "The hand begins with 52 known cards hidden under one joint key No player or server owns the full key",
   },
   {
     number: "02",
-    title: "Mix every seat",
-    copy: "Each occupied browser contributes fresh random bytes. Seat order is part of the seed.",
+    title: "Shuffle together",
+    copy: "The server and each human secretly reorder the encrypted deck Each shuffle includes a proof that no card changed",
   },
   {
     number: "03",
-    title: "Replay the deal",
-    copy: "After settlement, the revealed values reproduce the seed, shuffle and every dealt position.",
+    title: "Open only the deal",
+    copy: "Key shares reveal each hole card to its owner and board cards to the table The completed transcript checks every step",
   },
 ] as const;
 
@@ -35,10 +37,10 @@ export default function MotivationPage() {
       <header className="story-hero story-hero-motivation">
         <div>
           <p className="story-kicker">Motivation</p>
-          <h1>The shuffle happens somewhere else.</h1>
+          <h1>The server should not be the only witness.</h1>
           <p>
-            At a physical table, the deal is visible. Online, a server chooses the state and sends each
-            player a private view. Players need evidence that survives outside that server.
+            An online table can look fair while the code choosing the cards stays hidden Noir Poker
+            publishes evidence for the deck and private challenges
           </p>
         </div>
         <div className="trust-meter" aria-label="Trust moves from claim to evidence">
@@ -52,8 +54,8 @@ export default function MotivationPage() {
         <header className="story-section-head">
           <p className="story-index">01</p>
           <div>
-            <h2 id="failures-title">Two failures with the same blind spot</h2>
-            <p>Players saw account screens. The decisive facts stayed inside the operator.</p>
+            <h2 id="failures-title">Real tables have hidden the wrong facts</h2>
+            <p>The screen only shows what the operator chooses to send</p>
           </div>
         </header>
 
@@ -63,14 +65,14 @@ export default function MotivationPage() {
               <span>A♠</span>
               <span>?</span>
             </div>
-            <p className="case-label">Hidden access</p>
-            <h3>UltimateBet and Absolute Poker</h3>
+            <p className="case-label">Privileged software</p>
+            <h3>UltimateBet</h3>
             <p>
-              Insider tools exposed opponents&apos; hole cards during live play. The player interface
-              could not show who had privileged access behind it.
+              A regulator found that people connected to the operator manipulated its poker
+              software More than 22 million dollars went back to affected players
             </p>
             <a href={ULTIMATE_BET} target="_blank" rel="noreferrer">
-              Read the investigation
+              Read the commission report coverage
             </a>
           </article>
 
@@ -79,30 +81,30 @@ export default function MotivationPage() {
               <span>$390m</span>
               <span>$60m</span>
             </div>
-            <p className="case-label">Hidden balance sheet</p>
+            <p className="case-label">Unreliable balances</p>
             <h3>Full Tilt Poker</h3>
             <p>
-              Internal records showed roughly $390 million owed to players and about $60 million in
-              bank accounts shortly before the 2011 enforcement action.
+              The US Justice Department said the operator lacked the funds shown in player
+              accounts Players kept winning and losing with credits the operator could not repay
             </p>
             <a href={FULL_TILT} target="_blank" rel="noreferrer">
-              Read the court release
+              Read the Justice Department record
             </a>
           </article>
         </div>
       </section>
 
-      <section className="story-section" aria-labelledby="deal-evidence-title">
+      <section className="story-section" aria-labelledby="deck-title">
         <header className="story-section-head">
           <p className="story-index">02</p>
           <div>
-            <h2 id="deal-evidence-title">The completed deck leaves a transcript</h2>
-            <p>The final shuffle is fixed by values from the server and every occupied seat.</p>
+            <h2 id="deck-title">No trusted dealer</h2>
+            <p>One honest participant keeps the final order outside server control</p>
           </div>
         </header>
 
         <ol className="trust-flow">
-          {TRUST_STEPS.map((step) => (
+          {DECK_STEPS.map((step) => (
             <li key={step.number}>
               <span>{step.number}</span>
               <div>
@@ -114,37 +116,49 @@ export default function MotivationPage() {
         </ol>
 
         <p className="story-note">
-          Browsers use <code>crypto.getRandomValues</code> for their contributions. The same public
-          transcript can be checked in the audit page or with the standalone verifier.{" "}
-          <a href={RANDOMNESS} target="_blank" rel="noreferrer">
-            Browser randomness reference
+          This design follows mental poker and verifiable shuffle research See{" "}
+          <a href={MENTAL_POKER} target="_blank" rel="noreferrer">
+            Mental Poker Revisited
+          </a>{" "}
+          and{" "}
+          <a href={VERIFIABLE_SHUFFLE} target="_blank" rel="noreferrer">
+            A Verifiable Secret Shuffle
           </a>
         </p>
       </section>
 
-      <section className="story-section story-private" aria-labelledby="private-title">
+      <section className="story-section story-private" aria-labelledby="challenge-title">
         <header className="story-section-head">
           <p className="story-index">03</p>
           <div>
-            <h2 id="private-title">A private challenge can still produce public evidence</h2>
-            <p>The objective stays in one browser. A proof can show that its rules were satisfied.</p>
+            <h2 id="challenge-title">Check the challenge without seeing it</h2>
+            <p>The proof checks selection and completion while the objective stays private</p>
           </div>
         </header>
 
         <div className="privacy-split">
           <article>
-            <span>Kept private</span>
-            <strong>Objective, secret, Merkle path and hand facts</strong>
+            <span>Player browser</span>
+            <strong>Objective secret catalog path and private hand witness</strong>
           </article>
           <article>
-            <span>Published</span>
-            <strong>Room binding, proof bytes, public inputs and one-time claim id</strong>
+            <span>Public proof</span>
+            <strong>Hand binding seat commitment catalog root fact hash and nullifier</strong>
           </article>
         </div>
 
         <p>
-          A fair-draw proof is optional. A completion proof is only needed when a player claims the 20
-          proof points. Anyone can verify an accepted proof in their own browser.
+          A private browser secret and a fresh server nonce select one fixed catalog entry The fair
+          draw proof checks that selection The completion proof checks the hidden rule against the
+          committed hand facts Other players can verify either accepted proof without learning the
+          objective
+        </p>
+
+        <p className="story-note">
+          Noir separates private witness values from public verifier inputs Read the{" "}
+          <a href={NOIR} target="_blank" rel="noreferrer">
+            Noir zero knowledge reference
+          </a>
         </p>
       </section>
 
@@ -152,15 +166,15 @@ export default function MotivationPage() {
         <header className="story-section-head">
           <p className="story-index">04</p>
           <div>
-            <h2 id="limits-title">Current limits</h2>
-            <p>These boundaries matter when reading the claims above.</p>
+            <h2 id="limits-title">Evidence has a boundary</h2>
+            <p>The protocol makes specific claims rather than trusting a badge</p>
           </div>
         </header>
         <ul>
-          <li>The server sees the cards while a hand is live.</li>
-          <li>The server can stop serving a room before settlement.</li>
-          <li>Challenge completion currently uses six facts committed by the server.</li>
-          <li>Live cards remain visible to the server; the audit starts after settlement.</li>
+          <li>A participant can disconnect and stop progress</li>
+          <li>A deck transcript proves its recorded encrypted shuffle and openings</li>
+          <li>A completion proof relies on the hand fact commitment published by the server</li>
+          <li>The implementation still needs independent security review before real stakes</li>
         </ul>
         <Link className="story-link" href="/protocol">
           Read the exact protocol

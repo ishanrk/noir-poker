@@ -15,9 +15,9 @@ import {
   verifyShare,
   type PointValue,
   type ShareProof,
-} from "@/lib/deck-crypto";
-import { verifyShuffle } from "@/lib/deck-proof";
-import type { DealAudit } from "@/lib/server";
+} from "./deck-crypto.ts";
+import { verifyShuffle } from "./deck-proof.ts";
+import type { DealAudit } from "./server.ts";
 
 export type DeckCheck = {
   transcript: boolean;

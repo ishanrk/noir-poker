@@ -1,7 +1,7 @@
 import circuit from "../zk/deck_shuffle.json" with { type: "json" };
-import { deckShuffleVk } from "../zk/deck-shuffle-vk";
+import { deckShuffleVk } from "../zk/deck-shuffle-vk.ts";
 
-import { bytes, type CipherValue, type PointValue } from "@/lib/deck-crypto";
+import { bytes, type CipherValue, type PointValue } from "./deck-crypto.ts";
 
 type ShuffleInput = {
   hand: number;

@@ -277,12 +277,24 @@ impl MentalDeck {
 
     pub fn needed_shares(&self, seat: usize) -> Option<Vec<usize>> {
         let participant = self.participant(seat)?;
-        let opening = self.opening.as_ref()?;
-
         if !self.human.get(seat).copied().unwrap_or(false) {
             return None;
         }
-        let positions = opening
+
+        // one transcript head per share group
+        let next = self.seats.iter().copied().find(|&candidate| {
+            self.participant(candidate)
+                .is_some_and(|participant| !self.share_positions(candidate, participant).is_empty())
+        })?;
+        (next == seat).then(|| self.share_positions(seat, participant))
+    }
+
+    fn share_positions(&self, seat: usize, participant: usize) -> Vec<usize> {
+        let Some(opening) = self.opening.as_ref() else {
+            return Vec::new();
+        };
+
+        opening
             .positions
             .iter()
             .copied()
@@ -291,9 +303,7 @@ impl MentalDeck {
                 opening.kind == OpenKind::Board || owner != Some(seat) || self.complete
             })
             .filter(|&position| !opening.shares.contains_key(&(participant, position)))
-            .collect::<Vec<_>>();
-
-        (!positions.is_empty()).then_some(positions)
+            .collect()
     }
 
     pub fn add_shares(&mut self, seat: usize, values: Vec<ShareWire>) -> Result<(), &'static str> {
@@ -722,6 +732,66 @@ mod tests {
 
         assert!(deck.add_key(1, public_key(secret), proof).is_err());
         assert!(deck.add_key(0, public_key(secret), proof).is_ok());
+    }
+
+    #[test]
+    fn share_groups_stay_ordered() {
+        let room = Uuid::from_bytes([3; 16]);
+        let first = Fr::from(13u64);
+        let second = Fr::from(19u64);
+        let mut deck = MentalDeck::new(
+            room,
+            0,
+            0,
+            vec![true, true],
+            Fr::from(7u64),
+            Fr::from(11u64),
+        );
+
+        let proof = prove_key(first, Fr::from(17u64), &deck.head);
+        deck.add_key(0, public_key(first), proof).unwrap();
+        let proof = prove_key(second, Fr::from(23u64), &deck.head);
+        deck.add_key(1, public_key(second), proof).unwrap();
+
+        let key = deck.aggregate_key().unwrap();
+        let permutation = core::array::from_fn(|i| CARD_COUNT - i - 1);
+        for value in 0..3 {
+            let masks = core::array::from_fn(|i| Fr::from(i as u64 + 30 + value * 100));
+            let shuffled = deck_crypto::shuffle(&deck.deck, &permutation, &masks, key).unwrap();
+            deck.add_shuffle(value as usize, shuffled, dummy()).unwrap();
+        }
+        deck.begin_open(OpenKind::Private, (0..4).collect())
+            .unwrap();
+
+        assert!(deck.needed_shares(0).is_some());
+        assert!(deck.needed_shares(1).is_none());
+
+        let context = deck.head;
+        let participant = deck.participant_for(0).unwrap();
+        let shares = deck
+            .needed_shares(0)
+            .unwrap()
+            .into_iter()
+            .map(|position| {
+                let value = prove_share(
+                    deck.deck[position],
+                    first,
+                    Fr::from(position as u64 + 500),
+                    &context,
+                );
+                ShareWire {
+                    participant,
+                    position,
+                    context: hex(&context),
+                    value: point_wire(value.0),
+                    proof: proof_wire(value.1),
+                }
+            })
+            .collect();
+        deck.add_shares(0, shares).unwrap();
+
+        assert!(deck.needed_shares(0).is_none());
+        assert!(deck.needed_shares(1).is_some());
     }
 
     #[test]

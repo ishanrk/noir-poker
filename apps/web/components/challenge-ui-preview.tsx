@@ -28,7 +28,6 @@ function previewView(state: ChallengePreviewState): ContractView {
         kind: "assigned",
         handNo: 12,
         objective: "Reach showdown",
-        reward: 20,
         active: false,
         drawVerified: true,
         drawState: "verified",
@@ -45,9 +44,10 @@ function previewView(state: ChallengePreviewState): ContractView {
     claim: {
       handNo: 12,
       objective: "Reach showdown",
-      reward: 20,
       completed: state !== "miss",
       state: state === "verified" ? "verified" : "idle",
+      drawVerified: true,
+      drawState: "verified",
     },
     proofs: [],
   };

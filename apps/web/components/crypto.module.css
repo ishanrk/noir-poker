@@ -58,6 +58,13 @@
   font: 800 11px/1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
 }
 
+.retry:disabled {
+  border-bottom-color: var(--line-strong);
+  background: #dfe3e8;
+  color: #737b86;
+  cursor: not-allowed;
+}
+
 .links,
 .actions {
   display: flex;
@@ -81,9 +88,11 @@
 
 .private {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
   align-items: center;
   gap: 20px;
+  background: var(--lime);
+  color: var(--blue);
 }
 
 .private strong {
@@ -97,6 +106,43 @@
   font-weight: 700;
 }
 
+.private .label {
+  color: var(--blue);
+}
+
+.privateIntro {
+  min-width: 0;
+}
+
+.privateProofs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 20px;
+}
+
+.private > .privateProofs {
+  grid-column: 2;
+}
+
+.privateProof {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+  padding-left: 16px;
+  border-left: 2px solid var(--blue);
+}
+
+.privateProof > span {
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.privateProof .retry {
+  width: fit-content;
+  margin-top: 5px;
+}
+
 .proofRows {
   display: grid;
   gap: 16px;
@@ -105,34 +151,65 @@
 
 .proofPlayer {
   display: grid;
-  grid-template-columns: minmax(110px 0.7fr) 1fr 1fr;
+  grid-template-columns: minmax(140px, 0.7fr) repeat(2, minmax(0, 1fr));
   gap: 18px;
   padding-top: 14px;
   border-top: 1px solid var(--line-strong);
 }
 
-.proofPlayer > strong {
+.proofOwner {
   display: grid;
+  align-content: start;
   gap: 5px;
 }
 
-.proofPlayer > strong a {
+.proofOwner > span {
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.proofOwner a {
   width: fit-content;
   color: var(--blue);
   font-size: 10px;
 }
 
 .proofItem {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  display: grid;
+  align-content: start;
   gap: 12px;
   font-size: 12px;
   font-weight: 800;
 }
 
+.proofItem > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.proofItem small {
+  font-size: 10px;
+}
+
 .proofItem a {
   color: var(--blue);
+}
+
+.proofStatus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.proofStatus strong {
+  width: 100%;
+}
+
+.proofPrivacy {
+  margin: 0;
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .page {
@@ -151,13 +228,13 @@
 }
 
 .hero h1 {
-  font-size: clamp(34px 6vw 70px);
+  font-size: clamp(34px, 6vw, 70px);
   line-height: 0.95;
 }
 
 .hero p {
   max-width: 680px;
-  font: 650 16px/1.55 ui-sans-serif system-ui sans-serif;
+  font: 650 16px/1.55 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
 }
 
 .list {
@@ -180,7 +257,7 @@
 }
 
 .entry span {
-  font: 700 14px/1.4 ui-sans-serif, system-ui, sans-serif;
+  font: 700 14px/1.4 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
 }
 
 .entry a {
@@ -192,13 +269,13 @@
 .historyProofs {
   display: grid;
   gap: 7px;
-  font: 700 13px/1.4 ui-sans-serif, system-ui, sans-serif;
+  font: 700 13px/1.4 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
 }
 
 .historyProofs span {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
 }
 
@@ -234,7 +311,89 @@
 
 .detailGrid p,
 .detailGrid li {
-  font: 600 15px/1.55 ui-sans-serif system-ui sans-serif;
+  font: 600 15px/1.55 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
+}
+
+.proofSteps {
+  margin-top: 44px;
+  border-top: 2px solid var(--blue);
+}
+
+.proofStep {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 22px;
+  padding: 28px 0;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.proofStep > span {
+  color: var(--blue);
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.proofStep > div {
+  min-width: 0;
+}
+
+.proofStep h2 {
+  color: var(--blue);
+  font-size: 22px;
+}
+
+.proofStep p {
+  max-width: 760px;
+  margin: 10px 0 18px;
+  font: 600 15px/1.55 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
+}
+
+.binding {
+  margin: 8px 0;
+}
+
+.binding div {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.binding dt,
+.byteCounts dt {
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.binding dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font: 600 12px/1.45 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
+}
+
+.byteCounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 34px;
+  margin: 18px 0 0;
+}
+
+.byteCounts div {
+  display: grid;
+  gap: 3px;
+}
+
+.byteCounts dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.proofNote {
+  max-width: 780px;
+  font: 650 14px/1.55 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
 }
 
 .public {
@@ -250,7 +409,7 @@
 
 .public div {
   display: grid;
-  grid-template-columns: 170px minmax(0 1fr);
+  grid-template-columns: 170px minmax(0, 1fr);
   gap: 18px;
 }
 
@@ -263,7 +422,14 @@
 .public dd {
   margin: 0;
   overflow-wrap: anywhere;
-  font: 600 12px/1.45 ui-monospace monospace;
+  font: 600 12px/1.45 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
+}
+
+.public dd small {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink-soft);
+  font: 650 13px/1.4 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
 }
 
 .error {
@@ -289,7 +455,7 @@
 }
 
 .dealSequence header > p:last-child {
-  font: 650 15px/1.5 ui-sans-serif, system-ui, sans-serif;
+  font: 650 15px/1.5 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
 }
 
 .cardStream {
@@ -312,16 +478,7 @@
 }
 
 .streamCard :global(.card) {
-  transform-origin: center bottom;
-  animation: stream-deal 440ms both;
-  animation-delay: var(--deal-delay);
-}
-
-@keyframes stream-deal {
-  from {
-    opacity: 0;
-    transform: translateY(-30px) rotate(-5deg);
-  }
+  transform: none;
 }
 
 @media (max-width: 680px) {
@@ -332,6 +489,14 @@
   .public div,
   .proofPlayer {
     grid-template-columns: 1fr;
+  }
+
+  .privateProofs {
+    grid-template-columns: 1fr;
+  }
+
+  .private > .privateProofs {
+    grid-column: 1;
   }
 
   .stripHead {
@@ -346,6 +511,16 @@
 
   .entry {
     gap: 8px;
+  }
+
+  .proofStep {
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .binding div {
+    grid-template-columns: 1fr;
+    gap: 3px;
   }
 
   .cardStream {

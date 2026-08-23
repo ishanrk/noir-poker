@@ -24,6 +24,11 @@ pub async fn ensure_pending(db: &Db) -> FairResult<()> {
     let rows = query(
         "SELECT rooms.id, rooms.players, rooms.total_hands, COALESCE(MAX(hands.hand_no) + 1, 0) AS next_hand \
          FROM rooms LEFT JOIN hands ON hands.room_id = rooms.id \
+         WHERE NOT EXISTS ( \
+             SELECT 1 FROM deck_transcripts \
+             WHERE deck_transcripts.room_id = rooms.id \
+             AND deck_transcripts.completed_at IS NULL \
+         ) \
          GROUP BY rooms.id, rooms.players, rooms.total_hands ORDER BY rooms.id",
     )
     .fetch_all(db.pool())
@@ -98,12 +103,14 @@ pub fn bot_share(room: Uuid, ceremony: &Ceremony, seat: usize) -> [u8; 32] {
     input.finalize().into()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_room(
     db: &Db,
     id: Uuid,
     config: RoomConfig,
     mode: RoomMode,
     token_hash: &[u8; 32],
+    name: &str,
     ceremony: &Ceremony,
     share: [u8; 32],
 ) -> FairResult<()> {
@@ -122,8 +129,9 @@ pub async fn create_room(
     .bind(i32::try_from(config.hands)?)
     .execute(&mut *tx)
     .await?;
-    query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, 0, $2)")
+    query("INSERT INTO seats (room_id, seat, name, token_hash) VALUES ($1, 0, $2, $3)")
         .bind(id)
+        .bind(name)
         .bind(token_hash.as_slice())
         .execute(&mut *tx)
         .await?;
@@ -138,6 +146,7 @@ pub async fn create_pending_room(
     id: Uuid,
     config: RoomConfig,
     token_hash: &[u8; 32],
+    name: &str,
     ceremony: &Ceremony,
 ) -> FairResult<()> {
     let mut tx = db.pool().begin().await?;
@@ -155,8 +164,9 @@ pub async fn create_pending_room(
     .bind(i32::try_from(config.hands)?)
     .execute(&mut *tx)
     .await?;
-    query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, 0, $2)")
+    query("INSERT INTO seats (room_id, seat, name, token_hash) VALUES ($1, 0, $2, $3)")
         .bind(id)
+        .bind(name)
         .bind(token_hash.as_slice())
         .execute(&mut *tx)
         .await?;
@@ -193,9 +203,10 @@ pub async fn start_single(
         let seat = index + 1;
         let bot = bot_share(room, ceremony, seat);
 
-        query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, $2, $3)")
+        query("INSERT INTO seats (room_id, seat, name, token_hash) VALUES ($1, $2, $3, $4)")
             .bind(room)
             .bind(i32::try_from(seat)?)
+            .bind(format!("Bot {seat}"))
             .bind(token.as_slice())
             .execute(&mut *tx)
             .await?;
@@ -217,6 +228,7 @@ pub async fn join_room(
     room: Uuid,
     seat: usize,
     token_hash: &[u8; 32],
+    name: &str,
     share: [u8; 32],
     rev: u64,
     next_rev: u64,
@@ -226,9 +238,10 @@ pub async fn join_room(
 ) -> FairResult<()> {
     let mut tx = db.pool().begin().await?;
 
-    query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, $2, $3)")
+    query("INSERT INTO seats (room_id, seat, name, token_hash) VALUES ($1, $2, $3, $4)")
         .bind(room)
         .bind(i32::try_from(seat)?)
+        .bind(name)
         .bind(token_hash.as_slice())
         .execute(&mut *tx)
         .await?;
@@ -549,6 +562,18 @@ async fn insert_hand(
     .bind(stacks)
     .execute(&mut **tx)
     .await?;
+
+    if hand.encrypted {
+        query(
+            "INSERT INTO deck_transcripts (room_id, hand_no, hand_id) \
+             VALUES ($1, $2, $3)",
+        )
+        .bind(room)
+        .bind(i64::try_from(hand.no)?)
+        .bind(hand.id)
+        .execute(&mut **tx)
+        .await?;
+    }
     Ok(())
 }
 

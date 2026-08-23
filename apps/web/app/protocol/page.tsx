@@ -1,17 +1,19 @@
-import Link from "next/link";
-
 import { ChallengeProofDemo } from "@/components/challenge-proof-demo";
 import { ProofPuzzle } from "@/components/proof-puzzle";
-import { ProtocolDemo } from "@/components/protocol-demo";
 import { SiteHeader } from "@/components/site-header";
 
-const REPO = "https://github.com/ishanrk/noir-poker/blob/multiplayer";
+const REPO = "https://github.com/ishanrk/noir-poker/blob/main";
 const NOIR = "https://noir-lang.org/docs/";
 const NOIR_PROVING = "https://noir-lang.org/docs/getting_started_manually";
 const BARRETENBERG =
   "https://github.com/AztecProtocol/aztec-packages/tree/next/barretenberg";
 const RANDOMNESS =
   "https://developer.mozilla.org/en-US/docs/Web/API/Crypto/getRandomValues";
+const MENTAL_POKER =
+  "https://research-information.bris.ac.uk/en/publications/mental-poker-revisited/";
+const VERIFIABLE_SHUFFLE = "https://doi.org/10.1145/501983.502000";
+const BLAKE2 = "https://www.rfc-editor.org/rfc/rfc7693";
+const MERKLE = "https://doi.org/10.1007/3-540-48184-2_32";
 
 const FACTS = [
   "saw the flop",
@@ -31,9 +33,10 @@ const IMPLEMENTATION = [
   ["Browser execution", "NoirJS and bb.js WASM worker"],
   ["Public fields", "194"],
   ["Challenge catalog", "8 fixed entries"],
-  ["Challenge reward", "20 proof points"],
-  ["Deal protocol", "1"],
-  ["Deal algorithm", "sha256-counter-rejection-fisher-yates-v1"],
+  ["Challenge score", "verified completions"],
+  ["Deck protocol", "mental poker 1"],
+  ["Deck proof", "joint ElGamal shuffle with UltraHonk"],
+  ["Shuffle public fields", "453"],
   [
     "Circuit artifact SHA-256",
     "1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d",
@@ -54,8 +57,8 @@ export default function ProtocolPage() {
           <p className="story-kicker">Protocol</p>
           <h1>Verify it yourself.</h1>
           <p>
-            The browser can replay a completed deal and verify an accepted challenge proof. Both paths
-            expose portable JSON.
+            The browser verifies a completed encrypted deck transcript and any published challenge
+            proof Both paths expose portable JSON
           </p>
         </div>
         <div className="protocol-signal" aria-hidden="true">
@@ -84,8 +87,8 @@ export default function ProtocolPage() {
             </header>
             <ol>
               <li>Finish the hand and open <code>/audit/&lt;room&gt;/&lt;hand&gt;</code>.</li>
-              <li>The page rebuilds the commitment, seed, 52-card shuffle and deal map.</li>
-              <li>Choose <strong>Export JSON</strong> and save the downloaded audit.</li>
+              <li>The page checks every key proof encrypted shuffle and decryption opening.</li>
+              <li>Choose <strong>Download Proof Transcript</strong> and save the accepted audit.</li>
               <li>
                 Run <code>npm --prefix apps/web run deal:verify -- audit.json</code>.
               </li>
@@ -94,13 +97,13 @@ export default function ProtocolPage() {
 
           <article>
             <header>
-              <span>Automatic</span>
+              <span>Optional</span>
               <h3>Fair-draw proof</h3>
             </header>
             <ol>
-              <li>The player browser starts Mode 0 after the challenge assignment arrives.</li>
+              <li>The player chooses Generate Fair Draw Proof after assignment.</li>
               <li>The Rust server verifies the proof before marking it published.</li>
-              <li>Another player opens the published proof and verifies it locally.</li>
+              <li>Another player may open the accepted proof and verify it locally.</li>
               <li>
                 The accepted JSON is available from the server at{" "}
                 <code>/proofs/&lt;room&gt;/&lt;hand&gt;/&lt;seat&gt;/draw</code>.
@@ -110,13 +113,13 @@ export default function ProtocolPage() {
 
           <article>
             <header>
-              <span>Points claim</span>
+              <span>Completion claim</span>
               <h3>Completion receipt</h3>
             </header>
             <ol>
-              <li>Meeting the objective starts Mode 1 in the player browser.</li>
-              <li>The server verifies it, publishes the claim and awards 20 proof points.</li>
-              <li>Open <code>/proof/&lt;nullifier&gt;</code>; verification starts in that browser.</li>
+              <li>Meeting the objective enables Generate Completion Proof.</li>
+              <li>The server verifies it and records one completed challenge.</li>
+              <li>Open <code>/proof/&lt;nullifier&gt;</code> and choose Verify Proof.</li>
               <li>
                 Export JSON, then run{" "}
                 <code>npm --prefix apps/web run proof:verify -- receipt.json</code>.
@@ -154,22 +157,15 @@ export default function ProtocolPage() {
         <div className="protocol-demo-grid">
           <article>
             <header>
-              <h3>Deal fairness</h3>
-              <p>Commitment, player entropy, deterministic shuffle and deal positions.</p>
-            </header>
-            <ProtocolDemo />
-          </article>
-          <article>
-            <header>
               <h3>Private challenge</h3>
-              <p>Secret commitment, hidden assignment, automatic proof and public verification.</p>
+              <p>Secret commitment hidden assignment optional proof and public verification</p>
             </header>
             <ChallengeProofDemo />
           </article>
         </div>
       </section>
 
-      <section className="story-section" aria-labelledby="proof-statements-title">
+      <section className="story-section" id="challenge-proofs" aria-labelledby="proof-statements-title">
         <header className="story-section-head">
           <p className="story-index">04</p>
           <div>
@@ -225,38 +221,44 @@ export default function ProtocolPage() {
         </header>
 
         <div className="protocol-details-story">
-          <details open>
+          <details open id="deck-shuffle">
             <summary>
-              <span>Deal commitment and seed</span>
-              <small>Final deck construction</small>
+              <span>Encrypted deck shuffle</span>
+              <small>Deck construction</small>
             </summary>
             <div>
               <p>
-                The server generates a fresh 32-byte secret and publishes a SHA-256 commitment bound
-                to the room and hand number before player entropy arrives.
+                The server and every human browser create one secret key for the hand Only their
+                public keys enter the transcript The keys combine into one deck key that no single
+                participant owns
               </p>
-              <code>C = SHA256(&quot;NPDEAL01&quot; || room || hand || server_secret)</code>
+              <code>P = P_server + P_1 + ... + P_n</code>
               <p>
-                Each browser contributes 32 bytes from <code>crypto.getRandomValues</code>. Ordered
-                seat contributions and the committed server secret produce one seed.
+                The canonical 52 cards start encrypted under that joint key Every deck participant
+                applies a private permutation and fresh encryption masks
               </p>
-              <code>
-                seed = SHA256(&quot;NPSEED01&quot; || room || hand || seats || shares ||
-                server_secret)
-              </code>
+              <code>D_out = rerandomize(permutation(D_in))</code>
               <p>
-                SHA-256 counter output drives rejection sampling and Fisher-Yates over the canonical
-                52-card deck. Hole cards, burns and community cards use fixed positions.
+                Each UltraHonk proof binds one input deck to one output deck without revealing the
+                permutation If one human browser samples honestly then the server cannot choose the
+                final order
               </p>
-              <code>stream_block = SHA256(&quot;NPSTRM01&quot; || seed || counter)</code>
               <p>
-                A 32-bit word is rejected when it falls outside the largest exact multiple of the
-                shrinking range. This removes modulo bias from each swap choice.
+                Proven decryption shares open only required hole and board positions Final key
+                openings reconstruct all 52 cards after settlement The SHA 256 record chain fixes
+                the exact public transcript
+              </p>
+              <p>
+                This follows{" "}
+                <a href={MENTAL_POKER} target="_blank" rel="noreferrer">mental poker</a>
+                {" "}and{" "}
+                <a href={VERIFIABLE_SHUFFLE} target="_blank" rel="noreferrer">verifiable shuffle</a>
+                {" "}research
               </p>
             </div>
           </details>
 
-          <details>
+          <details id="challenge-assignment">
             <summary>
               <span>Challenge assignment</span>
               <small>Hidden rule selection</small>
@@ -282,10 +284,16 @@ export default function ProtocolPage() {
                 without modulo imbalance. The player commits before seeing the nonce. The server
                 cannot evaluate candidate nonces without the hidden 256-bit browser secret.
               </p>
+              <p>
+                The hashes use the{" "}
+                <a href={BLAKE2} target="_blank" rel="noreferrer">BLAKE2 standard</a>
+                {" "}and the hidden catalog path follows{" "}
+                <a href={MERKLE} target="_blank" rel="noreferrer">Merkle tree authentication</a>
+              </p>
             </div>
           </details>
 
-          <details>
+          <details id="challenge-completion">
             <summary>
               <span>Challenge completion</span>
               <small>Hidden rule completion</small>
@@ -311,10 +319,14 @@ export default function ProtocolPage() {
               <code>
                 nullifier = BLAKE2s(&quot;NPNULL02&quot; || hand_tag || seat || secret)
               </code>
+              <p>
+                The facts hash hides the six values with a private salt The nullifier permits one
+                accepted completion for that hidden secret
+              </p>
             </div>
           </details>
 
-          <details>
+          <details id="proof-verification">
             <summary>
               <span>Generation and verification</span>
               <small>The browser and server path</small>
@@ -329,6 +341,12 @@ export default function ProtocolPage() {
                 publishing them. A public browser fetches those accepted bytes and runs the same
                 UltraHonk verification locally.
               </p>
+              <p>
+                See the{" "}
+                <a href={NOIR_PROVING} target="_blank" rel="noreferrer">Noir proving guide</a>
+                {" "}and{" "}
+                <a href={BARRETENBERG} target="_blank" rel="noreferrer">Barretenberg source</a>
+              </p>
             </div>
           </details>
 
@@ -339,10 +357,9 @@ export default function ProtocolPage() {
             </summary>
             <div>
               <p>
-                The deal check relies on SHA-256 commitment security, pseudorandom hash output and
-                browser entropy from crypto.getRandomValues. An unpredictable contribution after
-                the server commitment prevents the server from choosing the final deck after it
-                commits. The server can still abort or stop serving a room.
+                A valid shuffle proof proves a permutation and fresh encryption It does not prove
+                uniform sampling Fair randomness needs one honest human browser to sample a uniform
+                secret permutation The server or another player can still abort the room
               </p>
               <p>
                 The completion circuit proves the private rule against six facts committed by the
@@ -393,14 +410,17 @@ export default function ProtocolPage() {
           <a href={`${REPO}/apps/server/src/proof.rs`} target="_blank" rel="noreferrer">
             Rust verifier
           </a>
-          <a href={`${REPO}/crates/deal-core/src/lib.rs`} target="_blank" rel="noreferrer">
-            Deal protocol
+          <a href={`${REPO}/apps/web/lib/deck-crypto.ts`} target="_blank" rel="noreferrer">
+            Deck protocol
           </a>
-          <a href={`${REPO}/apps/server/src/fairness.rs`} target="_blank" rel="noreferrer">
-            Fair ceremony
+          <a href={`${REPO}/apps/server/src/mental.rs`} target="_blank" rel="noreferrer">
+            Encrypted deck server
           </a>
-          <a href={`${REPO}/apps/web/lib/deal.ts`} target="_blank" rel="noreferrer">
-            Browser deal verifier
+          <a href={`${REPO}/apps/web/lib/deck-audit.ts`} target="_blank" rel="noreferrer">
+            Browser deck verifier
+          </a>
+          <a href={`${REPO}/circuits/deck-v1/shuffle/src/main.nr`} target="_blank" rel="noreferrer">
+            Shuffle circuit
           </a>
           <a href={`${REPO}/apps/web/scripts/verify-receipt.mjs`} target="_blank" rel="noreferrer">
             Standalone proof verifier
@@ -417,10 +437,19 @@ export default function ProtocolPage() {
           <a href={RANDOMNESS} target="_blank" rel="noreferrer">
             Web Crypto randomness
           </a>
+          <a href={MENTAL_POKER} target="_blank" rel="noreferrer">
+            Mental Poker Revisited
+          </a>
+          <a href={VERIFIABLE_SHUFFLE} target="_blank" rel="noreferrer">
+            Verifiable secret shuffle
+          </a>
+          <a href={BLAKE2} target="_blank" rel="noreferrer">
+            BLAKE2 standard
+          </a>
+          <a href={MERKLE} target="_blank" rel="noreferrer">
+            Merkle tree authentication
+          </a>
         </div>
-        <Link className="story-link" href="/rules">
-          Read the game rules
-        </Link>
       </section>
     </main>
   );

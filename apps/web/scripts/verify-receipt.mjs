@@ -77,7 +77,6 @@ function receipt(value) {
 
   if (
     !metadata(value) ||
-    value.points !== 20 ||
     !common(completion, value) ||
     completion.mode !== 1 ||
     completion.factsHash !== value.facts_hash ||

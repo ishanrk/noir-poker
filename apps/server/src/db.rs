@@ -21,6 +21,7 @@ pub struct NewHand<'a> {
     pub seed: &'a [u8; 32],
     pub dealer: usize,
     pub stacks: &'a [u32],
+    pub encrypted: bool,
 }
 
 pub struct NewChallenge {
@@ -107,6 +108,7 @@ pub struct StoredRoom {
     pub small_blind: i64,
     pub big_blind: i64,
     pub total_hands: i32,
+    pub challenge_awarded: bool,
     pub rev: i64,
     pub seats: Vec<StoredSeat>,
     pub hand: Option<StoredHand>,
@@ -116,9 +118,11 @@ pub struct StoredRoom {
 #[derive(Clone)]
 pub struct StoredSeat {
     pub seat: i32,
+    pub name: String,
     pub token_hash: Vec<u8>,
     pub ready_hand: Option<Uuid>,
     pub proof_points: i64,
+    pub challenge_bonus: i64,
 }
 
 #[derive(Clone)]
@@ -204,7 +208,6 @@ pub struct StoredProofMeta {
     pub draw_published: bool,
     pub completion_published: bool,
     pub nullifier: Option<Vec<u8>>,
-    pub points: Option<i64>,
 }
 
 pub struct StoredClaim {
@@ -240,23 +243,15 @@ impl Db {
         Ok(Self { pool })
     }
 
-    pub async fn begin_deck(&self, room: Uuid, hand_no: u64, hand: Uuid) -> DbResult<()> {
-        query("INSERT INTO deck_transcripts (room_id, hand_no, hand_id) VALUES ($1, $2, $3)")
-            .bind(room)
-            .bind(i64::try_from(hand_no)?)
-            .bind(hand)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
     pub async fn finish_deck(
         &self,
         room: Uuid,
         hand_no: u64,
         transcript: &[u8],
         deck: &[u8; 52],
+        facts: &[FactCommitment],
     ) -> DbResult<()> {
+        let mut tx = self.pool.begin().await?;
         let changed = query(
             "UPDATE deck_transcripts SET transcript = $3, final_deck = $4, completed_at = now() \
              WHERE room_id = $1 AND hand_no = $2 AND completed_at IS NULL",
@@ -265,9 +260,28 @@ impl Db {
         .bind(i64::try_from(hand_no)?)
         .bind(transcript)
         .bind(deck.as_slice())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
         one_row(changed)?;
+
+        for fact in facts {
+            let changed = query(
+                "UPDATE challenge_assignments SET facts_salt = $4, facts_hash = $5 \
+                 WHERE room_id = $1 AND hand_no = $2 AND seat = $3 \
+                 AND facts_hash IS NULL",
+            )
+            .bind(room)
+            .bind(i64::try_from(hand_no)?)
+            .bind(i32::try_from(fact.seat)?)
+            .bind(fact.salt.as_slice())
+            .bind(fact.value.as_slice())
+            .execute(&mut *tx)
+            .await?;
+
+            one_row(changed)?;
+        }
+
+        tx.commit().await?;
         Ok(())
     }
 
@@ -282,11 +296,13 @@ impl Db {
         )
     }
 
-    pub async fn incomplete_decks(&self) -> DbResult<u64> {
-        let row =
-            query("SELECT COUNT(*) AS count FROM deck_transcripts WHERE completed_at IS NULL")
-                .fetch_one(&self.pool)
-                .await?;
+    pub async fn incomplete_rooms(&self) -> DbResult<u64> {
+        let row = query(
+            "SELECT COUNT(DISTINCT room_id) AS count FROM deck_transcripts \
+             WHERE completed_at IS NULL",
+        )
+        .fetch_one(&self.pool)
+        .await?;
         Ok(u64::try_from(row.try_get::<i64, _>("count")?)?)
     }
 
@@ -313,11 +329,14 @@ impl Db {
         .bind(i32::try_from(config.hands)?)
         .execute(&mut *tx)
         .await?;
-        query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, 0, $2)")
-            .bind(id)
-            .bind(token_hash.as_slice())
-            .execute(&mut *tx)
-            .await?;
+        query(
+            "INSERT INTO seats (room_id, seat, name, token_hash) \
+             VALUES ($1, 0, 'Player 1', $2)",
+        )
+        .bind(id)
+        .bind(token_hash.as_slice())
+        .execute(&mut *tx)
+        .await?;
 
         tx.commit().await?;
         Ok(())
@@ -335,9 +354,10 @@ impl Db {
     ) -> DbResult<()> {
         let mut tx = self.pool.begin().await?;
 
-        query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, $2, $3)")
+        query("INSERT INTO seats (room_id, seat, name, token_hash) VALUES ($1, $2, $3, $4)")
             .bind(room)
             .bind(i32::try_from(seat)?)
+            .bind(format!("Player {}", seat + 1))
             .bind(token_hash.as_slice())
             .execute(&mut *tx)
             .await?;
@@ -365,6 +385,18 @@ impl Db {
             .bind(stacks)
             .execute(&mut *tx)
             .await?;
+
+            if hand.encrypted {
+                query(
+                    "INSERT INTO deck_transcripts (room_id, hand_no, hand_id) \
+                     VALUES ($1, $2, $3)",
+                )
+                .bind(room)
+                .bind(i64::try_from(hand.no)?)
+                .bind(hand.id)
+                .execute(&mut *tx)
+                .await?;
+            }
         }
 
         tx.commit().await?;
@@ -411,6 +443,73 @@ impl Db {
         Ok(())
     }
 
+    pub async fn finish_game(
+        &self,
+        room: Uuid,
+        hand: Uuid,
+        seat: usize,
+        bonuses: Option<&[u32]>,
+        rev: u64,
+        next_rev: u64,
+    ) -> DbResult<()> {
+        let mut tx = self.pool.begin().await?;
+        let changed = query(
+            "UPDATE seats SET ready_hand = $3 \
+             WHERE room_id = $1 AND seat = $2 AND ready_hand IS NULL",
+        )
+        .bind(room)
+        .bind(i32::try_from(seat)?)
+        .bind(hand)
+        .execute(&mut *tx)
+        .await?;
+        one_row(changed)?;
+
+        if let Some(bonuses) = bonuses {
+            for (seat, bonus) in bonuses.iter().copied().enumerate() {
+                let changed = query(
+                    "UPDATE seats SET challenge_bonus = $3 \
+                     WHERE room_id = $1 AND seat = $2 AND challenge_bonus = 0",
+                )
+                .bind(room)
+                .bind(i32::try_from(seat)?)
+                .bind(i64::from(bonus))
+                .execute(&mut *tx)
+                .await?;
+                one_row(changed)?;
+            }
+            query("UPDATE seats SET ready_hand = NULL WHERE room_id = $1")
+                .bind(room)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        let changed = if bonuses.is_some() {
+            query(
+                "UPDATE rooms SET rev = $2, challenge_awarded = TRUE \
+                 WHERE id = $1 AND rev = $3 AND challenge_awarded = FALSE AND players = $4",
+            )
+            .bind(room)
+            .bind(i64::try_from(next_rev)?)
+            .bind(i64::try_from(rev)?)
+            .bind(i32::try_from(bonuses.map_or(0, <[u32]>::len))?)
+            .execute(&mut *tx)
+            .await?
+        } else {
+            query(
+                "UPDATE rooms SET rev = $2 \
+                 WHERE id = $1 AND rev = $3 AND challenge_awarded = FALSE",
+            )
+            .bind(room)
+            .bind(i64::try_from(next_rev)?)
+            .bind(i64::try_from(rev)?)
+            .execute(&mut *tx)
+            .await?
+        };
+        one_row(changed)?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn assign_challenge(&self, challenge: ChallengeEntropy) -> DbResult<()> {
         let mut tx = self.pool.begin().await?;
         let changed = query(
@@ -452,6 +551,11 @@ impl Db {
              FROM challenge_assignments assignment \
              JOIN rooms ON rooms.id = assignment.room_id \
              WHERE assignment.nonce IS NULL \
+             AND NOT EXISTS ( \
+                 SELECT 1 FROM deck_transcripts \
+                 WHERE deck_transcripts.room_id = assignment.room_id \
+                 AND deck_transcripts.completed_at IS NULL \
+             ) \
              AND assignment.hand_no = ( \
                  SELECT MAX(hands.hand_no) + 1 FROM hands \
                  WHERE hands.room_id = assignment.room_id \
@@ -643,7 +747,12 @@ impl Db {
 
     pub async fn load_rooms(&self) -> DbResult<Vec<StoredRoom>> {
         let rows = query(
-            "SELECT id, mode, players, stack, small_blind, big_blind, total_hands, rev FROM rooms ORDER BY id",
+            "SELECT id, mode, players, stack, small_blind, big_blind, total_hands, \
+             challenge_awarded, rev FROM rooms WHERE NOT EXISTS ( \
+                 SELECT 1 FROM deck_transcripts \
+                 WHERE deck_transcripts.room_id = rooms.id \
+                 AND deck_transcripts.completed_at IS NULL \
+             ) ORDER BY id",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -663,6 +772,7 @@ impl Db {
                 small_blind: row.try_get("small_blind")?,
                 big_blind: row.try_get("big_blind")?,
                 total_hands: row.try_get("total_hands")?,
+                challenge_awarded: row.try_get("challenge_awarded")?,
                 rev: row.try_get("rev")?,
                 seats,
                 hand,
@@ -675,7 +785,7 @@ impl Db {
 
     async fn load_seats(&self, room: Uuid) -> DbResult<Vec<StoredSeat>> {
         let rows = query(
-            "SELECT seat, token_hash, ready_hand, proof_points \
+            "SELECT seat, name, token_hash, ready_hand, proof_points, challenge_bonus \
              FROM seats WHERE room_id = $1 ORDER BY seat",
         )
         .bind(room)
@@ -686,9 +796,11 @@ impl Db {
             .map(|row| {
                 Ok(StoredSeat {
                     seat: row.try_get("seat")?,
+                    name: row.try_get("name")?,
                     token_hash: row.try_get("token_hash")?,
                     ready_hand: row.try_get("ready_hand")?,
                     proof_points: row.try_get("proof_points")?,
+                    challenge_bonus: row.try_get("challenge_bonus")?,
                 })
             })
             .collect()
@@ -870,7 +982,7 @@ impl Db {
         query(
             "SELECT hand_no, seat, facts_hash IS NOT NULL AS finished, \
              draw_verified_at IS NOT NULL AS draw_published, \
-             claimed_at IS NOT NULL AS completion_published, nullifier, points \
+             claimed_at IS NOT NULL AS completion_published, nullifier \
              FROM challenge_assignments WHERE room_id = $1 ORDER BY hand_no, seat",
         )
         .bind(room)
@@ -885,7 +997,6 @@ impl Db {
                 draw_published: row.try_get("draw_published")?,
                 completion_published: row.try_get("completion_published")?,
                 nullifier: row.try_get("nullifier")?,
-                points: row.try_get("points")?,
             })
         })
         .collect()

@@ -94,6 +94,9 @@ pub(super) struct Room {
     pub(super) last_deck: Option<Box<MentalDeck>>,
     pub(super) mental: bool,
     pub(super) action_pause: bool,
+    pub(super) bot_running: bool,
+    pub(super) bot_wake: bool,
+    pub(super) challenge_awarded: bool,
     pub(super) rev: u64,
     pub(super) notify: broadcast::Sender<u64>,
 }
@@ -129,11 +132,7 @@ impl Room {
         Ok(Self {
             config,
             mode,
-            seats: vec![Seat {
-                token_hash,
-                ready_hand: None,
-                proof_points: 0,
-            }],
+            seats: vec![Seat::new(token_hash, "Player 1".to_owned())],
             hand: None,
             current_commitment: None,
             ceremony: None,
@@ -143,6 +142,9 @@ impl Room {
             last_deck: None,
             mental: false,
             action_pause: false,
+            bot_running: false,
+            bot_wake: false,
+            challenge_awarded: false,
             rev: 0,
             notify,
         })
@@ -182,20 +184,25 @@ impl Room {
         Ok(self.seats.len())
     }
 
+    pub(super) fn set_creator_name(&mut self, name: String) {
+        self.seats[0].name = name;
+    }
+
     #[cfg(test)]
     pub(super) fn commit_join(&mut self, token_hash: TokenHash, hand: Option<LiveHand>, rev: u64) {
-        self.seats.push(Seat {
+        self.seats.push(Seat::new(
             token_hash,
-            ready_hand: None,
-            proof_points: 0,
-        });
+            format!("Player {}", self.seats.len() + 1),
+        ));
         self.hand = hand;
         self.changed(rev);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn commit_fair_join(
         &mut self,
         token_hash: TokenHash,
+        name: String,
         seat: usize,
         share: [u8; 32],
         hand: Option<LiveHand>,
@@ -205,11 +212,7 @@ impl Room {
         let ceremony = self.ceremony.as_mut().expect("fair join ceremony");
 
         ceremony.shares[seat] = Some(share);
-        self.seats.push(Seat {
-            token_hash,
-            ready_hand: None,
-            proof_points: 0,
-        });
+        self.seats.push(Seat::new(token_hash, name));
 
         if let Some(hand) = hand {
             self.current_commitment = Some(ceremony.commitment);
@@ -233,12 +236,9 @@ impl Room {
             .expect("single deal ceremony")
             .commitment;
 
-        for token_hash in tokens {
-            self.seats.push(Seat {
-                token_hash,
-                ready_hand: None,
-                proof_points: 0,
-            });
+        for (index, token_hash) in tokens.into_iter().enumerate() {
+            self.seats
+                .push(Seat::new(token_hash, format!("Bot {}", index + 1)));
         }
 
         self.current_commitment = Some(commitment);
@@ -267,8 +267,8 @@ impl Room {
             return Err("already ready");
         }
 
-        // human challenge required
-        if (self.mode != RoomMode::Single || seat == 0)
+        // multiplayer challenge required
+        if self.mode == RoomMode::Multiplayer
             && self
                 .next_challenges
                 .get(seat)
@@ -320,6 +320,49 @@ impl Room {
             all: ready.all && all,
             share,
         })
+    }
+
+    pub(super) fn stage_finish(&self, seat: usize) -> Result<PendingFinish, &'static str> {
+        let hand = self.hand.as_ref().ok_or("game not started")?;
+        let player = self.seats.get(seat).ok_or("invalid player")?;
+
+        if self.mode != RoomMode::Multiplayer || !self.game_complete() {
+            return Err("game not complete");
+        }
+        if self.deck.as_ref().is_some_and(|deck| !deck.complete) {
+            return Err("deck opening incomplete");
+        }
+        if self.challenge_awarded {
+            return Err("game already finished");
+        }
+        if player.ready_hand == Some(hand.id) {
+            return Err("already finished");
+        }
+
+        let all = self
+            .seats
+            .iter()
+            .enumerate()
+            .all(|(index, player)| index == seat || player.ready_hand == Some(hand.id));
+
+        Ok(PendingFinish {
+            hand: hand.id,
+            rev: self.rev.checked_add(1).ok_or("revision limit reached")?,
+            bonuses: all.then(|| challenge_bonuses(self.config.stack, &self.seats)),
+        })
+    }
+
+    pub(super) fn commit_finish(&mut self, seat: usize, pending: PendingFinish) {
+        if let Some(bonuses) = pending.bonuses {
+            for (player, bonus) in self.seats.iter_mut().zip(bonuses) {
+                player.challenge_bonus = bonus;
+                player.ready_hand = None;
+            }
+            self.challenge_awarded = true;
+        } else {
+            self.seats[seat].ready_hand = Some(pending.hand);
+        }
+        self.changed(pending.rev);
     }
 
     pub(super) fn stage_next_hand(&self, seed: [u8; 32]) -> Result<Option<LiveHand>, &'static str> {
@@ -410,8 +453,8 @@ impl Room {
         hand_no: u64,
         commitment: [u8; 32],
     ) -> Result<PendingChallenge, &'static str> {
-        if self.mode == RoomMode::Single && seat != 0 {
-            return Err("bot challenge unavailable");
+        if self.mode != RoomMode::Multiplayer {
+            return Err("challenge unavailable");
         }
 
         let hand = self.hand.as_ref().ok_or("game not started")?;
@@ -526,6 +569,14 @@ impl Room {
         if !hand.game.settled {
             return Err("hand not settled");
         }
+        if self.challenge_awarded
+            || self
+                .seats
+                .get(seat)
+                .is_some_and(|player| player.ready_hand == Some(hand.id))
+        {
+            return Err("challenge review finished");
+        }
 
         if hand.no != hand_no {
             return Err("wrong challenge hand");
@@ -547,7 +598,7 @@ impl Room {
         let prior_points = self.seats[seat].proof_points;
         let next_points = prior_points
             .checked_add(u64::from(points))
-            .ok_or("proof points limit reached")?;
+            .ok_or("challenge count limit reached")?;
 
         Ok(PendingClaim {
             hand_no,
@@ -719,8 +770,22 @@ impl Ceremony {
 
 pub(super) struct Seat {
     pub(super) token_hash: TokenHash,
+    pub(super) name: String,
     pub(super) ready_hand: Option<Uuid>,
     pub(super) proof_points: u64,
+    pub(super) challenge_bonus: u32,
+}
+
+impl Seat {
+    fn new(token_hash: TokenHash, name: String) -> Self {
+        Self {
+            token_hash,
+            name,
+            ready_hand: None,
+            proof_points: 0,
+            challenge_bonus: 0,
+        }
+    }
 }
 
 pub(super) struct LiveHand {
@@ -799,6 +864,12 @@ pub(super) struct PendingReady {
     pub(super) all: bool,
 }
 
+pub(super) struct PendingFinish {
+    pub(super) hand: Uuid,
+    pub(super) rev: u64,
+    pub(super) bonuses: Option<Vec<u32>>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct PendingClaim {
     pub(super) hand_no: u64,
@@ -813,6 +884,37 @@ pub(super) struct PendingClaim {
     pub(super) prior_points: u64,
     pub(super) next_points: u64,
     pub(super) rev: u64,
+}
+
+pub(super) fn challenge_bonuses(stack: u32, seats: &[Seat]) -> Vec<u32> {
+    let mut order: Vec<_> = (0..seats.len()).collect();
+    order.sort_by_key(|&seat| (std::cmp::Reverse(seats[seat].proof_points), seat));
+    let ranked = (0..seats.len())
+        .map(|rank| {
+            let percent = 100u64.saturating_sub(16 * rank as u64);
+            (u64::from(stack) * percent).div_ceil(100)
+        })
+        .collect::<Vec<_>>();
+    let mut bonuses = vec![0; seats.len()];
+    let mut start = 0;
+
+    while start < order.len() {
+        let score = seats[order[start]].proof_points;
+        let mut end = start + 1;
+        while end < order.len() && seats[order[end]].proof_points == score {
+            end += 1;
+        }
+        let bonus = ranked[start..end]
+            .iter()
+            .sum::<u64>()
+            .div_ceil((end - start) as u64);
+        for &seat in &order[start..end] {
+            bonuses[seat] = u32::try_from(bonus).expect("bonus within buy in");
+        }
+        start = end;
+    }
+
+    bonuses
 }
 
 pub(super) struct PendingAction {
@@ -992,10 +1094,6 @@ fn settle(game: &mut State) -> Result<HandResult, &'static str> {
     Ok(HandResult { kind, awards })
 }
 
-pub(super) fn settle_hidden(game: &mut State) -> Result<HandResult, &'static str> {
-    settle(game)
-}
-
 const fn empty_facts() -> Facts {
     Facts {
         saw_flop: false,
@@ -1015,6 +1113,16 @@ pub(super) fn bind_facts(
 ) -> Result<(), &'static str> {
     let facts = action.facts.as_ref().ok_or("challenge facts missing")?;
 
+    action.fact_commitments = Some(challenge_facts(facts, challenges, salts, mode)?);
+    Ok(())
+}
+
+pub(super) fn challenge_facts(
+    facts: &[Facts],
+    challenges: &[Option<Challenge>],
+    salts: Vec<[u8; 32]>,
+    mode: RoomMode,
+) -> Result<Vec<FactCommitment>, &'static str> {
     let count = if mode == RoomMode::Single {
         1
     } else {
@@ -1043,8 +1151,7 @@ pub(super) fn bind_facts(
         });
     }
 
-    action.fact_commitments = Some(commits);
-    Ok(())
+    Ok(commits)
 }
 
 fn action_error(err: ActionError) -> &'static str {
@@ -1066,6 +1173,26 @@ mod tests {
     use super::*;
 
     const SEED: [u8; 32] = [0x42; 32];
+
+    fn scored(points: u64) -> Seat {
+        let mut seat = Seat::new([0; 32], "Player".to_owned());
+        seat.proof_points = points;
+        seat
+    }
+
+    #[test]
+    fn ranked_challenge_bonus() {
+        let seats = [scored(60), scored(40), scored(20), scored(0)];
+
+        assert_eq!(challenge_bonuses(101, &seats), vec![101, 85, 69, 53]);
+    }
+
+    #[test]
+    fn tied_challenge_bonus() {
+        let seats = [scored(20), scored(20), scored(0)];
+
+        assert_eq!(challenge_bonuses(100, &seats), vec![92, 92, 68]);
+    }
 
     #[test]
     fn fold_result() {

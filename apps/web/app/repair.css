@@ -1389,6 +1389,62 @@ button.key-space { width: min(420px, 100%); height: 68px; justify-self: center; 
   text-align: center;
 }
 
+.table-shell {
+  position: relative;
+}
+
+.challenge-leaderboard {
+  position: absolute;
+  z-index: 12;
+  top: 0;
+  right: 0;
+  width: 188px;
+  padding: 11px 13px;
+  border: 1px solid var(--blue);
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 4px 4px 0 var(--lime);
+  color: var(--blue);
+}
+
+.challenge-leaderboard > strong {
+  font-size: 10px;
+}
+
+.challenge-leaderboard ol {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.challenge-leaderboard li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 7px;
+  align-items: baseline;
+  color: var(--ink);
+  font-size: 10px;
+}
+
+.challenge-leaderboard li b {
+  color: var(--blue);
+}
+
+.challenge-leaderboard li small {
+  color: #228c62;
+  font-size: 8px;
+}
+
+@media (max-width: 700px) {
+  .challenge-leaderboard {
+    position: relative;
+    width: min(260px, calc(100% - 24px));
+    margin: 0 auto 10px;
+  }
+}
+
 .action-copy {
   min-height: 56px;
 }

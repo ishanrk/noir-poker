@@ -21,6 +21,7 @@ export type RoomConfig = {
   big_blind: number;
   hands: number;
   mode?: RoomMode;
+  name?: string;
 };
 
 export type RoomMode = "single" | "multiplayer" | "aztec";
@@ -48,7 +49,6 @@ export type ProofReceipt = {
   facts_hash: string;
   nullifier: string;
   catalog_root: string;
-  points: number;
   draw_proof?: string;
   draw_public_inputs?: string;
   completion_proof: string;
@@ -118,7 +118,6 @@ export type ProofMeta = {
   draw_published: boolean;
   completion_published: boolean;
   nullifier?: string;
-  points?: number;
 };
 
 async function responseError(response: Response) {
@@ -143,11 +142,11 @@ export async function createRoom(config: RoomConfig): Promise<SeatResponse> {
   return response.json();
 }
 
-export async function joinRoom(room: string): Promise<SeatResponse> {
+export async function joinRoom(room: string, name?: string): Promise<SeatResponse> {
   const response = await fetch(`${serverUrl()}/rooms/${encodeURIComponent(room)}/join`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ entropy: entropy() }),
+    body: JSON.stringify({ entropy: entropy(), name }),
   });
 
   if (!response.ok) throw new Error(await responseError(response));
@@ -158,7 +157,9 @@ export async function loadProofReceipt(nullifier: string): Promise<ProofReceipt>
   const response = await fetch(`${serverUrl()}/proofs/${encodeURIComponent(nullifier)}`);
 
   if (!response.ok) throw new Error(await responseError(response));
-  return response.json();
+  const receipt = await response.json() as ProofReceipt & { points?: unknown };
+  delete receipt.points;
+  return receipt;
 }
 
 export async function loadPublishedProof(
