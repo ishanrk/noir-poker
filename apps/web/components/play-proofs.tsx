@@ -24,6 +24,14 @@ export function PlayProofs({ room, handNo, settled, view }: {
       player.completion?.published,
     ].join(":"))
     .join("|");
+  const localPublicationVersion = [
+    view.assignment.kind === "assigned"
+      ? `${view.assignment.handNo}:${view.assignment.drawVerified || view.assignment.drawState === "verified"}`
+      : "",
+    view.claim
+      ? `${view.claim.handNo}:${view.claim.drawVerified || view.claim.drawState === "verified"}:${view.claim.state === "verified"}`
+      : "",
+  ].join("|");
 
   useEffect(() => {
     let live = true;
@@ -38,7 +46,7 @@ export function PlayProofs({ room, handNo, settled, view }: {
         setError(cause instanceof Error ? cause.message : "proof history unavailable");
       });
     return () => { live = false; };
-  }, [handNo, proofVersion, room, settled]);
+  }, [handNo, localPublicationVersion, proofVersion, room, settled]);
 
   const firstHand = Math.max(0, handNo - 4);
   const hands = Array.from({ length: handNo - firstHand + 1 }, (_, index) => firstHand + index);

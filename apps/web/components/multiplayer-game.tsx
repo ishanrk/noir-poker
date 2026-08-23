@@ -271,7 +271,6 @@ export function MultiplayerGame({ room }: { room: string }) {
   const [localProofs, setLocalProofs] = useState<Record<string, LocalProofState>>({});
   const [notices, setNotices] = useState<ActionNoticeView[]>([]);
   const noticeQueue = useRef<ActionNoticeView[]>([]);
-  const noticeClock = useRef<{ key: string; start: number } | undefined>(undefined);
   const [deckStage, setDeckStage] = useState<string>();
   const [finishHand, setFinishHand] = useState<number>();
   const [tourOpen, setTourOpen] = useState(false);
@@ -323,17 +322,12 @@ export function MultiplayerGame({ room }: { room: string }) {
     if (!notice) return;
 
     const hand = view?.hand_no;
-    const key = `${hand}:${notice.seq}`;
-    if (noticeClock.current?.key !== key) {
-      noticeClock.current = { key, start: Date.now() };
-    }
-    const remaining = Math.max(0, 2000 - (Date.now() - noticeClock.current.start));
     const timer = window.setTimeout(() => {
       setNoticeQueue((current) => {
         if (viewRef.current?.hand_no !== hand || current[0]?.seq !== notice.seq) return current;
         return current.slice(1);
       });
-    }, remaining);
+    }, 2000);
 
     return () => window.clearTimeout(timer);
   }, [notice, setNoticeQueue, view?.hand_no]);
@@ -349,7 +343,6 @@ export function MultiplayerGame({ room }: { room: string }) {
     setError(undefined);
     setDeckStage(undefined);
     setNoticeQueue([]);
-    noticeClock.current = undefined;
     syncing.current = true;
     actionWait.current = undefined;
     readyWait.current = undefined;

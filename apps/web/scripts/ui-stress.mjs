@@ -638,7 +638,11 @@ async function noticeLog(trace) {
           for (const notice of notices(node)) {
             const id = `${notice.getAttribute("data-hand")}:${notice.getAttribute("data-seq")}`;
             const event = window.__noticeEvents.findLast((item) => item.id === id && item.removed === undefined);
-            if (event) event.removed = Date.now();
+            if (event) {
+              event.removed = Date.now();
+              const game = document.querySelector(".game-view");
+              event.state = game ? { notice: game.getAttribute("data-notice"), stage: game.getAttribute("data-stage") } : null;
+            }
           }
         }
       }
@@ -868,7 +872,13 @@ try {
     const tail = trace.frames.slice(-12).map((item) => ({
       direction: item.direction,
       at: item.at,
-      message: value(item),
+      type: value(item)?.type,
+      hand: value(item)?.view?.hand_no ?? value(item)?.hand_no,
+      rev: value(item)?.rev,
+      stage: value(item)?.stage,
+      settled: value(item)?.view?.settled,
+      board: value(item)?.view?.board?.length,
+      action: value(item)?.view?.last_action,
     }));
     process.stderr.write(`${trace.name} ${JSON.stringify(tail, null, 2)}\n`);
   }
