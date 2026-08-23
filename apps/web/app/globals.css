@@ -656,6 +656,12 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .deck-proof-seal small { max-width: 170px; color: var(--muted); font-size: 11px; }
 .deck-proof-seal[data-state="verified"] { background: var(--blue); }
 .deck-proof-seal[data-state="verified"] span { color: var(--lime); }
+.deck-proof-page { --retro-font: "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; font-family: var(--retro-font); }
+.deck-proof-page :where(h1, h2, h3, p, strong, span, small, button, output, dt, dd, a) { font-family: var(--retro-font); }
+.deck-proof-page .audit-hero h1 { font-family: var(--retro-font); font-size: clamp(42px, 6vw, 68px); font-weight: 800; letter-spacing: 0; }
+.deck-unavailable { width: min(100% - 40px, 1040px); margin: 0 auto; padding: 28px 0 30px 26px; border-bottom: 1px solid var(--blue); border-left: 5px solid var(--blue); }
+.deck-unavailable strong { color: var(--blue); font-size: 19px; }
+.deck-unavailable p { margin: 10px 0 0; color: var(--muted); font-size: 14px; }
 .deck-opening { width: min(100% - 40px, 1040px); margin: 0 auto; padding: 74px 0; border-bottom: 2px solid var(--blue); }
 .deck-opening h2 { margin: 7px 0 8px; font: 800 32px/1.1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
 .deck-opening header > p:last-child { max-width: 670px; color: var(--muted); line-height: 1.55; }
@@ -664,21 +670,42 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .deck-opening-stream span { color: var(--blue); font: 700 9px/1 ui-sans-serif, system-ui, sans-serif; }
 .deck-opening-stream .card { width: 58px; }
 .proof-link { padding: 13px 18px; border: 2px solid var(--blue); color: white; background: var(--blue); box-shadow: 5px 5px 0 var(--lime); font: 800 12px/1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
-.deck-protocol-blocks { display: grid; grid-template-columns: repeat(2, 1fr); width: min(100% - 40px, 1040px); margin: 54px auto 0; border-top: 2px solid var(--blue); border-left: 1px solid var(--line-strong); }
-.deck-protocol-blocks article { min-height: 230px; padding: 28px; border-right: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); background: rgb(255 255 255 / 78%); }
-.deck-protocol-blocks span { color: var(--blue); font: 800 11px/1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
-.deck-protocol-blocks h2 { margin: 28px 0 12px; font: 800 23px/1.1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
-.deck-protocol-blocks p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.65; }
+.deck-protocol { width: min(100% - 40px, 1040px); margin: 70px auto 0; }
+.deck-protocol > header { display: grid; gap: 7px; max-width: 620px; }
+.deck-protocol > header h2 { margin: 0; font-size: 34px; line-height: 1; }
+.deck-protocol > header p:last-child { margin: 0; color: var(--muted); font-size: 14px; }
+.deck-protocol-path { position: relative; display: grid; grid-template-columns: repeat(6, 52px); justify-content: space-between; margin: 44px 0 38px; }
+.deck-protocol-path::before { position: absolute; z-index: 0; top: 24px; right: 20px; left: 20px; height: 2px; background: var(--blue); content: ""; }
+.deck-protocol-path button { position: relative; z-index: 1; width: 52px; height: 50px; padding: 0; border: 0; color: var(--blue); background: var(--paper); clip-path: polygon(10px 0, 42px 0, 52px 10px, 52px 40px, 42px 50px, 10px 50px, 0 40px, 0 10px); box-shadow: inset 0 0 0 2px var(--blue); cursor: pointer; font-size: 13px; font-weight: 800; }
+.deck-protocol-path button[data-current="true"] { color: white; background: var(--blue); box-shadow: inset 0 -6px 0 var(--lime); }
+.deck-protocol-step { position: relative; min-height: 330px; padding: 24px 8% 34px 52px; border-left: 5px solid var(--blue); background: linear-gradient(90deg, rgb(42 22 216 / 5%), transparent 62%); animation: protocol-step-in 260ms steps(4, end) both; }
+.deck-protocol-step::before { position: absolute; top: 0; left: -11px; width: 17px; height: 17px; background: var(--lime); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); content: ""; }
+.deck-protocol-step > span { color: var(--blue); font-size: 12px; font-weight: 800; }
+.deck-protocol-step h2 { max-width: 760px; margin: 20px 0 16px; font-size: clamp(29px, 4vw, 44px); line-height: 1; }
+.deck-protocol-step p { max-width: 780px; margin: 0; color: var(--ink); font-size: 17px; line-height: 1.65; }
+.deck-protocol-step strong { display: block; max-width: 760px; margin: 28px 0 24px; padding-left: 18px; border-left: 3px solid var(--lime); color: var(--blue); font-size: 15px; line-height: 1.45; }
+.deck-protocol-step a { color: var(--blue); font-size: 12px; font-weight: 800; text-underline-offset: 4px; }
+.deck-protocol-controls { display: grid; grid-template-columns: 150px 1fr 150px; align-items: center; gap: 18px; margin: 22px 0 70px 52px; }
+.deck-protocol-controls button { min-height: 46px; border: 0; color: white; background: var(--blue); clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px); box-shadow: inset 0 -5px 0 var(--lime); cursor: pointer; font-size: 12px; font-weight: 800; }
+.deck-protocol-controls button:disabled { color: var(--muted); background: var(--line); box-shadow: none; cursor: default; }
+.deck-protocol-controls output { color: var(--blue); font-size: 12px; text-align: center; }
 .deck-limit { width: min(100% - 40px, 1040px); margin: 0 auto 80px; padding: 26px 28px; color: white; background: var(--blue); box-shadow: 8px 8px 0 var(--lime); }
 .deck-limit strong { color: var(--lime); font: 800 15px/1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
 .deck-limit p { max-width: 780px; margin: 10px 0 0; line-height: 1.6; }
 @keyframes deck-open { from { opacity: 0; transform: translateY(-18px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes protocol-step-in { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: translateX(0); } }
 
 @media (max-width: 700px) {
   .deck-proof-seal { justify-self: start; }
   .deck-opening { width: calc(100% - 32px); }
   .deck-opening-stream { grid-template-columns: repeat(5, 1fr); }
   .deck-opening-stream .card { width: 50px; }
-  .deck-protocol-blocks { grid-template-columns: 1fr; width: calc(100% - 32px); }
+  .deck-unavailable, .deck-protocol { width: calc(100% - 32px); }
+  .deck-protocol-path { grid-template-columns: repeat(6, 42px); }
+  .deck-protocol-path::before { top: 20px; }
+  .deck-protocol-path button { width: 42px; height: 42px; clip-path: polygon(8px 0, 34px 0, 42px 8px, 42px 34px, 34px 42px, 8px 42px, 0 34px, 0 8px); }
+  .deck-protocol-step { min-height: 390px; padding: 22px 8px 30px 28px; }
+  .deck-protocol-step p { font-size: 15px; }
+  .deck-protocol-controls { grid-template-columns: 1fr 62px 1fr; margin-left: 0; }
   .deck-limit { width: calc(100% - 32px); }
 }
