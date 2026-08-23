@@ -1,81 +1,131 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 
 import styles from "@/components/crypto.module.css";
 import type { ContractView } from "@/components/contract";
+import { loadProofHistory, type ProofMeta } from "@/lib/server";
 
-export function PlayProofs({ room, view }: {
+export function PlayProofs({ room, handNo, settled, view }: {
   room: string;
+  handNo: number;
+  settled: boolean;
   view: ContractView;
 }) {
-  if (!view.proofs.length) return null;
+  const [history, setHistory] = useState<ProofMeta[]>([]);
+  const [error, setError] = useState<string>();
+  const proofVersion = view.proofs
+    .map((player) => [
+      player.seat,
+      player.draw?.handNo,
+      player.draw?.published,
+      player.completion?.handNo,
+      player.completion?.published,
+    ].join(":"))
+    .join("|");
+
+  useEffect(() => {
+    let live = true;
+    void loadProofHistory(room)
+      .then((proofs) => {
+        if (!live) return;
+        setHistory(proofs);
+        setError(undefined);
+      })
+      .catch((cause) => {
+        if (!live) return;
+        setError(cause instanceof Error ? cause.message : "proof history unavailable");
+      });
+    return () => { live = false; };
+  }, [handNo, proofVersion, room, settled]);
+
+  const firstHand = Math.max(0, handNo - 4);
+  const hands = Array.from({ length: handNo - firstHand + 1 }, (_, index) => firstHand + index);
+  const records = useMemo(
+    () => new Map(history.map((proof) => [`${proof.seat}:${proof.hand_no}`, proof])),
+    [history],
+  );
 
   return (
-    <section className={styles.strip} aria-label="Challenge proofs">
-      <header className={styles.stripHead}>
-        <div>
-          <p className={styles.label}>CHALLENGE PROOFS</p>
-          <h2>PUBLIC PROOF HISTORY</h2>
-        </div>
-        <p className={styles.proofPrivacy}>PRIVATE OBJECTIVES STAY HIDDEN</p>
-      </header>
-      <div className={styles.proofRows}>
-        {view.proofs.map((proof) => (
-          <div className={styles.proofPlayer} key={proof.seat}>
-            <div className={styles.proofOwner}>
-              <strong>{proof.name.toUpperCase()}</strong>
-              <span>{proof.completed} COMPLETED</span>
-              <Link href={`/room/${room}/proofs/player/${proof.seat}`} target="_blank">FULL HISTORY</Link>
-            </div>
-            <ProofItem room={room} seat={proof.seat} kind="draw" proof={proof.draw} />
-            <ProofItem room={room} seat={proof.seat} kind="completion" proof={proof.completion} />
-          </div>
-        ))}
+    <section className={`${styles.strip} ${styles.proofTableStrip}`} aria-label="Challenge proofs">
+      <div className={styles.proofTableWrap}>
+        <table className={styles.proofTable}>
+          <caption>CHALLENGE PROOF HISTORY · LAST FIVE HANDS</caption>
+          <thead>
+            <tr>
+              <th scope="col">PLAYER</th>
+              {hands.map((hand) => (
+                <th scope="col" key={hand}>
+                  <strong>HAND {hand + 1}</strong>
+                  <small>
+                    <span data-proof-tour="challenge-draw">DRAW PROOF</span>
+                    <span aria-hidden="true"> / </span>
+                    <span data-proof-tour="challenge-completion">COMPLETION</span>
+                  </small>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {view.proofs.map((player) => (
+              <tr key={player.seat}>
+                <th scope="row">{player.name.toUpperCase()}</th>
+                {hands.map((hand) => (
+                  <ProofCell
+                    key={hand}
+                    room={room}
+                    hand={hand}
+                    seat={player.seat}
+                    proof={records.get(`${player.seat}:${hand}`)}
+                  />
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-      <nav className={styles.links}>
-        <Link href={`/room/${room}/proofs`} target="_blank">VIEW PROOF HISTORY</Link>
-      </nav>
+      {error && <p className={styles.proofTableError} role="status">{error.toUpperCase()}</p>}
     </section>
   );
 }
 
-function ProofItem({ room, seat, kind, proof }: {
+function ProofCell({ room, hand, seat, proof }: {
   room: string;
+  hand: number;
   seat: number;
-  kind: "draw" | "completion";
-  proof?: ContractView["proofs"][number]["draw"];
+  proof?: ProofMeta;
 }) {
-  const label = kind === "draw" ? "FAIR DRAW" : "COMPLETION";
-  const local = proof?.local === "verified"
-    ? "VERIFIED LOCALLY"
-    : proof?.local === "failed"
-      ? "INVALID LOCALLY"
-      : proof?.local === "verifying"
-        ? "VERIFYING"
-        : undefined;
+  if (!proof) {
+    return <td><span className={styles.proofEmpty}>{hand === 0 ? "NO CHALLENGE" : "WAITING"}</span></td>;
+  }
 
   return (
-    <div className={styles.proofItem}>
-      <div>
-        <span>{label}</span>
-        {proof && <small>HAND {proof.handNo + 1}</small>}
-      </div>
-      {proof?.published ? (
-        <div className={styles.proofStatus}>
-          <strong>{local ?? "PUBLISHED"}</strong>
-          {local !== "VERIFYING" && (
-            <Link
-              href={`/room/${room}/proofs/${proof.handNo}/${seat}/${kind}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              VERIFY
-            </Link>
-          )}
-          {proof.receipt && <Link href={proof.receipt} target="_blank" rel="noreferrer">PUBLIC RECEIPT</Link>}
-        </div>
-      ) : (
-        <strong>NOT PUBLISHED</strong>
-      )}
-    </div>
+    <td>
+      <span className={styles.proofCell}>
+        {proof.draw_published ? (
+          <Link
+            href={`/room/${room}/proofs/${hand}/${seat}/draw`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            DRAW PROOF
+          </Link>
+        ) : (
+          <span>DRAW PENDING</span>
+        )}
+        {proof.completion_published ? (
+          <Link
+            href={`/room/${room}/proofs/${hand}/${seat}/completion`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            COMPLETION PROOF
+          </Link>
+        ) : (
+          <strong>{proof.finished ? "MISSED" : "IN PLAY"}</strong>
+        )}
+      </span>
+    </td>
   );
 }

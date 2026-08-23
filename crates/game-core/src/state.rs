@@ -2331,6 +2331,66 @@ mod tests {
     }
 
     #[test]
+    fn three_way_short_stack_all_in_runs_out_before_settlement() {
+        let mut state = State::new(SEED, 0, &[2920, 70, 10], 5, 10);
+
+        assert_eq!(state.players[2].stack, 0);
+        assert_eq!(state.players[2].contributed, 10);
+        assert_eq!(
+            state.apply(0, Action::RaiseTo(2900)),
+            Ok(vec![Event::Raised {
+                player: 0,
+                to: 2900,
+            },])
+        );
+        assert_eq!(
+            state.apply(1, Action::Call),
+            Ok(vec![
+                Event::Called {
+                    player: 1,
+                    amount: 65,
+                },
+                Event::BettingRoundComplete,
+            ])
+        );
+
+        assert!(state.round_complete);
+        assert!(!state.settled);
+        assert_eq!(state.fold_winner, None);
+        assert!(state.board.is_empty());
+        assert_eq!(state.pot, 2980);
+
+        state.advance_street().unwrap();
+        assert_eq!(state.street, Street::Flop);
+        assert_eq!(state.board.len(), 3);
+        assert!(!state.settled);
+
+        state.advance_street().unwrap();
+        assert_eq!(state.street, Street::Turn);
+        assert_eq!(state.board.len(), 4);
+        assert!(!state.settled);
+
+        state.advance_street().unwrap();
+        assert_eq!(state.street, Street::River);
+        assert_eq!(state.board.len(), 5);
+        assert!(!state.settled);
+
+        let awards = state.settle().unwrap();
+
+        assert!(!awards.is_empty());
+        assert!(state.settled);
+        assert_eq!(state.pot, 0);
+        assert_eq!(
+            state
+                .players
+                .iter()
+                .map(|player| u64::from(player.stack))
+                .sum::<u64>(),
+            3000
+        );
+    }
+
+    #[test]
     fn early_turn() {
         let mut state = State::new(SEED, 0, &[100; 2], 5, 10);
         let mut same = State::new(SEED, 0, &[100; 2], 5, 10);

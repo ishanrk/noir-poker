@@ -88,7 +88,7 @@
 
 .private {
   display: grid;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 20px;
   background: var(--lime);
@@ -112,6 +112,12 @@
 
 .privateIntro {
   min-width: 0;
+}
+
+.privateError {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .privateProofs {
@@ -209,6 +215,97 @@
   margin: 0;
   color: var(--blue);
   font-size: 11px;
+  font-weight: 800;
+}
+
+.proofTableStrip {
+  padding-block: 10px 14px;
+}
+
+.proofTableWrap {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.proofTable {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 11px;
+  text-align: left;
+}
+
+.proofTable caption {
+  padding: 0 0 10px;
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-align: left;
+}
+
+.proofTable th,
+.proofTable td {
+  min-width: 128px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line-strong);
+  vertical-align: top;
+}
+
+.proofTable thead th:first-child,
+.proofTable tbody th {
+  width: 132px;
+}
+
+.proofTable thead th {
+  color: var(--blue);
+  font-weight: 900;
+}
+
+.proofTable thead strong,
+.proofTable thead small {
+  display: block;
+}
+
+.proofTable thead small {
+  margin-top: 4px;
+  font-size: 8px;
+  line-height: 1.35;
+}
+
+.proofTable tbody th {
+  color: var(--blue);
+  font-size: 12px;
+}
+
+.proofCell {
+  display: grid;
+  gap: 6px;
+  line-height: 1.25;
+}
+
+.proofCell a {
+  width: fit-content;
+  color: var(--blue);
+  font-weight: 900;
+}
+
+.proofCell > span,
+.proofEmpty {
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+
+.proofCell strong {
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.proofTableError {
+  margin: 10px 12px 0;
+  color: #a0162c;
+  font-size: 10px;
   font-weight: 800;
 }
 

@@ -1700,7 +1700,7 @@ async fn deck_shares(
 ) -> Result<(), &'static str> {
     let context = decode_hex(context).ok_or("invalid deck context")?;
     let room_ref = find_room(state, id).await.ok_or("room not found")?;
-    let mut drive = false;
+    let mut resume = false;
     {
         let mut room = room_ref.lock().await;
         let rev = room.rev;
@@ -1717,20 +1717,24 @@ async fn deck_shares(
                 .into_iter()
                 .map(|(_, card)| Card::from_id(card).ok_or("invalid opened card"))
                 .collect::<Result<Vec<_>, _>>()?;
-            drive = {
-                let hand = room.hand.as_mut().ok_or("game not started")?;
-                hand.game
-                    .advance_street_with(&cards)
-                    .map_err(|_| "cannot advance hand")?;
-                !hand.game.round_complete
-            };
-            queue_open(&mut room)?;
+            publish_board(&mut room, &cards)?;
+            resume = true;
         }
         let _ = room.notify.send(rev);
     }
-    if drive {
+    if resume {
         start_bots(state, id, true);
     }
+    Ok(())
+}
+
+fn publish_board(room: &mut Room, cards: &[Card]) -> Result<(), &'static str> {
+    let hand = room.hand.as_mut().ok_or("game not started")?;
+
+    hand.game
+        .advance_street_with(cards)
+        .map_err(|_| "cannot advance hand")?;
+    room.action_pause = true;
     Ok(())
 }
 
@@ -4808,6 +4812,53 @@ mod tests {
             200
         );
         assert_eq!(room.rev, 3);
+    }
+
+    #[test]
+    fn three_way_short_stack_all_in_settles_before_game_over() {
+        let config = config(3);
+        let mut room = Room::new(config, hash_token(Uuid::new_v4())).unwrap();
+
+        join(&mut room, Uuid::new_v4(), None).unwrap();
+        join(&mut room, Uuid::new_v4(), Some(SEED)).unwrap();
+        room.mode = RoomMode::Single;
+        room.hand = Some(live_hand(
+            Uuid::new_v4(),
+            0,
+            SEED,
+            0,
+            vec![2920, 70, 10],
+            config,
+        ));
+
+        let hand = room.hand.as_ref().unwrap();
+        assert_eq!(hand.game.players[2].stack, 0);
+        assert_eq!(hand.game.board.len(), 0);
+        assert!(!hand.game.settled);
+        assert!(!room.game_complete());
+
+        apply(&mut room, 0, Action::RaiseTo(2900)).unwrap();
+
+        let hand = room.hand.as_ref().unwrap();
+        assert_eq!(hand.game.board.len(), 0);
+        assert!(!hand.game.settled);
+        assert!(!room.game_complete());
+
+        apply(&mut room, 1, Action::Call).unwrap();
+
+        let hand = room.hand.as_ref().unwrap();
+        assert_eq!(hand.game.street, Street::River);
+        assert_eq!(hand.game.board.len(), 5);
+        assert!(hand.game.round_complete);
+        assert!(hand.game.settled);
+        assert_eq!(hand.game.pot, 0);
+        assert_eq!(hand.result.as_ref().unwrap().kind, HandResultKind::Showdown);
+        assert!(room.game_complete());
+
+        let view = room_view(TEST_ROOM, &room, hand, 0);
+        assert_eq!(view.board.len(), 5);
+        assert_eq!(view.result.unwrap().kind, "showdown");
+        assert_eq!(view.game_over.unwrap().winners, vec![0]);
     }
 
     #[test]
