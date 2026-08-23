@@ -29,7 +29,7 @@ export function DealIntegrity({
       </div>
       <div className="deal-copy">
         <p className="protocol-label">Deck Randomness Proof</p>
-        <strong>A short cryptographic protocol showing how the cards were dealt randomly and not unfairly to prefer one player</strong>
+        <strong>Short proof showing server didn&apos;t cheat the deck</strong>
         <code title={deal.commitment}>SHA-256 {deal.commitment}</code>
       </div>
       <div className="deal-actions">

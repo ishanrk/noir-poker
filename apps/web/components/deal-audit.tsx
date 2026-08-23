@@ -23,9 +23,9 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
     void loadDealAudit(room, hand)
       .then(async (value) => {
         if (!live) return;
-        setAudit(value);
         const result = await verifyDeck(value, (next) => live && setStep(next));
         if (!live) return;
+        setAudit(value);
         setCheck(result);
         setState("verified");
       })

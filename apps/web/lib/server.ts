@@ -179,7 +179,18 @@ export async function loadDealAudit(room: string, hand: number): Promise<DealAud
   );
 
   if (!response.ok) throw new Error(await responseError(response));
-  return response.json();
+  const value = await response.json() as Partial<DealAudit>;
+  if (
+    !Array.isArray(value.keys) ||
+    !Array.isArray(value.key_proofs) ||
+    !Array.isArray(value.shuffles) ||
+    !Array.isArray(value.openings) ||
+    !Array.isArray(value.deck) ||
+    !Array.isArray(value.records)
+  ) {
+    throw new Error("deck proof unavailable for this hand");
+  }
+  return value as DealAudit;
 }
 
 export async function loadHandHistory(room: string): Promise<HandMeta[]> {
