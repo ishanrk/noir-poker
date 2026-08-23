@@ -119,11 +119,13 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
   await waitForEnabled(call, "call unavailable");
   const afterCall = frames.length;
   await call.click();
-  await waitForFrame(
+  const botSnapshot = await waitForFrame(
     (direction, message) => direction === "received" && message.type === "snapshot" && message.rev >= rev + 2,
     "bot action missing",
     afterCall,
   );
+  const actionNotices = JSON.parse(frames[botSnapshot].payload).view.action_notices;
+  assert.deepEqual(actionNotices.slice(-2).map(({ player }) => player), [0, 1]);
   const fold = page.getByRole("button", { name: "Fold" });
   await waitForEnabled(fold, "bot did not return action");
   await fold.click();

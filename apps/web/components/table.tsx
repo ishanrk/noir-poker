@@ -77,7 +77,7 @@ export type View = {
   settled: boolean;
   game_over?: { winners: number[]; chips: number };
   last_action?: ActionNoticeView;
-  action_notices: ActionNoticeView[];
+  action_notices?: ActionNoticeView[];
   actions: ActionView | undefined;
   result?: HandResultView;
   ready?: ReadyView;

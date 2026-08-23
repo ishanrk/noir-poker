@@ -237,6 +237,7 @@ export function MultiplayerGame({ room }: { room: string }) {
   const [notices, setNotices] = useState<ActionNoticeView[]>([]);
   const [finish, setFinish] = useState(false);
   const [deckStage, setDeckStage] = useState<string>();
+  const notice = notices[0];
 
   useEffect(() => {
     if (!error && !challengeError) return;
@@ -252,11 +253,11 @@ export function MultiplayerGame({ room }: { room: string }) {
   }, [finish, router]);
 
   useEffect(() => {
-    if (!notices.length) return;
+    if (!notice) return;
 
     const timer = setTimeout(() => setNotices((current) => current.slice(1)), 1100);
     return () => clearTimeout(timer);
-  }, [notices]);
+  }, [notice]);
 
   const connect = useCallback(() => {
     const current = auth.current;
@@ -424,17 +425,17 @@ export function MultiplayerGame({ room }: { room: string }) {
           message.view.hole = [{ value: local.cards[0] }, { value: local.cards[1] }];
         }
         viewRef.current = message.view;
-        const log = message.view.action_notices;
+        const log = message.view.action_notices ?? (message.view.last_action ? [message.view.last_action] : []);
         const last = log.at(-1)?.seq ?? -1;
         const seen = seenAction.current;
         if (rev.current >= 0) {
-          const next = seen?.hand === message.view.hand_no
-            ? log.filter((notice) => notice.seq > seen.seq)
-            : log;
-          if (next.length) {
-            setNotices((currentNotices) => seen?.hand === message.view.hand_no
-              ? [...currentNotices, ...next]
-              : next);
+          if (seen?.hand !== message.view.hand_no) {
+            setNotices(log);
+          } else {
+            const next = log.filter((entry) => entry.seq > seen.seq);
+            if (next.length) {
+              setNotices((currentNotices) => [...currentNotices, ...next]);
+            }
           }
         }
         seenAction.current = { hand: message.view.hand_no, seq: last };
@@ -826,7 +827,7 @@ export function MultiplayerGame({ room }: { room: string }) {
         room={room}
         error={error}
         disabled={actionPending || notices.length > 0 || !connected}
-        notice={notices[0]}
+        notice={notice}
         finish={finish}
         raiseTo={raiseTo}
         setRaiseTo={setRaiseTo}

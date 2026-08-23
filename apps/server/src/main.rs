@@ -4272,6 +4272,21 @@ mod tests {
     }
 
     #[test]
+    fn action_notices() {
+        let mut room = started(1000);
+
+        apply(&mut room, 0, Action::Call).unwrap();
+        apply(&mut room, 1, Action::Check).unwrap();
+
+        let hand = room.hand.as_ref().unwrap();
+        let notices = room_view(TEST_ROOM, &room, hand, 0).action_notices;
+
+        assert_eq!(notices.len(), 2);
+        assert_eq!((notices[0].seq, notices[0].player), (0, 0));
+        assert_eq!((notices[1].seq, notices[1].player), (1, 1));
+    }
+
+    #[test]
     fn wrong_turn() {
         let room = started(1000);
         let expected = start_game(config(2), SEED);
