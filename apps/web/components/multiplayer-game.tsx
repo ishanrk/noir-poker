@@ -216,7 +216,6 @@ export function MultiplayerGame({ room }: { room: string }) {
   const deckBusy = useRef(false);
   const localHole = useRef<{ hand: number; cards: [string, string] } | undefined>(undefined);
   const seenAction = useRef<{ hand: number; seq: number } | undefined>(undefined);
-  const finishTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const viewRef = useRef<View | undefined>(undefined);
   const actionWait = useRef<{ hand: number; seq: number } | undefined>(undefined);
   const [seat, setSeat] = useState<number | null>();
@@ -235,9 +234,9 @@ export function MultiplayerGame({ room }: { room: string }) {
   const [claimState, setClaimState] = useState<ProofState>("idle");
   const [localProofs, setLocalProofs] = useState<Record<string, LocalProofState>>({});
   const [notices, setNotices] = useState<ActionNoticeView[]>([]);
-  const [finish, setFinish] = useState(false);
   const [deckStage, setDeckStage] = useState<string>();
   const notice = notices[0];
+  const finish = Boolean(view?.game_over && !notice);
 
   useEffect(() => {
     if (!error && !challengeError) return;
@@ -255,7 +254,7 @@ export function MultiplayerGame({ room }: { room: string }) {
   useEffect(() => {
     if (!notice) return;
 
-    const timer = setTimeout(() => setNotices((current) => current.slice(1)), 1100);
+    const timer = setTimeout(() => setNotices((current) => current.slice(1)), 2000);
     return () => clearTimeout(timer);
   }, [notice]);
 
@@ -439,15 +438,6 @@ export function MultiplayerGame({ room }: { room: string }) {
           }
         }
         seenAction.current = { hand: message.view.hand_no, seq: last };
-        if (message.view.game_over) {
-          if (rev.current < 0) {
-            setFinish(true);
-          } else if (!finishTimer.current) {
-            finishTimer.current = setTimeout(() => setFinish(true), 1050);
-          }
-        } else {
-          setFinish(false);
-        }
         rev.current = message.rev;
         const currentChallenge = privateObjective(room, current.seat, challengeAssignment(message.view.challenge));
         const claimed = message.view.claim?.status === "claimed";
@@ -570,7 +560,6 @@ export function MultiplayerGame({ room }: { room: string }) {
     return () => {
       live = false;
       if (socket.current) closeSocket(socket.current);
-      if (finishTimer.current) clearTimeout(finishTimer.current);
     };
   }, [connect, room]);
 

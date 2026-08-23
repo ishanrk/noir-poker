@@ -492,7 +492,7 @@
   background: var(--blue);
   text-align: center;
   transform: translateX(-50%);
-  animation: table-action-drop 1100ms ease-out both;
+  animation: table-action-drop 2000ms ease-out both;
 }
 
 .table-action-notice strong,
@@ -592,7 +592,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .table-action-notice {
-    animation: table-action-fade 1100ms linear both;
+    animation: table-action-fade 2000ms linear both;
   }
 }
 

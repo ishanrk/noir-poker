@@ -1294,7 +1294,8 @@ async fn single_entropy(
         room.mental = true;
     }
     drop(room);
-    drive_bots(state, id).await
+    start_bots(state, id);
+    Ok(())
 }
 
 async fn room_ws(
@@ -1677,7 +1678,7 @@ async fn deck_shares(
         let _ = room.notify.send(rev);
     }
     if drive {
-        drive_bots(state, id).await?;
+        start_bots(state, id);
     }
     Ok(())
 }
@@ -1728,7 +1729,8 @@ async fn deck_private_ready(
         }
         let _ = room.notify.send(rev);
     }
-    drive_bots(state, id).await
+    start_bots(state, id);
+    Ok(())
 }
 
 async fn deck_open(
@@ -1875,7 +1877,8 @@ async fn apply_action(
     action: Action,
 ) -> Result<(), &'static str> {
     apply_action_once(state, id, seat, action).await?;
-    drive_bots(state, id).await
+    start_bots(state, id);
+    Ok(())
 }
 
 async fn apply_action_once(
@@ -1936,15 +1939,27 @@ async fn drive_bots(state: &AppState, id: Uuid) -> Result<(), &'static str> {
             return Ok(());
         };
 
-        sleep(Duration::from_millis(650)).await;
+        sleep(Duration::from_secs(2)).await;
         apply_action_once(state, id, seat, action).await?;
     }
 
     Err("bot action limit")
 }
 
+fn start_bots(state: &AppState, id: Uuid) {
+    let state = state.clone();
+    tokio::spawn(async move {
+        if let Err(err) = drive_bots(&state, id).await {
+            eprintln!("bot action error: {err}");
+        }
+    });
+}
+
 fn next_bot_action(room: Uuid, state: &Room) -> Result<Option<(usize, Action)>, &'static str> {
     if state.mode != RoomMode::Single {
+        return Ok(None);
+    }
+    if state.mental && !state.deck.as_ref().is_some_and(|deck| deck.private_done()) {
         return Ok(None);
     }
 
@@ -2361,7 +2376,8 @@ async fn ready_room_entropy(
 ) -> Result<(), &'static str> {
     ready_room_entropy_once(state, id, seat, entropy).await?;
     drive_bot_ready(state, id).await?;
-    drive_bots(state, id).await
+    start_bots(state, id);
+    Ok(())
 }
 
 async fn ready_room_entropy_once(
