@@ -18,8 +18,8 @@ page.on("console", (message) => {
   }
 });
 page.on("websocket", (socket) => {
-  socket.on("framereceived", ({ payload }) => frames.push({ direction: "received", payload }));
-  socket.on("framesent", ({ payload }) => frames.push({ direction: "sent", payload }));
+  socket.on("framereceived", ({ payload }) => frames.push({ direction: "received", payload, at: Date.now() }));
+  socket.on("framesent", ({ payload }) => frames.push({ direction: "sent", payload, at: Date.now() }));
 });
 
 await mkdir(output, { recursive: true });
@@ -94,6 +94,7 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
   assert.equal(await page.getByRole("button", { name: "Connect Aztec" }).count(), 0);
   await page.getByRole("button", { name: "Create Game" }).click();
   await page.waitForURL(/\/table\//, { timeout: 15_000 });
+  assert.equal(await page.getByText("Waiting for every player to join.", { exact: true }).count(), 0);
 
   const commitment = await waitForFrame(
     (direction, message) =>
@@ -119,16 +120,34 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
   await waitForEnabled(call, "call unavailable");
   const afterCall = frames.length;
   await call.click();
+  const callSnapshot = await waitForFrame(
+    (direction, message) => direction === "received" && message.type === "snapshot" && message.rev >= rev + 1,
+    "player action missing",
+    afterCall,
+  );
   const botSnapshot = await waitForFrame(
     (direction, message) => direction === "received" && message.type === "snapshot" && message.rev >= rev + 2,
     "bot action missing",
     afterCall,
   );
+  assert.ok(frames[botSnapshot].at - frames[callSnapshot].at >= 1800, "bot action skipped pause");
   const actionNotices = JSON.parse(frames[botSnapshot].payload).view.action_notices;
   assert.deepEqual(actionNotices.slice(-2).map(({ player }) => player), [0, 1]);
   const fold = page.getByRole("button", { name: "Fold" });
   await waitForEnabled(fold, "bot did not return action");
+  const afterFold = frames.length;
   await fold.click();
+  const foldSnapshot = await waitForFrame(
+    (direction, message) => direction === "received" && message.type === "snapshot" && message.view?.last_action?.action === "fold",
+    "fold notice missing",
+    afterFold,
+  );
+  const deckOpen = await waitForFrame(
+    (direction, message) => direction === "received" && message.type === "deck_open",
+    "final deck opening missing",
+    foldSnapshot + 1,
+  );
+  assert.ok(frames[deckOpen].at - frames[foldSnapshot].at >= 1800, "fold notice skipped pause");
   await page.getByText("Hand complete", { exact: true }).waitFor({ state: "visible", timeout: 15_000 });
   await page.getByText("Deck Randomness Proof", { exact: true }).waitFor({ state: "visible", timeout: 120_000 });
   assert.equal(await page.getByText("PRIVATE CHALLENGE", { exact: true }).count(), 0);

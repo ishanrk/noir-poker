@@ -4074,6 +4074,26 @@ mod tests {
     }
 
     #[test]
+    fn bots_wait_for_cards() {
+        let mut room = single_room();
+        let mut game = State::hidden(0, &[1000, 1000], 5, 10);
+
+        game.turn = 1;
+        room.mental = true;
+        room.hand.as_mut().unwrap().game = game;
+
+        assert!(next_bot_action(TEST_ROOM, &room).unwrap().is_none());
+        assert!(
+            room.hand
+                .as_mut()
+                .unwrap()
+                .game
+                .set_hole(1, [Card::from_id(0).unwrap(), Card::from_id(1).unwrap()])
+        );
+        assert!(next_bot_action(TEST_ROOM, &room).unwrap().is_some());
+    }
+
+    #[test]
     fn bot_ready_skips_proof() {
         let mut room = single_room();
 
@@ -5236,6 +5256,7 @@ mod tests {
         assert_eq!(audit.commitment, ceremony.commitment);
         assert_eq!(audit.shares[1], fairness::bot_share(id, &ceremony, 1));
         apply_action(&state, id, 0, Action::Call).await.unwrap();
+        sleep(Duration::from_millis(2200)).await;
 
         let restored = reload(&db, id).await;
         let hand = restored.hand.as_ref().unwrap();
