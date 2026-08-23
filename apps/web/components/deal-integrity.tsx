@@ -20,7 +20,10 @@ export function DealIntegrity({
   compact?: boolean;
 }) {
   return (
-    <section className={`deal-integrity${compact ? " deal-integrity-compact" : ""}`}>
+    <section
+      className={`deal-integrity${compact ? " deal-integrity-compact" : ""}`}
+      data-proof-tour="deck"
+    >
       <div className="deal-stack" data-state={deal.state} aria-hidden="true">
         <i />
         <i />
@@ -38,6 +41,32 @@ export function DealIntegrity({
         ) : (
           <span>Available after hand</span>
         )}
+      </div>
+    </section>
+  );
+}
+
+export function PreviousDealIntegrity({ room, hand }: {
+  room: string;
+  hand: number;
+}) {
+  return (
+    <section className="deal-integrity deal-integrity-compact" data-proof-tour="deck">
+      <div className="deal-stack" data-state="revealed" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+        <span>✓</span>
+      </div>
+      <div className="deal-copy">
+        <p className="protocol-label">Deck Randomness Proof</p>
+        <strong>Hand {hand + 1} has a public encrypted deck transcript</strong>
+        <code>Keys shuffles reveals openings and all 52 cards</code>
+      </div>
+      <div className="deal-actions">
+        <Link href={`/audit/${room}/${hand}`} target="_blank">
+          Verify Hand {hand + 1} Deck
+        </Link>
       </div>
     </section>
   );

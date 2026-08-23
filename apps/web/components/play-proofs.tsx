@@ -78,6 +78,7 @@ export function PlayProofs({ room, handNo, settled, view }: {
                     hand={hand}
                     seat={player.seat}
                     proof={records.get(`${player.seat}:${hand}`)}
+                    checking={settled && hand === handNo}
                   />
                 ))}
               </tr>
@@ -90,11 +91,12 @@ export function PlayProofs({ room, handNo, settled, view }: {
   );
 }
 
-function ProofCell({ room, hand, seat, proof }: {
+function ProofCell({ room, hand, seat, proof, checking }: {
   room: string;
   hand: number;
   seat: number;
   proof?: ProofMeta;
+  checking: boolean;
 }) {
   if (!proof) {
     return <td><span className={styles.proofEmpty}>{hand === 0 ? "NO CHALLENGE" : "WAITING"}</span></td>;
@@ -123,7 +125,7 @@ function ProofCell({ room, hand, seat, proof }: {
             COMPLETION PROOF
           </Link>
         ) : (
-          <strong>{proof.finished ? "MISSED" : "IN PLAY"}</strong>
+          <strong>{proof.finished ? checking ? "CHECKING" : "MISSED" : "IN PLAY"}</strong>
         )}
       </span>
     </td>

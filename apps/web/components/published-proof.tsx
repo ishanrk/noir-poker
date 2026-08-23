@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import styles from "@/components/crypto.module.css";
+import { ProofGuide, type ProofGuideStep } from "@/components/proof-guide";
 import { SiteHeader } from "@/components/site-header";
 import { verifyPublishedProof } from "@/lib/receipt";
 import { loadPublishedProof, type ProofKind, type PublishedProof } from "@/lib/server";
@@ -11,17 +12,6 @@ import { loadPublishedProof, type ProofKind, type PublishedProof } from "@/lib/s
 type VerifyState = "loading" | "ready" | "verifying" | "verified" | "failed";
 
 const REPO = "https://github.com/ishanrk/noir-poker/blob/main";
-
-const meaning = {
-  mode: "selects fair draw mode 0 or completion mode 1",
-  hand: "binds the proof to one room and hand",
-  seat: "binds the proof to one player seat",
-  commitment: "binds the hidden browser secret before the server nonce exists",
-  nonce: "adds fresh public server input after the secret commitment",
-  facts: "commits six salted hand facts without publishing them",
-  nullifier: "identifies one completion claim without revealing the secret",
-  catalog: "pins the fixed eight challenge definitions",
-} as const;
 
 export function PublishedProofPage({ room, hand, seat, kind }: {
   room: string;
@@ -67,7 +57,8 @@ export function PublishedProofPage({ room, hand, seat, kind }: {
         if (!live || routeRef.current !== route) return;
         proofRef.current = value;
         setProof(value);
-        setState("ready");
+        setState("verifying");
+        void verify();
       })
       .catch((cause) => {
         if (!live || routeRef.current !== route) return;
@@ -75,7 +66,7 @@ export function PublishedProofPage({ room, hand, seat, kind }: {
         setError(cause instanceof Error ? cause.message : "proof unavailable");
       });
     return () => { live = false; };
-  }, [hand, kind, room, route, seat]);
+  }, [hand, kind, room, route, seat, verify]);
 
   function download() {
     if (!proof) return;
@@ -83,13 +74,38 @@ export function PublishedProofPage({ room, hand, seat, kind }: {
     const link = document.createElement("a");
     link.href = url;
     link.download = `noir-poker-${kind}-${proof.hand_no}-${proof.seat}.json`;
+    document.body.append(link);
     link.click();
+    link.remove();
     URL.revokeObjectURL(url);
   }
 
   const draw = kind === "draw";
   const proofBytes = proof ? encodedBytes(proof.proof) : undefined;
   const publicBytes = proof ? encodedBytes(proof.public_inputs) : undefined;
+  const fileName = proof
+    ? `noir-poker-${kind}-${proof.hand_no}-${proof.seat}.json`
+    : "proof.json";
+  const verificationActions = proof ? (
+    <>
+      <code className="proof-guide-command">
+        npm --prefix apps/web run proof:verify -- {fileName}
+      </code>
+      <div className="proof-guide-links">
+        <button type="button" onClick={() => void verify()}>Run Browser Check</button>
+        <button type="button" onClick={download}>Download JSON</button>
+        <Link href={`/room/${proof.room}/proofs`} target="_blank" rel="noreferrer">Proof History</Link>
+        <Link href={`${REPO}/circuits/challenge-v2/src/main.nr`} target="_blank" rel="noreferrer">Circuit Source</Link>
+        <Link href={`${REPO}/apps/web/lib/receipt.ts`} target="_blank" rel="noreferrer">Browser Verifier</Link>
+        <Link href={`${REPO}/apps/server/src/proof.rs`} target="_blank" rel="noreferrer">Server Verifier</Link>
+        <Link href={`${REPO}/apps/web/scripts/verify-receipt.mjs`} target="_blank" rel="noreferrer">Local Verifier</Link>
+        <Link href="/protocol#challenge-proofs" target="_blank" rel="noreferrer">Protocol Sources</Link>
+      </div>
+    </>
+  ) : null;
+  const steps = proof
+    ? proofSteps({ proof, draw, proofBytes, publicBytes, verificationActions })
+    : [];
 
   return (
     <main className="site-shell">
@@ -98,6 +114,9 @@ export function PublishedProofPage({ room, hand, seat, kind }: {
         <header className={styles.hero}>
           <p className={styles.label}>HAND {hand + 1}&nbsp;&nbsp;&nbsp;PLAYER {seat + 1}</p>
           <h1>{draw ? "DRAW PROOF" : "COMPLETION PROOF"}</h1>
+          <p>
+            Inspect the accepted proof bytes and run the public verifier in order
+          </p>
         </header>
         <div className={styles.verifyState} data-state={state} aria-live="polite">
           {state === "loading"
@@ -112,169 +131,116 @@ export function PublishedProofPage({ room, hand, seat, kind }: {
         </div>
         {error && <p className={styles.error}>{error}</p>}
 
-        <div className={styles.detailGrid}>
-          <section>
-            <h2>PUBLIC STATEMENT</h2>
-            <p>{draw
-              ? `Player ${seat + 1} selected one hidden challenge from the fixed catalog using a committed secret and the server nonce`
-              : `Player ${seat + 1} selected one hidden catalog challenge and satisfied it against the committed hand facts`}</p>
-          </section>
-          <section>
-            <h2>PRIVATE WITNESS</h2>
-            <p>{draw
-              ? "Challenge browser secret selected index and Merkle path"
-              : "Challenge browser secret selected index Merkle path private fact witness and fact salt"}</p>
-          </section>
-        </div>
-
         {proof && (
-          <>
-            <section className={styles.proofSteps} aria-label="Proof explanation">
-              <ProofStep index="01" title="ACCEPTED EVIDENCE">
-                <p>
-                  The server published the exact UltraHonk proof it accepted with the exact public
-                  inputs checked beside it
-                </p>
-                <dl className={styles.byteCounts}>
-                  <div><dt>proof bytes</dt><dd>{proofBytes?.toLocaleString()}</dd></div>
-                  <div><dt>public input bytes</dt><dd>{publicBytes?.toLocaleString()}</dd></div>
-                  <div><dt>public fields</dt><dd>194</dd></div>
-                </dl>
-              </ProofStep>
-              <ProofStep index="02" title="HAND AND PLAYER">
-                <p>The hand tag binds this statement to one room and hand while the seat binds one player</p>
-                <Binding label="hand tag" value={proof.hand_tag} />
-                <Binding label="seat" value={String(proof.seat)} />
-              </ProofStep>
-              <ProofStep index="03" title="PRIVATE SELECTION">
-                <p>
-                  The server records the hidden secret commitment before creating its nonce The
-                  catalog root proves the hidden result belongs to the fixed challenge set
-                </p>
-                <Binding label="commitment" value={proof.commitment} />
-                <Binding label="server nonce" value={proof.nonce} />
-                <Binding label="catalog root" value={proof.catalog_root} />
-                <p className={styles.proofNote}>
-                  The public values reveal no selected objective index rule masks or Merkle path
-                </p>
-              </ProofStep>
-              {!draw && (
-                <ProofStep index="04" title="PRIVATE COMPLETION">
-                  <p>
-                    The facts hash commits to six salted facts derived by the server The proof checks
-                    the hidden objective against that commitment The circuit derives the nullifier
-                    so the same completion cannot count twice
-                  </p>
-                  <Binding label="facts hash" value={proof.facts_hash ?? ""} />
-                  <Binding label="nullifier" value={proof.nullifier ?? ""} />
-                  <p className={styles.proofNote}>
-                    Mode 1 independently proves the private selection and completion in one proof
-                    It does not depend on a previous fair draw proof
-                  </p>
-                  <p className={styles.proofNote}>
-                    The circuit does not replay poker actions It proves against the fact commitment
-                    published by the server
-                  </p>
-                </ProofStep>
-              )}
-              <ProofStep index={draw ? "04" : "05"} title="PINNED VERIFIER">
-                <p>
-                  The artifact hash pins the compiled Noir circuit The verification key hash pins the
-                  UltraHonk key used by this browser and the server
-                </p>
-                <Binding label="artifact sha256" value={proof.artifact_sha256} />
-                <Binding label="vk sha256" value={proof.vk_sha256} />
-                <dl className={styles.byteCounts}>
-                  <div><dt>circuit</dt><dd>{proof.circuit_id}</dd></div>
-                  <div><dt>proof system</dt><dd>{proof.proof_system}</dd></div>
-                  <div><dt>barretenberg</dt><dd>{proof.bb_version}</dd></div>
-                </dl>
-              </ProofStep>
-            </section>
-
-            <section className={styles.public}>
-              <h2>PUBLIC INPUTS</h2>
-              <p className={styles.proofNote}>
-                Public inputs bind the proof to this published statement They contain no objective
-                secret Merkle path fact salt or private fact witness
-              </p>
-              <dl>
-                <PublicInput label="mode" value={draw ? "0" : "1"} note={meaning.mode} />
-                <PublicInput label="hand tag" value={proof.hand_tag} note={meaning.hand} />
-                <PublicInput label="seat" value={String(proof.seat)} note={meaning.seat} />
-                <PublicInput label="commitment" value={proof.commitment} note={meaning.commitment} />
-                <PublicInput label="server nonce" value={proof.nonce} note={meaning.nonce} />
-                {!draw && <PublicInput label="facts hash" value={proof.facts_hash ?? ""} note={meaning.facts} />}
-                {!draw && <PublicInput label="nullifier" value={proof.nullifier ?? ""} note={meaning.nullifier} />}
-                <PublicInput label="catalog root" value={proof.catalog_root} note={meaning.catalog} />
-              </dl>
-            </section>
-          </>
+          <ProofGuide
+            key={`${route}:${proof.nullifier ?? "draw"}`}
+            label={draw ? "Fair challenge draw" : "Challenge completion"}
+            title="Read and verify this proof"
+            intro="Move through each public check in order"
+            steps={steps}
+          />
         )}
-
-        <div className={styles.actions}>
-          <button type="button" onClick={() => void verify()} disabled={!proof || state === "verifying"}>
-            {state === "verified" || state === "failed" ? "RUN AGAIN" : "VERIFY"}
-          </button>
-          <button type="button" onClick={download} disabled={!proof}>DOWNLOAD JSON</button>
-          <Link href={`/room/${room}/proofs`} target="_blank" rel="noreferrer">PROOF HISTORY</Link>
-        </div>
-        <section className={styles.public}>
-          <h2>VERIFY YOURSELF</h2>
-          <p><code>npm --prefix apps/web run proof:verify -- proof.json</code></p>
-          <p>
-            <Link href={`${REPO}/circuits/challenge-v2/src/main.nr`} target="_blank" rel="noreferrer">CIRCUIT SOURCE</Link>
-            {"  "}
-            <Link href={`${REPO}/apps/web/lib/receipt.ts`} target="_blank" rel="noreferrer">BROWSER VERIFIER</Link>
-            {"  "}
-            <Link href={`${REPO}/apps/web/lib/challenge-proof.ts`} target="_blank" rel="noreferrer">BROWSER PROVER</Link>
-            {"  "}
-            <Link href={`${REPO}/apps/server/src/proof.rs`} target="_blank" rel="noreferrer">RUST VERIFIER</Link>
-            {"  "}
-            <Link href={`${REPO}/apps/web/scripts/verify-receipt.mjs`} target="_blank" rel="noreferrer">NODE VERIFIER</Link>
-            {"  "}
-            <Link href="/protocol#challenge-proofs" target="_blank" rel="noreferrer">PROTOCOL AND REFERENCES</Link>
-          </p>
-        </section>
       </div>
     </main>
   );
 }
 
-function ProofStep({ index, title, children }: {
-  index: string;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className={styles.proofStep}>
-      <span>{index}</span>
-      <div>
-        <h2>{title}</h2>
-        {children}
-      </div>
-    </section>
-  );
+function proofSteps({
+  proof,
+  draw,
+  proofBytes,
+  publicBytes,
+  verificationActions,
+}: {
+  proof: PublishedProof;
+  draw: boolean;
+  proofBytes: number | undefined;
+  publicBytes: number | undefined;
+  verificationActions: ReactNode;
+}): ProofGuideStep[] {
+  return [
+    {
+      title: "The accepted bytes",
+      text: "This page fetched the exact proof bytes and public input bytes stored after server verification. Any change to either value makes verification fail.",
+      detail: (
+        <dl>
+          <Value label="Proof bytes" value={String(proofBytes ?? 0)} />
+          <Value label="Public input bytes" value={String(publicBytes ?? 0)} />
+          <Value label="Public fields" value="194" />
+        </dl>
+      ),
+    },
+    {
+      title: "The UltraHonk check",
+      text: "UltraHonk checks a compact argument against the compiled Noir circuit. A valid result means one private witness satisfies every circuit constraint for these public values. The verifier never receives that witness.",
+      detail: (
+        <dl>
+          <Value label="Proof system" value={proof.proof_system} />
+          <Value label="Circuit" value={proof.circuit_id} />
+          <Value label="Mode" value={draw ? "0 for challenge draw" : "1 for completion"} />
+        </dl>
+      ),
+    },
+    {
+      title: "The hand and player",
+      text: "The verifier derives the hand tag from the room id and zero based hand number. It then requires the seat and proof mode to match this public record.",
+      detail: (
+        <dl>
+          <Value label="Room" value={proof.room} />
+          <Value label="Hand number" value={`${proof.hand_no} in data and ${proof.hand_no + 1} on screen`} />
+          <Value label="Hand tag" value={proof.hand_tag} />
+          <Value label="Seat" value={`${proof.seat} in data and Player ${proof.seat + 1} on screen`} />
+        </dl>
+      ),
+    },
+    {
+      title: draw ? "The fair challenge draw" : "The completion statement",
+      text: draw
+        ? "The commitment fixes a browser secret before the server nonce exists. The circuit derives a selector from that secret and nonce. Its low three bits choose one of eight leaves. A private Merkle path must end at the fixed catalog root."
+        : "The circuit repeats the commitment selector and catalog checks. It also binds six private fact bits to the public facts hash. Every condition in the hidden challenge must match those bits. The one time nullifier prevents a second accepted claim for this secret.",
+      detail: (
+        <dl>
+          <Value label="Commitment" value={proof.commitment} />
+          <Value label="Server nonce" value={proof.nonce} />
+          <Value label="Catalog root" value={proof.catalog_root} />
+          {!draw && <Value label="Facts hash" value={proof.facts_hash ?? ""} />}
+          {!draw && <Value label="Nullifier" value={proof.nullifier ?? ""} />}
+        </dl>
+      ),
+    },
+    {
+      title: "The 194 public fields",
+      text: "Each public byte is encoded as one canonical 32 byte Noir field. The order is mode then 32 hand tag bytes then seat then 32 bytes each for commitment nonce facts hash nullifier and catalog root. The hidden challenge secret rule path fact salt and fact bits are absent.",
+      detail: (
+        <dl>
+          <Value label="Mode fields" value="1" />
+          <Value label="Hand tag fields" value="32" />
+          <Value label="Seat fields" value="1" />
+          <Value label="Five byte array groups" value="160" />
+        </dl>
+      ),
+    },
+    {
+      title: "The pinned verifier",
+      text: "The server accepts proofs only with its pinned verification key. The portable verifier calculates the compiled artifact SHA 256 value before it runs UltraHonk. The metadata below identifies the exact circuit build and server key.",
+      detail: (
+        <dl>
+          <Value label="Artifact SHA 256" value={proof.artifact_sha256} />
+          <Value label="Verification key SHA 256" value={proof.vk_sha256} />
+          <Value label="Barretenberg" value={proof.bb_version} />
+        </dl>
+      ),
+    },
+    {
+      title: "Run an independent check",
+      text: "The browser check runs automatically on this page. Download the JSON to keep the exact public record. From the repository root install the web dependencies then run the command below. A verified line names the room hand and proof count. Any changed proof byte or public field returns an error.",
+      detail: verificationActions,
+    },
+  ];
 }
 
-function Binding({ label, value }: { label: string; value: string }) {
-  return (
-    <dl className={styles.binding}>
-      <div><dt>{label}</dt><dd>{value}</dd></div>
-    </dl>
-  );
-}
-
-function PublicInput({ label, value, note }: { label: string; value: string; note: string }) {
-  return (
-    <div>
-      <dt>{label}</dt>
-      <dd>
-        {value}
-        <small>{note}</small>
-      </dd>
-    </div>
-  );
+function Value({ label, value }: { label: string; value: string }) {
+  return <div><dt>{label}</dt><dd>{value}</dd></div>;
 }
 
 function encodedBytes(value: string) {

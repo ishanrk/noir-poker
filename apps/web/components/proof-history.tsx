@@ -72,7 +72,7 @@ function ProofEntry({ room, proof }: {
           COMPLETION&nbsp;&nbsp;&nbsp;{proof.completion_published
             ? "CHALLENGE COMPLETED"
             : proof.finished
-              ? "MISSED OR NOT PROVEN"
+              ? "MISSED"
               : "ASSIGNED"}
           {proof.completion_published && <Link href={`/room/${room}/proofs/${proof.hand_no}/${proof.seat}/completion`} target="_blank">VIEW</Link>}
         </span>

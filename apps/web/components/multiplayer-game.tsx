@@ -9,6 +9,7 @@ import type { DealView } from "@/components/deal-integrity";
 import { Keycap } from "@/components/keycap";
 import { PlayProofs } from "@/components/play-proofs";
 import { PrivateChallengeBar } from "@/components/private-challenge";
+import { ProofTour } from "@/components/proof-tour";
 import { Table, type ActionNoticeView, type ChallengeView, type ClaimView, type View } from "@/components/table";
 import {
   CHALLENGE_VERSION,
@@ -104,6 +105,9 @@ const proofKey = (seat: number, hand: number, kind: ProofKind) => `${seat}:${han
 const deckSecretKey = (room: string, hand: number) => `noir-poker-deck-${room}-${hand}`;
 const deckHoleKey = (room: string, hand: number, seat: number) =>
   `noir-poker-hole-${room}-${hand}-${seat}`;
+const MAX_AUTO_PROOF_DELAY_MS = 10_000;
+const GAME_OVER_DELAY_MS = 3000;
+const GAME_OVER_DISPLAY_MS = 2000;
 
 function deckSecret(room: string, hand: number) {
   const key = deckSecretKey(room, hand);
@@ -263,17 +267,22 @@ export function MultiplayerGame({ room }: { room: string }) {
   const [challengeError, setChallengeError] = useState<string>();
   const [drawStates, setDrawStates] = useState<Record<number, ProofState>>({});
   const [claimState, setClaimState] = useState<ProofState>("idle");
+  const [autoAttempts, setAutoAttempts] = useState<Record<string, number>>({});
   const [localProofs, setLocalProofs] = useState<Record<string, LocalProofState>>({});
   const [notices, setNotices] = useState<ActionNoticeView[]>([]);
   const noticeQueue = useRef<ActionNoticeView[]>([]);
+  const noticeClock = useRef<{ key: string; start: number } | undefined>(undefined);
   const [deckStage, setDeckStage] = useState<string>();
+  const [finishHand, setFinishHand] = useState<number>();
+  const [tourOpen, setTourOpen] = useState(false);
   const notice = notices[0];
-  const finish = Boolean(
+  const gameReady = Boolean(
     view?.game_over &&
     !notice &&
     !deckStage &&
     (view.deal === undefined || view.deal.audit),
   );
+  const finish = gameReady && finishHand === view?.hand_no;
 
   const setPending = useCallback((value: boolean) => {
     actionBusy.current = value;
@@ -294,9 +303,18 @@ export function MultiplayerGame({ room }: { room: string }) {
   );
 
   useEffect(() => {
+    if (!gameReady) return;
+
+    const hand = view?.hand_no;
+    const timer = setTimeout(() => setFinishHand(hand), GAME_OVER_DELAY_MS);
+
+    return () => clearTimeout(timer);
+  }, [gameReady, view?.hand_no]);
+
+  useEffect(() => {
     if (!finish) return;
 
-    const timer = setTimeout(() => router.push("/"), 2000);
+    const timer = setTimeout(() => router.push("/"), GAME_OVER_DISPLAY_MS);
 
     return () => clearTimeout(timer);
   }, [finish, router]);
@@ -304,24 +322,21 @@ export function MultiplayerGame({ room }: { room: string }) {
   useEffect(() => {
     if (!notice) return;
 
-    let frame = 0;
-    let last: number | undefined;
-    let shown = 0;
-    const tick = (now: number) => {
-      if (last !== undefined) shown += Math.min(now - last, 50);
-      last = now;
-      if (shown >= 2000) {
-        setNoticeQueue((current) => current.slice(1));
-        return;
-      }
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
+    const hand = view?.hand_no;
+    const key = `${hand}:${notice.seq}`;
+    if (noticeClock.current?.key !== key) {
+      noticeClock.current = { key, start: Date.now() };
+    }
+    const remaining = Math.max(0, 2000 - (Date.now() - noticeClock.current.start));
+    const timer = window.setTimeout(() => {
+      setNoticeQueue((current) => {
+        if (viewRef.current?.hand_no !== hand || current[0]?.seq !== notice.seq) return current;
+        return current.slice(1);
+      });
+    }, remaining);
 
-    return () => {
-      cancelAnimationFrame(frame);
-    };
-  }, [notice, setNoticeQueue]);
+    return () => window.clearTimeout(timer);
+  }, [notice, setNoticeQueue, view?.hand_no]);
 
   const connect = useCallback(() => {
     const current = auth.current;
@@ -334,6 +349,7 @@ export function MultiplayerGame({ room }: { room: string }) {
     setError(undefined);
     setDeckStage(undefined);
     setNoticeQueue([]);
+    noticeClock.current = undefined;
     syncing.current = true;
     actionWait.current = undefined;
     readyWait.current = undefined;
@@ -713,7 +729,7 @@ export function MultiplayerGame({ room }: { room: string }) {
     };
   }, [connect, room]);
 
-  function send(action: ClientAction) {
+  const send = useCallback((action: ClientAction) => {
     const current = socket.current;
     const poker = ["fold", "check", "call", "raise_to"].includes(action.type);
     const paced = poker || action.type === "ready" || action.type === "finish";
@@ -748,9 +764,9 @@ export function MultiplayerGame({ room }: { room: string }) {
       setConnected(false);
       setError("Connection failed");
     }
-  }
+  }, [connected, setPending]);
 
-  function commitChallenge() {
+  const commitChallenge = useCallback(() => {
     const challenge = view?.challenge;
     if (view?.mode !== "multiplayer" || !challenge || challenge.assigned || typeof seat !== "number") return;
 
@@ -759,7 +775,7 @@ export function MultiplayerGame({ room }: { room: string }) {
     } catch {
       setChallengeError("Fair draw setup failed");
     }
-  }
+  }, [room, seat, send, view?.challenge, view?.mode]);
 
   const drawChallenge = useCallback(async (assignment: Assignment | undefined) => {
     const current = socket.current;
@@ -798,6 +814,7 @@ export function MultiplayerGame({ room }: { room: string }) {
 
       drawing.current = hand;
       setChallengeError(undefined);
+      setDrawState(hand, "preparing");
       const result = await proveChallenge({
         mode: 0,
         handTag,
@@ -870,6 +887,7 @@ export function MultiplayerGame({ room }: { room: string }) {
 
       claiming.current = hand;
       setChallengeError(undefined);
+      setClaimState("preparing");
       const result = await proveChallenge({
         mode: 1,
         handTag,
@@ -903,6 +921,91 @@ export function MultiplayerGame({ room }: { room: string }) {
       }
     }
   }, [connected, room, seat, view?.claim]);
+
+  useEffect(() => {
+    const challenge = view?.challenge;
+    if (
+      view?.mode !== "multiplayer" ||
+      !challenge ||
+      challenge.assigned ||
+      typeof seat !== "number" ||
+      !connected ||
+      actionPending
+    ) return;
+
+    const key = `commit:${challenge.hand_no}`;
+    const attempts = autoAttempts[key] ?? 0;
+    const timer = window.setTimeout(() => {
+      const latest = viewRef.current?.challenge;
+      if (!latest || latest.hand_no !== challenge.hand_no || latest.assigned) return;
+      setAutoAttempts((current) => ({ ...current, [key]: Math.max(current[key] ?? 0, attempts + 1) }));
+      commitChallenge();
+    }, attempts === 0 ? 0 : Math.min(attempts * 1200, MAX_AUTO_PROOF_DELAY_MS));
+
+    return () => window.clearTimeout(timer);
+  }, [actionPending, autoAttempts, commitChallenge, connected, seat, view?.challenge, view?.mode]);
+
+  useEffect(() => {
+    if (view?.mode !== "multiplayer" || typeof seat !== "number" || !connected) return;
+    if (drawing.current !== undefined || claiming.current !== undefined) return;
+
+    const candidates = [claimAssignment(view.claim), challengeAssignment(view.challenge)]
+      .filter((assignment): assignment is Assignment => assignment !== undefined);
+    const assignment = candidates.find((candidate) => {
+      const state = drawStates[candidate.hand_no] ?? "idle";
+      return !candidate.draw_verified &&
+        state !== "verified";
+    });
+    if (!assignment) return;
+
+    const state = drawStates[assignment.hand_no] ?? "idle";
+    if (state === "preparing" || state === "proving" || state === "verifying") return;
+
+    const key = `draw:${assignment.hand_no}`;
+    const attempts = autoAttempts[key] ?? 0;
+    const timer = window.setTimeout(() => {
+      if (drawing.current !== undefined || claiming.current !== undefined) return;
+      setAutoAttempts((current) => ({ ...current, [key]: Math.max(current[key] ?? 0, attempts + 1) }));
+      void drawChallenge(assignment);
+    }, attempts === 0 ? 0 : Math.min(attempts * 1200, MAX_AUTO_PROOF_DELAY_MS));
+
+    return () => window.clearTimeout(timer);
+  }, [autoAttempts, claimState, connected, drawChallenge, drawStates, seat, view?.challenge, view?.claim, view?.mode]);
+
+  useEffect(() => {
+    const claim = view?.claim;
+    if (
+      view?.mode !== "multiplayer" ||
+      !claim ||
+      claim.status !== "claimable" ||
+      claimCompleted !== true ||
+      typeof seat !== "number" ||
+      !connected ||
+      drawing.current !== undefined ||
+      claiming.current !== undefined ||
+      claimState === "preparing" ||
+      claimState === "proving" ||
+      claimState === "verifying" ||
+      claimState === "verified"
+    ) return;
+
+    const key = `completion:${claim.hand_no}`;
+    const attempts = autoAttempts[key] ?? 0;
+    const timer = window.setTimeout(() => {
+      const latest = viewRef.current?.claim;
+      if (
+        !latest ||
+        latest.hand_no !== claim.hand_no ||
+        latest.status !== "claimable" ||
+        drawing.current !== undefined ||
+        claiming.current !== undefined
+      ) return;
+      setAutoAttempts((current) => ({ ...current, [key]: Math.max(current[key] ?? 0, attempts + 1) }));
+      void claimChallenge();
+    }, attempts === 0 ? 0 : Math.min(attempts * 1200, MAX_AUTO_PROOF_DELAY_MS));
+
+    return () => window.clearTimeout(timer);
+  }, [autoAttempts, claimChallenge, claimCompleted, claimState, connected, drawStates, seat, view?.claim, view?.mode]);
 
   async function verifyProof(owner: number, hand: number, kind: ProofKind) {
     const key = proofKey(owner, hand, kind);
@@ -948,6 +1051,28 @@ export function MultiplayerGame({ room }: { room: string }) {
     );
   }
   if (!view) return <div className={`room-status${error ? " ui-shake" : ""}`}><strong>{error ?? deckStage ?? "Connecting to table"}</strong>{!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><Keycap>Reconnect</Keycap></button>}</div>;
+
+  const automaticCompletionPending = Boolean(
+    view.mode === "multiplayer" &&
+    view.settled &&
+    view.claim?.status === "claimable" &&
+    claimCompleted === true &&
+    claimState !== "verified",
+  );
+  const automaticDrawPending = Boolean(
+    view.mode === "multiplayer" &&
+    view.settled &&
+    ((view.claim && !view.claim.draw_verified) ||
+      (view.challenge?.assigned && !view.challenge.draw_verified)),
+  );
+  const interactionDisabled =
+    actionPending ||
+    notices.length > 0 ||
+    Boolean(deckStage) ||
+    !connected ||
+    automaticCompletionPending ||
+    automaticDrawPending ||
+    tourOpen;
 
   const contract: ContractView = {
     assignment: view.mode !== "multiplayer" || !view.challenge
@@ -1005,13 +1130,16 @@ export function MultiplayerGame({ room }: { room: string }) {
 
   return (
     <div className={`game-view${error || challengeError ? " ui-shake" : ""}`}>
+      {view.mode === "multiplayer" && (
+        <ProofTour room={room} seat={seat} handNo={view.hand_no} onOpenChange={setTourOpen} />
+      )}
       {!connected && <div className="connection-bar"><span>{connecting ? "Connecting" : "Disconnected"}</span>{!connecting && <button type="button" onClick={connect}>Reconnect</button>}</div>}
       <Table
         view={view}
         viewer={seat}
         room={room}
         error={error}
-        disabled={actionPending || notices.length > 0 || Boolean(deckStage) || !connected}
+        disabled={interactionDisabled}
         notice={notice}
         stage={deckStage}
         finish={finish}
@@ -1032,16 +1160,13 @@ export function MultiplayerGame({ room }: { room: string }) {
       {view.mode === "multiplayer" && (
         <PrivateChallengeBar
           view={contract}
-          disabled={actionPending || notices.length > 0 || Boolean(deckStage) || !connected}
-          onCommit={commitChallenge}
-          onDraw={() => void drawChallenge(challengeAssignment(view.challenge))}
-          onClaimDraw={() => void drawChallenge(claimAssignment(view.claim))}
-          onClaim={() => void claimChallenge()}
         />
       )}
       {view.mode === "multiplayer" && (
         <PlayProofs
           room={room}
+          handNo={view.hand_no}
+          settled={view.settled}
           view={contract}
         />
       )}

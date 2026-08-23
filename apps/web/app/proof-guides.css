@@ -197,11 +197,48 @@
   text-align: center;
 }
 
+.artifact-runbook-steps {
+  border-top: 1px solid var(--line-strong);
+}
+
+.artifact-runbook-steps p {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 10px;
+  margin: 0;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  color: #505760;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.artifact-runbook-steps span {
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.fact-list > div {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.proof-guide-feedback {
+  width: min(calc(100% - 40px), 1040px);
+  margin: 14px auto 0;
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .proof-tour-layer {
   position: fixed;
   z-index: 1000;
   inset: 0;
-  background: rgb(7 9 14 / 62%);
+  background: transparent;
 }
 
 .proof-tour-focus {
@@ -212,7 +249,7 @@
   width: var(--proof-tour-width);
   height: var(--proof-tour-height);
   border: 4px solid var(--lime);
-  box-shadow: 0 0 0 3px var(--blue);
+  box-shadow: 0 0 0 3px var(--blue), 0 0 0 9999px rgb(7 9 14 / 62%);
   pointer-events: none;
   transition: inset 180ms ease, width 180ms ease, height 180ms ease;
 }

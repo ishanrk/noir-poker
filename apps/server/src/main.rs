@@ -4862,6 +4862,69 @@ mod tests {
     }
 
     #[test]
+    fn encrypted_all_in_publishes_each_board_street() {
+        let config = config(3);
+        let mut room = Room::new(config, hash_token(Uuid::new_v4())).unwrap();
+
+        join(&mut room, Uuid::new_v4(), None).unwrap();
+        join(&mut room, Uuid::new_v4(), Some(SEED)).unwrap();
+        room.mode = RoomMode::Single;
+        room.mental = true;
+        room.deck = Some(new_deck(TEST_ROOM, 0, 0, room.mode, config.players).unwrap());
+        room.hand = Some(live_hand(
+            Uuid::new_v4(),
+            0,
+            SEED,
+            0,
+            vec![2920, 70, 10],
+            config,
+        ));
+        room.hand.as_mut().unwrap().game = State::hidden(0, &[2920, 70, 10], 5, 10);
+
+        apply(&mut room, 0, Action::RaiseTo(2900)).unwrap();
+        apply(&mut room, 1, Action::Call).unwrap();
+
+        assert!(matches!(
+            room_message(TEST_ROOM, &room, 0),
+            ServerMessage::DeckKey { .. }
+        ));
+
+        let cards = (0..5)
+            .map(|id| Card::from_id(id).unwrap())
+            .collect::<Vec<_>>();
+
+        publish_board(&mut room, &cards[..3]).unwrap();
+        let ServerMessage::Snapshot { view, .. } = room_message(TEST_ROOM, &room, 0) else {
+            panic!("flop snapshot missing");
+        };
+        assert_eq!(view.street, "flop");
+        assert_eq!(view.board.len(), 3);
+        assert!(!view.settled);
+        assert!(view.game_over.is_none());
+
+        room.action_pause = false;
+        publish_board(&mut room, &cards[3..4]).unwrap();
+        let ServerMessage::Snapshot { view, .. } = room_message(TEST_ROOM, &room, 0) else {
+            panic!("turn snapshot missing");
+        };
+        assert_eq!(view.street, "turn");
+        assert_eq!(view.board.len(), 4);
+        assert!(!view.settled);
+        assert!(view.game_over.is_none());
+
+        room.action_pause = false;
+        publish_board(&mut room, &cards[4..]).unwrap();
+        let ServerMessage::Snapshot { view, .. } = room_message(TEST_ROOM, &room, 0) else {
+            panic!("river snapshot missing");
+        };
+        assert_eq!(view.street, "river");
+        assert_eq!(view.board.len(), 5);
+        assert!(!view.settled);
+        assert!(view.game_over.is_none());
+        assert!(!room.game_complete());
+    }
+
+    #[test]
     fn ready_rules() {
         let waiting = Room::new(config(2), hash_token(Uuid::new_v4())).unwrap();
 

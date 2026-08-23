@@ -17,8 +17,8 @@ const STEPS = [
   },
   {
     label: "Prove",
-    title: "The player chooses when to generate a proof.",
-    copy: "Mode 0 becomes available after assignment. Mode 1 becomes available after a completed objective. Neither proof blocks poker actions.",
+    title: "The browser generates every available proof.",
+    copy: "Mode 0 starts after assignment. Mode 1 starts after settlement when the objective was completed. There is no generate proof control.",
     code: "UltraHonkBackend.generateProof(witness)",
   },
   {

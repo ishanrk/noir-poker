@@ -6,7 +6,11 @@ import {
   PrivateChallenge,
   type ContractView,
 } from "@/components/contract";
-import { DealIntegrity, type DealView } from "@/components/deal-integrity";
+import {
+  DealIntegrity,
+  PreviousDealIntegrity,
+  type DealView,
+} from "@/components/deal-integrity";
 import { Keycap } from "@/components/keycap";
 import { Seat } from "@/components/seat";
 import { bestHand } from "@/lib/poker-hand";
@@ -305,6 +309,7 @@ export function Table({
           </ol>
         </aside>
       )}
+      {view.hand_no > 0 && <PreviousDealIntegrity room={room} hand={view.hand_no - 1} />}
       {view.deal?.audit && <DealIntegrity deal={view.deal} room={room} compact />}
 
       {PROOF_UI && (

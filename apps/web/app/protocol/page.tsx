@@ -38,11 +38,11 @@ const IMPLEMENTATION = [
   ["Deck proof", "joint ElGamal shuffle with UltraHonk"],
   ["Shuffle public fields", "453"],
   [
-    "Circuit artifact SHA-256",
+    "Circuit artifact SHA 256",
     "1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d",
   ],
   [
-    "Verification key SHA-256",
+    "Verification key SHA 256",
     "b435db9d240683e181d8bad47203bf85d57ca27982bc676cf2686b5cf3de1d67",
   ],
 ] as const;
@@ -85,30 +85,25 @@ export default function ProtocolPage() {
               <span>Completed hand</span>
               <h3>Deal audit</h3>
             </header>
-            <ol>
-              <li>Finish the hand and open <code>/audit/&lt;room&gt;/&lt;hand&gt;</code>.</li>
-              <li>The page checks every key proof encrypted shuffle and decryption opening.</li>
-              <li>Choose <strong>Download Proof Transcript</strong> and save the accepted audit.</li>
-              <li>
-                Run <code>npm --prefix apps/web run deal:verify -- audit.json</code>.
-              </li>
-            </ol>
+            <div className="artifact-runbook-steps">
+              <p><span>01</span>Finish the hand and open <code>/audit/&lt;room&gt;/&lt;hand&gt;</code></p>
+              <p><span>02</span>The page checks every key proof encrypted shuffle reveal and opening</p>
+              <p><span>03</span>Select <strong>Download Proof Transcript</strong> and save the accepted audit</p>
+              <p><span>04</span>Run <code>npm --prefix apps/web run deal:verify -- audit.json</code></p>
+            </div>
           </article>
 
           <article>
             <header>
-              <span>Optional</span>
-              <h3>Fair-draw proof</h3>
+              <span>Automatic</span>
+              <h3>Fair draw proof</h3>
             </header>
-            <ol>
-              <li>The player chooses Generate Fair Draw Proof after assignment.</li>
-              <li>The Rust server verifies the proof before marking it published.</li>
-              <li>Another player may open the accepted proof and verify it locally.</li>
-              <li>
-                The accepted JSON is available from the server at{" "}
-                <code>/proofs/&lt;room&gt;/&lt;hand&gt;/&lt;seat&gt;/draw</code>.
-              </li>
-            </ol>
+            <div className="artifact-runbook-steps">
+              <p><span>01</span>The browser generates Mode 0 after assignment</p>
+              <p><span>02</span>The server verifies the proof before publication</p>
+              <p><span>03</span>Any player can open the accepted proof and verify it locally</p>
+              <p><span>04</span>Fetch the JSON at <code>/proofs/&lt;room&gt;/&lt;hand&gt;/&lt;seat&gt;/draw</code></p>
+            </div>
           </article>
 
           <article>
@@ -116,21 +111,18 @@ export default function ProtocolPage() {
               <span>Completion claim</span>
               <h3>Completion receipt</h3>
             </header>
-            <ol>
-              <li>Meeting the objective enables Generate Completion Proof.</li>
-              <li>The server verifies it and records one completed challenge.</li>
-              <li>Open <code>/proof/&lt;nullifier&gt;</code> and choose Verify Proof.</li>
-              <li>
-                Export JSON, then run{" "}
-                <code>npm --prefix apps/web run proof:verify -- receipt.json</code>.
-              </li>
-            </ol>
+            <div className="artifact-runbook-steps">
+              <p><span>01</span>The browser generates Mode 1 after a completed objective</p>
+              <p><span>02</span>The server verifies it and records one completion</p>
+              <p><span>03</span>Open <code>/proof/&lt;nullifier&gt;</code> to run browser verification</p>
+              <p><span>04</span>Download JSON then run <code>npm --prefix apps/web run proof:verify -- receipt.json</code></p>
+            </div>
           </article>
         </div>
 
         <p className="story-note">
-          A completion proof repeats the secret commitment, selector and catalog checks, so it
-          stands on its own.
+          A completion proof repeats the secret commitment selector and catalog checks. It stands
+          on its own.
         </p>
       </section>
 
@@ -158,7 +150,7 @@ export default function ProtocolPage() {
           <article>
             <header>
               <h3>Private challenge</h3>
-              <p>Secret commitment hidden assignment optional proof and public verification</p>
+              <p>Secret commitment hidden assignment automatic proof and public verification</p>
             </header>
             <ChallengeProofDemo />
           </article>
@@ -180,15 +172,15 @@ export default function ProtocolPage() {
             <h3>Fair draw</h3>
             <p>
               The prover knows a secret bound to the public commitment. That secret and the public
-              nonce select one leaf in the fixed eight-item Merkle catalog.
+              nonce select one leaf in the fixed eight entry Merkle catalog.
             </p>
             <div>
               <strong>Public</strong>
-              <p>mode, hand tag, seat, commitment, nonce and catalog root</p>
+              <p>mode hand tag seat commitment nonce and catalog root</p>
             </div>
             <div>
               <strong>Private</strong>
-              <p>secret, selected rule and three sibling hashes</p>
+              <p>secret selected rule and three sibling hashes</p>
             </div>
           </article>
 
@@ -196,8 +188,8 @@ export default function ProtocolPage() {
             <span>Mode 1</span>
             <h3>Completion</h3>
             <p>
-              The circuit repeats every assignment check, binds six private facts to a public hash,
-              applies the hidden rule and derives a one-time nullifier.
+              The circuit repeats every assignment check and binds six private facts to a public
+              hash. It applies the hidden rule and derives a one time nullifier.
             </p>
             <div>
               <strong>Public</strong>
@@ -205,7 +197,7 @@ export default function ProtocolPage() {
             </div>
             <div>
               <strong>Private</strong>
-              <p>secret, rule, Merkle path, fact salt and six facts</p>
+              <p>secret rule Merkle path fact salt and six facts</p>
             </div>
           </article>
         </div>
@@ -265,8 +257,8 @@ export default function ProtocolPage() {
             </summary>
             <div>
               <p>
-                The browser commits to a private 32-byte secret. The server stores that commitment,
-                then returns a fresh public nonce.
+                The browser commits to a private 32 byte secret. The server stores that commitment.
+                It then returns a fresh public nonce.
               </p>
               <code>
                 commitment = BLAKE2s(&quot;NPCOMM02&quot; || hand_tag || seat || secret)
@@ -276,13 +268,13 @@ export default function ProtocolPage() {
               </code>
               <code>challenge_index = selector[0] &amp; 7</code>
               <p>
-                The circuit hashes the selected rule and its three private Merkle siblings, then
+                The circuit hashes the selected rule and its three private Merkle siblings. It then
                 requires the computed root to equal the public catalog root.
               </p>
               <p>
-                The catalog has eight entries, so the low three selector bits choose an entry
-                without modulo imbalance. The player commits before seeing the nonce. The server
-                cannot evaluate candidate nonces without the hidden 256-bit browser secret.
+                The catalog has eight entries. The low three selector bits choose an entry without
+                modulo imbalance. The player commits before seeing the nonce. The server cannot
+                evaluate candidate nonces without the hidden 256 bit browser secret.
               </p>
               <p>
                 The hashes use the{" "}
@@ -300,21 +292,21 @@ export default function ProtocolPage() {
             </summary>
             <div>
               <p>The six private facts are:</p>
-              <ol className="fact-list">
+              <div className="fact-list">
                 {FACTS.map((fact, index) => (
-                  <li key={fact}>
+                  <div key={fact}>
                     <code>fact[{index}]</code>
                     <span>{fact}</span>
-                  </li>
+                  </div>
                 ))}
-              </ol>
+              </div>
               <code>
                 facts_hash = BLAKE2s(&quot;NPFACT02&quot; || hand_tag || seat || salt ||
                 facts)
               </code>
               <p>
-                The circuit checks each required true or false condition, then derives the public
-                one-time claim id.
+                The circuit checks each required true or false condition. It then derives the public
+                one time claim id.
               </p>
               <code>
                 nullifier = BLAKE2s(&quot;NPNULL02&quot; || hand_tag || seat || secret)

@@ -447,27 +447,34 @@ async function playObjective(target, objective, a, b, hand) {
 }
 
 async function verifyPublic(viewer, owner, kind) {
-  const row = viewer.page
-    .getByText(owner.toUpperCase(), { exact: true })
-    .locator("..")
-    .locator("..");
-  const item = row
-    .getByText(kind, { exact: true })
-    .locator("..")
-    .locator("..");
-  const verify = item.getByRole("link", { name: "VERIFY", exact: true });
+  const row = viewer.page.getByRole("row").filter({ hasText: owner.toUpperCase() });
+  const verify = row.getByRole("link", { name: `${kind} PROOF`, exact: true });
   await verify.waitFor({ timeout: 30_000 });
   const tableUrl = viewer.page.url();
   const opened = viewer.page.waitForEvent("popup");
   await verify.click();
   const page = await opened;
   watch(page, `${viewer.name}-${kind.toLowerCase().replaceAll(" ", "-")}`);
-  await page.getByText("READY TO VERIFY", { exact: true }).waitFor({ timeout: 30_000 });
-  await page.getByRole("button", { name: "VERIFY", exact: true }).waitFor({ timeout: 30_000 });
-  await page.getByRole("button", { name: "VERIFY", exact: true }).click();
   await page.getByText("VERIFIED LOCALLY", { exact: true }).waitFor({ timeout: 120_000 });
+  await page.getByRole("button", { name: "Download JSON", exact: true }).waitFor();
+  await page.getByRole("link", { name: "Local Verifier", exact: true }).waitFor();
+  const body = await page.locator("body").innerText();
+  for (const objective of objectives) {
+    assert.equal(body.includes(objective), false, `${kind} proof exposed the private objective`);
+  }
   assert.equal(viewer.page.url(), tableUrl, `${kind} proof replaced the table tab`);
   await page.close();
+}
+
+async function dismissTour(trace) {
+  await trace.page.getByRole("dialog").waitFor({ timeout: 30_000 });
+  await trace.page.getByText("Deck proof", { exact: true }).waitFor();
+  await trace.page.getByRole("button", { name: "Okay", exact: true }).click();
+  await trace.page.getByText("Challenge draw proof", { exact: true }).waitFor();
+  await trace.page.getByRole("button", { name: "Okay", exact: true }).click();
+  await trace.page.getByText("Completion proof", { exact: true }).waitFor();
+  await trace.page.getByRole("button", { name: "Okay Start Hand 2", exact: true }).click();
+  await trace.page.getByRole("dialog").waitFor({ state: "hidden" });
 }
 
 async function multiplayerStress() {
@@ -497,20 +504,16 @@ async function multiplayerStress() {
   assert.equal(await b.page.locator('section[aria-label="Alice"] .card-hidden').count(), 2);
 
   await foldCurrent(a, b, 0);
+  const [aChallenge, bChallenge] = await Promise.all([challenge(a.page), challenge(b.page)]);
   await Promise.all([
-    a.page.getByRole("button", { name: "Draw Challenge" }).waitFor({ timeout: 240_000 }),
-    b.page.getByRole("button", { name: "Draw Challenge" }).waitFor({ timeout: 240_000 }),
+    frame(a, (message) => message.type === "proof_accepted" && message.kind === "draw" && message.hand_no === 1, 0, "automatic draw proof missing"),
+    frame(b, (message) => message.type === "proof_accepted" && message.kind === "draw" && message.hand_no === 1, 0, "automatic draw proof missing"),
   ]);
-  assert.equal(sent(a, "challenge_draw").length + sent(b, "challenge_draw").length, 0);
-
-  await Promise.all([
-    a.page.getByRole("button", { name: "Draw Challenge" }).click(),
-    b.page.getByRole("button", { name: "Draw Challenge" }).click(),
-  ]);
-  await Promise.all([
-    a.page.getByRole("button", { name: "Generate Fair Draw Proof" }).waitFor(),
-    b.page.getByRole("button", { name: "Generate Fair Draw Proof" }).waitFor(),
-  ]);
+  assert.equal(sent(a, "challenge_draw").length, 1, "alice draw proof not automatic");
+  assert.equal(sent(b, "challenge_draw").length, 1, "bob draw proof not automatic");
+  assert.equal(await a.page.getByRole("button", { name: /Generate|Draw Challenge/ }).count(), 0);
+  assert.equal(await b.page.getByRole("button", { name: /Generate|Draw Challenge/ }).count(), 0);
+  await verifyPublic(a, "Bob", "DRAW");
   await Promise.all([
     waitNotices(a.page, "multiplayer hand 1 a"),
     waitNotices(b.page, "multiplayer hand 1 b"),
@@ -521,20 +524,16 @@ async function multiplayerStress() {
   ]);
 
   const aReady = a.page.getByRole("button", { name: "Ready for Next Hand" });
-  await until(async () => await aReady.isEnabled(), "ready blocked without draw proof");
+  await until(async () => await aReady.isEnabled(), "first ready unavailable");
   await aReady.click();
   await a.page.getByRole("button", { name: "Ready 1/2" }).waitFor({ timeout: 15_000 });
-  assert.equal(sent(a, "challenge_draw").length, 0, "ready generated a draw proof");
-
-  await b.page.getByRole("button", { name: "Generate Fair Draw Proof" }).click();
-  await frame(b, (message) => message.type === "proof_accepted" && message.kind === "draw" && message.hand_no === 1, 0, "draw proof not accepted");
-  await verifyPublic(a, "Bob", "FAIR DRAW");
 
   const bReady = b.page.getByRole("button", { name: "Ready for Next Hand" });
   await until(async () => await bReady.isEnabled(), "second ready unavailable");
   await bReady.click();
   const [aNext, bNext] = await Promise.all([waitHand(a, 1), waitHand(b, 1)]);
   assert.notDeepEqual(aNext, bNext, "next hand private cards match");
+  await Promise.all([dismissTour(a), dismissTour(b)]);
 
   const before = a.frames.length;
   await a.page.reload({ waitUntil: "domcontentloaded" });
@@ -544,7 +543,6 @@ async function multiplayerStress() {
   assert.equal(await a.page.locator(".table-action-notice").count(), 0, "multiplayer reconnect replayed a notice");
   await noticeLog(a);
 
-  const [aChallenge, bChallenge] = await Promise.all([challenge(a.page), challenge(b.page)]);
   for (const trace of [a, b]) {
     const publicState = JSON.stringify(latest(trace));
     for (const item of objectives) {
@@ -585,20 +583,19 @@ async function multiplayerStress() {
       { trace: a, viewer: b, objective: aChallenge.index, owner: "Alice" },
       { trace: b, viewer: a, objective: bChallenge.index, owner: "Bob" },
     ]) {
-      const button = choice.trace.page.getByRole("button", { name: "Generate Completion Proof" });
-      if (await button.count() && await button.isVisible()) return choice;
+      const result = choice.trace.page.getByText("COMPLETED", { exact: true });
+      if (await result.count() && await result.isVisible()) return choice;
     }
     return undefined;
   }, "showdown profit challenge not completed");
-  const generate = completed.trace.page.getByRole("button", { name: "Generate Completion Proof" });
-  await generate.waitFor({ timeout: 30_000 });
-  await generate.click();
   await frame(
     completed.trace,
     (message) => message.type === "proof_accepted" && message.kind === "completion" && message.hand_no === 1,
     0,
-    "completion proof not accepted",
+    "automatic completion proof missing",
   );
+  assert.equal(sent(completed.trace, "challenge_claim").length, 1, "completion proof not automatic");
+  assert.equal(await completed.trace.page.getByRole("button", { name: /Generate Completion/ }).count(), 0);
   await verifyPublic(completed.viewer, completed.owner, "COMPLETION");
 
   await ca.close();

@@ -1,6 +1,8 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
+import { ProofGuide, type ProofGuideStep } from "@/components/proof-guide";
 import { SiteHeader } from "@/components/site-header";
 import { verifyReceipt, type ReceiptProof } from "@/lib/receipt";
 import { loadProofReceipt, type ProofReceipt } from "@/lib/server";
@@ -47,7 +49,7 @@ function VerificationTimeline({
       </div>
       <div data-state={draw}>
         <span>02</span>
-        <p>Optional fair draw proof</p>
+        <p>Fair challenge draw proof</p>
         <strong>{status(draw)}</strong>
       </div>
       <div data-state={completion}>
@@ -80,8 +82,8 @@ export function ProofReceiptPreview() {
 export function ProofReceiptView({ nullifier }: { nullifier: string }) {
   const [receipt, setReceipt] = useState<ProofReceipt>();
   const receiptRef = useRef<ProofReceipt | undefined>(undefined);
-  const running = useRef(false);
-  const mounted = useRef(true);
+  const routeRef = useRef(nullifier);
+  const runRef = useRef(0);
   const [draw, setDraw] = useState<State>("waiting");
   const [completion, setCompletion] = useState<State>("waiting");
   const [error, setError] = useState<string>();
@@ -89,8 +91,8 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
   const [busy, setBusy] = useState(false);
 
   const verify = useCallback(async (loaded?: ProofReceipt) => {
-    if (running.current) return;
-    running.current = true;
+    const route = nullifier;
+    const run = ++runRef.current;
     setBusy(true);
     setError(undefined);
     setDraw("waiting");
@@ -99,7 +101,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
 
     try {
       const value = loaded ?? receiptRef.current ?? (await loadProofReceipt(nullifier));
-      if (!mounted.current) return;
+      if (routeRef.current !== route || runRef.current !== run) return;
       receiptRef.current = value;
       setReceipt(value);
       const hasDraw = Boolean(value.draw_proof && value.draw_public_inputs);
@@ -107,7 +109,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
       setDraw(hasDraw ? "verifying" : "skipped");
       if (!hasDraw) setCompletion("verifying");
       await verifyReceipt(value, (proof) => {
-        if (!mounted.current) return;
+        if (routeRef.current !== route || runRef.current !== run) return;
         if (proof === "draw") {
           step = "completion";
           setDraw("verified");
@@ -117,22 +119,22 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
         }
       });
     } catch (cause) {
-      if (!mounted.current) return;
+      if (routeRef.current !== route || runRef.current !== run) return;
       if (step === "draw") setDraw("failed");
       else setCompletion("failed");
       setError(cause instanceof Error ? cause.message : "proof verification failed");
     } finally {
-      running.current = false;
-      if (mounted.current) setBusy(false);
+      if (routeRef.current === route && runRef.current === run) setBusy(false);
     }
   }, [nullifier]);
 
   useEffect(() => {
-    mounted.current = true;
     let live = true;
+    routeRef.current = nullifier;
+    const request = ++runRef.current;
     receiptRef.current = undefined;
     queueMicrotask(() => {
-      if (!live) return;
+      if (!live || routeRef.current !== nullifier || runRef.current !== request) return;
       setReceipt(undefined);
       setDraw("waiting");
       setCompletion("waiting");
@@ -141,22 +143,23 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
 
     void loadProofReceipt(nullifier)
       .then((value) => {
-        if (!live) return;
+        if (!live || routeRef.current !== nullifier || runRef.current !== request) return;
         receiptRef.current = value;
         setReceipt(value);
         setDraw(value.draw_proof && value.draw_public_inputs ? "waiting" : "skipped");
+        void verify(value);
       })
       .catch((cause) => {
-        if (!live) return;
+        if (!live || routeRef.current !== nullifier || runRef.current !== request) return;
         setDraw("failed");
         setError(cause instanceof Error ? cause.message : "proof receipt unavailable");
       });
 
     return () => {
       live = false;
-      mounted.current = false;
+      if (routeRef.current === nullifier) runRef.current += 1;
     };
-  }, [nullifier]);
+  }, [nullifier, verify]);
 
   async function copyLink() {
     await navigator.clipboard.writeText(window.location.href);
@@ -172,11 +175,32 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
     const link = document.createElement("a");
     link.href = url;
     link.download = `noir-poker-challenge-${receipt.nullifier.slice(0, 12)}.json`;
+    document.body.append(link);
     link.click();
+    link.remove();
     URL.revokeObjectURL(url);
   }
 
   const verified = (draw === "verified" || draw === "skipped") && completion === "verified";
+  const fileName = receipt
+    ? `noir-poker-challenge-${receipt.nullifier.slice(0, 12)}.json`
+    : "receipt.json";
+  const verificationActions = receipt ? (
+    <>
+      <code className="proof-guide-command">
+        npm --prefix apps/web run proof:verify -- {fileName}
+      </code>
+      <div className="proof-guide-links">
+        <button type="button" onClick={() => void verify()}>Run Browser Check</button>
+        <button type="button" onClick={exportReceipt}>Download JSON</button>
+        <button type="button" onClick={() => void copyLink()}>Copy Public Link</button>
+        <Link href={`${REPO}/circuits/challenge-v2/src/main.nr`} target="_blank" rel="noreferrer">Circuit Source</Link>
+        <Link href={`${REPO}/apps/web/lib/receipt.ts`} target="_blank" rel="noreferrer">Browser Verifier</Link>
+        <Link href={`${REPO}/apps/server/src/proof.rs`} target="_blank" rel="noreferrer">Server Verifier</Link>
+        <Link href={`${REPO}/apps/web/scripts/verify-receipt.mjs`} target="_blank" rel="noreferrer">Local Verifier</Link>
+      </div>
+    </>
+  ) : null;
 
   return (
     <main className="site-shell proof-page">
@@ -186,76 +210,127 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
           <p className="eyebrow">Public challenge verifier</p>
           <h1>{verified ? "The challenge was completed." : receipt ? "Proof ready to verify." : "Loading proof."}</h1>
           <p>
-            This browser checks every published UltraHonk proof. The challenge and private fact
-            vector never appear in the receipt.
+            This browser checks the accepted UltraHonk proof automatically. The challenge and
+            private fact vector never appear in the receipt.
           </p>
         </div>
         <ReceiptSeal verified={verified} />
       </header>
 
-      <VerificationTimeline receipt={Boolean(receipt)} draw={draw} completion={completion} />
-
-      <p className="story-note">A completion proof does not require a previous draw proof</p>
-      <p className="story-note">
-        The completion circuit checks server derived facts against their public commitment It does
-        not replay the poker action log
-      </p>
-
       {error && <p className="proof-error">{error}</p>}
 
       {receipt && (
-        <section className="receipt-statement">
-          <div className="section-index">
-            <span>Statement</span>
-            <p>Proof statement</p>
-          </div>
-          <div>
-            <h2>
-              A committed secret selected one valid challenge, and that same hidden challenge was
-              satisfied by the committed hand facts.
-            </h2>
-            <div className="statement-grid">
-              <article>
-                <span>Public</span>
-                <strong>
-                  Room {receipt.room.slice(0, 8)} hand {receipt.hand_no + 1} seat {receipt.seat + 1}
-                </strong>
-              </article>
-              <article>
-                <span>Hidden</span>
-                <strong>Challenge, secret, Merkle path and six hand facts</strong>
-              </article>
-              <article>
-                <span>Toolchain</span>
-                <strong>Noir, UltraHonk, Barretenberg {receipt.bb_version}</strong>
-              </article>
-              <article>
-                <span>Replay guard</span>
-                <strong>{receipt.nullifier.slice(0, 18)}…</strong>
-              </article>
-            </div>
-          </div>
-        </section>
+        <ProofGuide
+          key={receipt.nullifier}
+          label="Public completion receipt"
+          title="Read and verify this receipt"
+          intro="Move through each check in order"
+          steps={receiptSteps({
+            receipt,
+            verificationActions,
+          })}
+        />
       )}
-
-      <section className="receipt-actions">
-        <button type="button" onClick={() => void copyLink()} disabled={!receipt}>
-          {copied ? "Link copied" : "Share verifier"}
-        </button>
-        <button type="button" onClick={() => void verify()} disabled={!receipt || busy}>
-          {verified || error ? "Run again" : "Verify proof"}
-        </button>
-        <details>
-          <summary>Developer verification</summary>
-          <code>npm --prefix apps/web run proof:verify -- receipt.json</code>
-          <button type="button" onClick={exportReceipt}>
-            Export JSON
-          </button>
-        </details>
-        <a href="/protocol#challenge-proofs" target="_blank" rel="noreferrer">
-          Protocol and references
-        </a>
-      </section>
+      {receipt && copied && <p className="proof-guide-feedback" role="status">Link copied</p>}
+      {receipt && busy && <p className="proof-guide-feedback" role="status">Verification is running</p>}
     </main>
   );
+}
+
+const REPO = "https://github.com/ishanrk/noir-poker/blob/main";
+
+function receiptSteps({
+  receipt,
+  verificationActions,
+}: {
+  receipt: ProofReceipt;
+  verificationActions: ReactNode;
+}): ProofGuideStep[] {
+  const drawIncluded = Boolean(receipt.draw_proof && receipt.draw_public_inputs);
+
+  return [
+    {
+      title: "The accepted public record",
+      text: "The server stored this completion receipt only after it accepted the proof. The JSON contains the exact proof bytes and exact public input bytes. Local verification does not trust the status text on this page.",
+      detail: (
+        <dl>
+          <ReceiptValue label="Protocol" value={String(receipt.protocol_version)} />
+          <ReceiptValue label="Circuit" value={receipt.circuit_id} />
+          <ReceiptValue label="Proof system" value={receipt.proof_system} />
+          <ReceiptValue label="Draw proof" value={drawIncluded ? "Included" : "Not included in this receipt"} />
+          <ReceiptValue label="Completion proof" value="Included" />
+        </dl>
+      ),
+    },
+    {
+      title: "The hand and player",
+      text: "The verifier derives the hand tag from the room id and zero based hand number. It requires the seat and fixed catalog root to match the public inputs inside every included proof.",
+      detail: (
+        <dl>
+          <ReceiptValue label="Room" value={receipt.room} />
+          <ReceiptValue label="Hand number" value={`${receipt.hand_no} in data and ${receipt.hand_no + 1} on screen`} />
+          <ReceiptValue label="Hand tag" value={receipt.hand_tag} />
+          <ReceiptValue label="Seat" value={`${receipt.seat} in data and Player ${receipt.seat + 1} on screen`} />
+          <ReceiptValue label="Catalog root" value={receipt.catalog_root} />
+        </dl>
+      ),
+    },
+    {
+      title: "The challenge draw",
+      text: "The browser commits to a private 32 byte secret before the server returns its nonce. The circuit hashes the secret with the nonce and uses three selector bits to choose one of eight catalog leaves. A private Merkle path must reach the fixed public root. Neither side can select the result after seeing both secret inputs.",
+      detail: (
+        <dl>
+          <ReceiptValue label="Secret commitment" value={receipt.commitment} />
+          <ReceiptValue label="Server nonce" value={receipt.nonce} />
+          <ReceiptValue label="Published draw check" value={drawIncluded ? "Mode 0 proof included" : "Historical receipt without Mode 0 proof"} />
+        </dl>
+      ),
+    },
+    {
+      title: "The completion check",
+      text: "Mode 1 repeats every assignment check. It binds six private fact bits to the public facts hash. It requires every condition in the hidden catalog rule to match those bits. The nullifier is derived from the hand player and secret so the same completion cannot count twice.",
+      detail: (
+        <dl>
+          <ReceiptValue label="Fact 0" value="Saw the flop" />
+          <ReceiptValue label="Fact 1" value="Raised before the flop" />
+          <ReceiptValue label="Fact 2" value="Called before the flop" />
+          <ReceiptValue label="Fact 3" value="Checked on the flop" />
+          <ReceiptValue label="Fact 4" value="Reached showdown" />
+          <ReceiptValue label="Fact 5" value="Finished with a net profit" />
+          <ReceiptValue label="Facts hash" value={receipt.facts_hash} />
+          <ReceiptValue label="Nullifier" value={receipt.nullifier} />
+        </dl>
+      ),
+    },
+    {
+      title: "The exact trust boundary",
+      text: "The circuit proves that the private fact bits match the server facts commitment and satisfy the hidden rule. It does not replay the poker action log. The encrypted deck transcript separately checks deck construction card reveals and final openings.",
+      detail: (
+        <div className="proof-guide-links">
+          <Link href={`/audit/${receipt.room}/${receipt.hand_no}`} target="_blank" rel="noreferrer">Open Deck Transcript</Link>
+          <Link href="/protocol#challenge-proofs" target="_blank" rel="noreferrer">Read Protocol Boundary</Link>
+        </div>
+      ),
+    },
+    {
+      title: "The UltraHonk result",
+      text: "UltraHonk checks that a private witness satisfies the compiled Noir constraints for these public inputs. The private secret challenge rule Merkle path fact salt and six fact bits never enter the receipt. The server key file and portable circuit artifact are identified by the SHA 256 values below.",
+      detail: (
+        <dl>
+          <ReceiptValue label="Artifact SHA 256" value={receipt.artifact_sha256} />
+          <ReceiptValue label="Verification key SHA 256" value={receipt.vk_sha256} />
+          <ReceiptValue label="Barretenberg" value={receipt.bb_version} />
+        </dl>
+      ),
+    },
+    {
+      title: "Run an independent check",
+      text: "This page runs browser verification automatically. Download the JSON to keep the accepted record. From the repository root install the web dependencies then run the command below. Success prints a verified line with the room hand and proof count. Any changed byte returns an error.",
+      detail: verificationActions,
+    },
+  ];
+}
+
+function ReceiptValue({ label, value }: { label: string; value: string }) {
+  return <div><dt>{label}</dt><dd>{value}</dd></div>;
 }

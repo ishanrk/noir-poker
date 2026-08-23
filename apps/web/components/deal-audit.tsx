@@ -13,45 +13,52 @@ type AuditState = "loading" | "verified" | "unavailable" | "failed";
 const protocol = [
   {
     title: "Each participant creates a key",
-    text: "The server and every human browser create a secret key for this hand. The transcript publishes each Grumpkin public key with a proof that its owner knows the matching secret. The secrets stay private during play. The public keys combine into one shared deck key.",
-    check: "The keys field stores public curve points and key_proofs stores ownership proofs",
+    text: "Participant 0 is the server. Later participants are human seats in seat order. Each keys entry is a public Grumpkin point with x and y coordinates. The matching key proof has points a and b plus scalar z. Those values prove knowledge of the secret key without publishing it.",
+    check: "The verifier checks every key proof against the transcript state before it accepts the next record",
     source: "Barnett and Smart on mental poker",
     href: "https://research-information.bris.ac.uk/en/publications/mental-poker-revisited/",
   },
   {
     title: "Each participant proves one shuffle",
-    text: "Every shuffle entry contains the 52 input ciphertexts and the 52 output ciphertexts. Its UltraHonk proof shows that the output contains the same cards under a hidden permutation with fresh encryption. If one human browser samples its permutation honestly then the server cannot choose the final order. The secret permutation and encryption masks never enter the transcript.",
+    text: "Every shuffle entry contains 52 input ciphertexts and 52 output ciphertexts. Each ciphertext has left and right Grumpkin points. The Noir circuit requires a private permutation containing every number from 0 through 51 exactly once. It also requires a nonzero private encryption mask for every output card. UltraHonk proves those constraints without exposing either private array.",
     check: "The shuffles field connects each public input deck to its public output deck",
     source: "Neff on verifiable secret shuffles",
     href: "https://dl.acm.org/doi/10.1145/501983.502000",
   },
   {
     title: "Public inputs pin every shuffle",
-    text: "Each proof publishes exactly 453 field values. They bind the protocol version the hand number the participant the prior transcript context all coordinates from both 52 card decks and the aggregate deck key. The proof bytes are the compact UltraHonk argument checked against the pinned verification key.",
+    text: "Each shuffle publishes exactly 453 field values. The order is protocol version then hand number then participant then 32 transcript context bytes then 208 input point coordinates then 208 output point coordinates then two aggregate key coordinates. The verifier reconstructs this sequence from the JSON and requires an exact match before checking UltraHonk.",
     check: "The public_inputs field binds the proof to this hand and these exact ciphertexts",
     source: "Noir proving and verification",
     href: "https://noir-lang.org/docs/getting_started_manually",
   },
   {
     title: "Ordered records preserve the deal",
-    text: "The records array stores each key shuffle decryption share card reveal opening and completion in sequence. Share proofs connect every decryption share to its published key. Reveal records open only the card positions needed during play.",
-    check: "The records field preserves the exact event order and each encoded payload",
+    text: "Every records entry has seq kind seat payload and hash. Seq must equal its zero based array position. Kind identifies a key shuffle share reveal opening or completion. A missing seat marks the server. Payload is base64 encoded binary data. Hash is the new SHA 256 chain head after that record.",
+    check: "The verifier decodes each payload and requires it to equal the matching public key shuffle share reveal opening or final deck value",
     source: "Chaum and Pedersen equality proofs",
     href: "https://chaum.com/wp-content/uploads/2021/12/Wallet_Databases.pdf",
   },
   {
     title: "Final openings reconstruct the deck",
-    text: "After settlement each participant publishes their secret key opening. The verifier derives its public key again and requires an exact match. Those openings decrypt the final ciphertext deck. The deck field records the resulting 52 card identifiers in order.",
-    check: "The openings field matches every public key and deck contains one full permutation",
+    text: "After settlement every participant publishes the hand key opening. The verifier derives each public key again and requires an exact match. It then decrypts all 52 final ciphertexts. Deck identifiers 0 through 12 are clubs. Values 13 through 25 are diamonds. Values 26 through 38 are hearts. Values 39 through 51 are spades. Each suit runs from 2 through ace.",
+    check: "The reconstructed deck must match every deck identifier and must contain each identifier exactly once",
     source: "Mental Poker Revisited",
     href: "https://research-information.bris.ac.uk/en/publications/mental-poker-revisited/",
   },
   {
     title: "The hash chain identifies the transcript",
-    text: "The verifier starts with a domain separated hash of the room and hand. Every ordered record hashes the previous head its sequence type seat and payload hash. transcript_hash is the final SHA 256 chain head. It identifies this record chain and is not a direct hash of the downloaded JSON file.",
+    text: "The first chain head is SHA 256 over the protocol domain plus room bytes plus the zero based hand number. Every next head hashes the same domain plus the previous head plus seq plus kind plus seat plus a SHA 256 digest of payload. A missing seat is encoded as 255. transcript_hash is the final chain head. It is not a direct digest of the JSON file.",
     check: "Changing one ordered record changes the final hash chain head",
     source: "NIST SHA 256 standard",
     href: "https://csrc.nist.gov/pubs/fips/180-4/upd1/final",
+  },
+  {
+    title: "Run the portable verifier",
+    text: "Download the proof transcript first. From the repository root install the web dependencies. Run the command with the downloaded file path. The script checks the canonical encrypted deck every key proof every UltraHonk shuffle proof every share every reveal every opening the SHA 256 chain and all 52 reconstructed cards.",
+    check: "Success prints verified plus the room id zero based hand number and card count 52",
+    source: "Portable verifier source",
+    href: "https://github.com/ishanrk/noir-poker/blob/main/apps/web/scripts/verify-deal.mjs",
   },
 ] as const;
 
@@ -106,11 +113,11 @@ function proofDetails(step: number, audit: DealAudit) {
     ],
     [
       ["Deck transitions", `${audit.shuffles.length} proven input and output deck pairs`],
-      ["Proof bytes", `${proofBytes.toLocaleString("en-US")} decoded bytes in total`],
+      ["Proof bytes", `${proofBytes} decoded bytes in total`],
     ],
     [
       ["Public fields", `453 fields for each of ${audit.shuffles.length} shuffles`],
-      ["Public input bytes", `${publicBytes.toLocaleString("en-US")} decoded bytes in total`],
+      ["Public input bytes", `${publicBytes} decoded bytes in total`],
     ],
     [
       ["Ordered records", `${audit.records.length} chained transcript entries`],
@@ -123,6 +130,10 @@ function proofDetails(step: number, audit: DealAudit) {
     [
       ["Final chain head", audit.transcript_hash],
       ["Complete records", `${records("complete")} final deck record`],
+    ],
+    [
+      ["Local command", "npm --prefix apps/web run deal:verify -- audit.json"],
+      ["Expected card count", "52 reconstructed cards"],
     ],
   ];
 
@@ -236,7 +247,7 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
         <header>
           <p className="protocol-label">Protocol walkthrough</p>
           <h2>Follow the deck</h2>
-          <p>Six steps from new keys to the verified deck</p>
+          <p>Seven steps from public keys to a local verification</p>
         </header>
         <nav className="deck-protocol-path" aria-label="Deck protocol steps">
           {protocol.map((item, index) => (
