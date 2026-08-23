@@ -37,7 +37,7 @@ export function ProofTour({ room, seat, handNo, onOpenChange }: {
   room: string;
   seat: number;
   handNo: number;
-  onOpenChange: (open: boolean) => void;
+  onOpenChange: (state: { handNo: number; open: boolean }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
@@ -49,20 +49,20 @@ export function ProofTour({ room, seat, handNo, onOpenChange }: {
     const timer = window.setTimeout(() => {
       if (handNo !== 1) {
         setOpen(false);
-        onOpenChange(false);
+        onOpenChange({ handNo, open: false });
         return;
       }
 
       try {
         if (localStorage.getItem(storageKey(room, seat)) === "complete") {
-          onOpenChange(false);
+          onOpenChange({ handNo, open: false });
           return;
         }
       } catch {}
 
       setStep(0);
       setOpen(true);
-      onOpenChange(true);
+      onOpenChange({ handNo, open: true });
     }, 0);
     return () => window.clearTimeout(timer);
   }, [handNo, onOpenChange, room, seat]);
@@ -131,7 +131,7 @@ export function ProofTour({ room, seat, handNo, onOpenChange }: {
       localStorage.setItem(storageKey(room, seat), "complete");
     } catch {}
     setOpen(false);
-    onOpenChange(false);
+    onOpenChange({ handNo, open: false });
   }
 
   if (!open) return null;

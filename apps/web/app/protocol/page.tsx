@@ -89,7 +89,7 @@ export default function ProtocolPage() {
               <p><span>01</span>Finish the hand and open <code>/audit/&lt;room&gt;/&lt;hand&gt;</code></p>
               <p><span>02</span>The page checks every key proof encrypted shuffle reveal and opening</p>
               <p><span>03</span>Select <strong>Download Proof Transcript</strong> and save the accepted audit</p>
-              <p><span>04</span>Run <code>npm --prefix apps/web run deal:verify -- audit.json</code></p>
+              <p><span>04</span>Run <code>npm --prefix apps/web run deal:verify -- path/to/downloaded.json</code></p>
             </div>
           </article>
 
@@ -102,7 +102,7 @@ export default function ProtocolPage() {
               <p><span>01</span>The browser generates Mode 0 after assignment</p>
               <p><span>02</span>The server verifies the proof before publication</p>
               <p><span>03</span>Any player can open the accepted proof and verify it locally</p>
-              <p><span>04</span>Fetch the JSON at <code>/proofs/&lt;room&gt;/&lt;hand&gt;/&lt;seat&gt;/draw</code></p>
+              <p><span>04</span>Open <code>/room/&lt;room&gt;/proofs/&lt;hand&gt;/&lt;seat&gt;/draw</code></p>
             </div>
           </article>
 
@@ -115,7 +115,7 @@ export default function ProtocolPage() {
               <p><span>01</span>The browser generates Mode 1 after a completed objective</p>
               <p><span>02</span>The server verifies it and records one completion</p>
               <p><span>03</span>Open <code>/proof/&lt;nullifier&gt;</code> to run browser verification</p>
-              <p><span>04</span>Download JSON then run <code>npm --prefix apps/web run proof:verify -- receipt.json</code></p>
+              <p><span>04</span>Download JSON then run <code>npm --prefix apps/web run proof:verify -- path/to/downloaded.json</code></p>
             </div>
           </article>
         </div>
@@ -386,7 +386,7 @@ export default function ProtocolPage() {
           <p className="story-index">07</p>
           <div>
             <h2 id="sources-title">Source and references</h2>
-            <p>Read the circuit, verifier and upstream tool documentation.</p>
+            <p>Read the circuit and verifier source with the upstream tool documentation.</p>
           </div>
         </header>
         <div className="story-link-grid">

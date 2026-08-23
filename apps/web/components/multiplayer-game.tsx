@@ -273,7 +273,7 @@ export function MultiplayerGame({ room }: { room: string }) {
   const noticeQueue = useRef<ActionNoticeView[]>([]);
   const [deckStage, setDeckStage] = useState<string>();
   const [finishHand, setFinishHand] = useState<number>();
-  const [tourOpen, setTourOpen] = useState(false);
+  const [tourState, setTourState] = useState<{ handNo: number; open: boolean }>();
   const notice = notices[0];
   const gameReady = Boolean(
     view?.game_over &&
@@ -322,14 +322,25 @@ export function MultiplayerGame({ room }: { room: string }) {
     if (!notice) return;
 
     const hand = view?.hand_no;
-    const timer = window.setTimeout(() => {
-      setNoticeQueue((current) => {
-        if (viewRef.current?.hand_no !== hand || current[0]?.seq !== notice.seq) return current;
-        return current.slice(1);
-      });
-    }, 2000);
+    let timer: number | undefined;
+    let frame: number | undefined;
+    const start = () => {
+      timer = window.setTimeout(() => {
+        setNoticeQueue((current) => {
+          if (viewRef.current?.hand_no !== hand || current[0]?.seq !== notice.seq) return current;
+          return current.slice(1);
+        });
+      }, 2000);
+    };
 
-    return () => window.clearTimeout(timer);
+    // start after visible paint
+    if (document.visibilityState === "hidden") start();
+    else frame = window.requestAnimationFrame(start);
+
+    return () => {
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [notice, setNoticeQueue, view?.hand_no]);
 
   const connect = useCallback(() => {
@@ -1058,6 +1069,11 @@ export function MultiplayerGame({ room }: { room: string }) {
     ((view.claim && !view.claim.draw_verified) ||
       (view.challenge?.assigned && !view.challenge.draw_verified)),
   );
+  const tourBlocking = Boolean(
+    view.mode === "multiplayer" &&
+    view.hand_no === 1 &&
+    (tourState?.handNo !== view.hand_no || tourState.open),
+  );
   const interactionDisabled =
     actionPending ||
     notices.length > 0 ||
@@ -1065,7 +1081,7 @@ export function MultiplayerGame({ room }: { room: string }) {
     !connected ||
     automaticCompletionPending ||
     automaticDrawPending ||
-    tourOpen;
+    tourBlocking;
 
   const contract: ContractView = {
     assignment: view.mode !== "multiplayer" || !view.challenge
@@ -1124,7 +1140,7 @@ export function MultiplayerGame({ room }: { room: string }) {
   return (
     <div className={`game-view${error || challengeError ? " ui-shake" : ""}`}>
       {view.mode === "multiplayer" && (
-        <ProofTour room={room} seat={seat} handNo={view.hand_no} onOpenChange={setTourOpen} />
+        <ProofTour room={room} seat={seat} handNo={view.hand_no} onOpenChange={setTourState} />
       )}
       {!connected && <div className="connection-bar"><span>{connecting ? "Connecting" : "Disconnected"}</span>{!connecting && <button type="button" onClick={connect}>Reconnect</button>}</div>}
       <Table
@@ -1160,6 +1176,7 @@ export function MultiplayerGame({ room }: { room: string }) {
           room={room}
           handNo={view.hand_no}
           settled={view.settled}
+          gameOver={Boolean(view.game_over)}
           view={contract}
         />
       )}

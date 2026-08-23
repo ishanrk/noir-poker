@@ -7,10 +7,11 @@ import styles from "@/components/crypto.module.css";
 import type { ContractView } from "@/components/contract";
 import { loadProofHistory, type ProofMeta } from "@/lib/server";
 
-export function PlayProofs({ room, handNo, settled, view }: {
+export function PlayProofs({ room, handNo, settled, gameOver, view }: {
   room: string;
   handNo: number;
   settled: boolean;
+  gameOver: boolean;
   view: ContractView;
 }) {
   const [history, setHistory] = useState<ProofMeta[]>([]);
@@ -48,8 +49,15 @@ export function PlayProofs({ room, handNo, settled, view }: {
     return () => { live = false; };
   }, [handNo, localPublicationVersion, proofVersion, room, settled]);
 
-  const firstHand = Math.max(0, handNo - 4);
-  const hands = Array.from({ length: handNo - firstHand + 1 }, (_, index) => firstHand + index);
+  const latestHand = Math.max(
+    handNo,
+    ...view.proofs.flatMap((player) => [
+      player.draw?.handNo ?? handNo,
+      player.completion?.handNo ?? handNo,
+    ]),
+  );
+  const firstHand = Math.max(0, latestHand - 4);
+  const hands = Array.from({ length: latestHand - firstHand + 1 }, (_, index) => firstHand + index);
   const records = useMemo(
     () => new Map(history.map((proof) => [`${proof.seat}:${proof.hand_no}`, proof])),
     [history],
@@ -67,9 +75,9 @@ export function PlayProofs({ room, handNo, settled, view }: {
                 <th scope="col" key={hand}>
                   <strong>HAND {hand + 1}</strong>
                   <small>
-                    <span data-proof-tour="challenge-draw">DRAW PROOF</span>
+                    <span data-proof-tour={hand === handNo ? "challenge-draw" : undefined}>DRAW PROOF</span>
                     <span aria-hidden="true"> / </span>
-                    <span data-proof-tour="challenge-completion">COMPLETION</span>
+                    <span data-proof-tour={hand === handNo ? "challenge-completion" : undefined}>COMPLETION</span>
                   </small>
                 </th>
               ))}
@@ -86,7 +94,7 @@ export function PlayProofs({ room, handNo, settled, view }: {
                     hand={hand}
                     seat={player.seat}
                     proof={records.get(`${player.seat}:${hand}`)}
-                    checking={settled && hand === handNo}
+                    checking={settled && !gameOver && hand === handNo}
                   />
                 ))}
               </tr>

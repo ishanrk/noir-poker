@@ -263,6 +263,18 @@ function receiptSteps({
       ),
     },
     {
+      title: "The 194 public fields",
+      text: "Each included proof has exactly 194 public fields. Each public byte uses one canonical 32 byte Noir field. The order is mode then 32 hand tag bytes then seat then 32 bytes each for commitment nonce facts hash nullifier and catalog root.",
+      detail: (
+        <dl>
+          <ReceiptValue label="Mode fields" value="1" />
+          <ReceiptValue label="Hand tag fields" value="32" />
+          <ReceiptValue label="Seat fields" value="1" />
+          <ReceiptValue label="Five byte array groups" value="160" />
+        </dl>
+      ),
+    },
+    {
       title: "The hand and player",
       text: "The verifier derives the hand tag from the room id and zero based hand number. It requires the seat and fixed catalog root to match the public inputs inside every included proof.",
       detail: (

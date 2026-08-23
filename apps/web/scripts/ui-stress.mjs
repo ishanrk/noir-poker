@@ -267,7 +267,6 @@ async function singleStress() {
   await nextSingle(trace, 1);
   await singleAction(trace);
   await settleSingle(trace, 2, true);
-  await trace.page.getByText("Deck Randomness Proof", { exact: true }).waitFor();
   const verifyDeck = trace.page.getByRole("link", { name: /Verify Deck/ });
   await verifyDeck.waitFor();
   assert.equal(await verifyDeck.getAttribute("target"), "_blank", "deck proof replaced the table tab");
@@ -456,7 +455,11 @@ async function verifyPublic(viewer, owner, kind) {
   const page = await opened;
   watch(page, `${viewer.name}-${kind.toLowerCase().replaceAll(" ", "-")}`);
   await page.getByText("VERIFIED LOCALLY", { exact: true }).waitFor({ timeout: 120_000 });
-  await page.getByRole("button", { name: "Download JSON", exact: true }).waitFor();
+  const download = page.getByRole("button", { name: "Download JSON", exact: true });
+  for (let step = 0; step < 10 && !(await download.isVisible()); step += 1) {
+    await page.getByRole("button", { name: "Next Step", exact: true }).click();
+  }
+  await download.waitFor();
   await page.getByRole("link", { name: "Local Verifier", exact: true }).waitFor();
   const body = await page.locator("body").innerText();
   for (const objective of objectives) {
@@ -537,7 +540,7 @@ async function multiplayerStress() {
 
   const before = a.frames.length;
   await a.page.reload({ waitUntil: "domcontentloaded" });
-  await a.page.getByText("PRIVATE CHALLENGE", { exact: true }).waitFor({ timeout: 30_000 });
+  await a.page.getByRole("region", { name: "Private challenge" }).waitFor({ timeout: 30_000 });
   assert.deepEqual(await hole(a.page), aNext, "multiplayer hole cards changed after refresh");
   await frame(a, (message) => message.type === "snapshot" && message.view?.hand_no === 1, before, "reconnect snapshot missing");
   assert.equal(await a.page.locator(".table-action-notice").count(), 0, "multiplayer reconnect replayed a notice");
@@ -618,6 +621,24 @@ async function noticeLog(trace) {
   await trace.page.evaluate(() => {
     window.__noticeEvents = [];
     sessionStorage.setItem("__noticeEvents", "[]");
+    const active = new WeakMap();
+    const close = (id) => {
+      const event = window.__noticeEvents.findLast((item) => item.id === id && item.removed === undefined);
+      if (event) event.removed = performance.now();
+    };
+    const add = (notice) => {
+      const id = `${notice.getAttribute("data-hand")}:${notice.getAttribute("data-seq")}`;
+      const previous = active.get(notice);
+      if (previous === id) return;
+      if (previous) close(previous);
+      active.set(notice, id);
+      window.__noticeEvents.push({ id, added: performance.now() });
+    };
+    const remove = (notice) => {
+      const id = active.get(notice) ?? `${notice.getAttribute("data-hand")}:${notice.getAttribute("data-seq")}`;
+      close(id);
+      active.delete(notice);
+    };
     const observer = new MutationObserver((records) => {
       const notices = (node) => {
         if (!(node instanceof Element)) return [];
@@ -626,29 +647,25 @@ async function noticeLog(trace) {
           : [...node.querySelectorAll(".table-action-notice")];
       };
       for (const record of records) {
+        if (record.type === "attributes") {
+          add(record.target);
+          continue;
+        }
         for (const node of record.addedNodes) {
-          for (const notice of notices(node)) {
-            window.__noticeEvents.push({
-              id: `${notice.getAttribute("data-hand")}:${notice.getAttribute("data-seq")}`,
-              added: Date.now(),
-            });
-          }
+          for (const notice of notices(node)) add(notice);
         }
         for (const node of record.removedNodes) {
-          for (const notice of notices(node)) {
-            const id = `${notice.getAttribute("data-hand")}:${notice.getAttribute("data-seq")}`;
-            const event = window.__noticeEvents.findLast((item) => item.id === id && item.removed === undefined);
-            if (event) {
-              event.removed = Date.now();
-              const game = document.querySelector(".game-view");
-              event.state = game ? { notice: game.getAttribute("data-notice"), stage: game.getAttribute("data-stage") } : null;
-            }
-          }
+          for (const notice of notices(node)) remove(notice);
         }
       }
       sessionStorage.setItem("__noticeEvents", JSON.stringify(window.__noticeEvents));
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, {
+      attributeFilter: ["data-hand", "data-seq"],
+      attributes: true,
+      childList: true,
+      subtree: true,
+    });
   });
 }
 
@@ -825,6 +842,25 @@ async function tableStress() {
             "final game snapshot missing",
           ),
         ),
+      ),
+    );
+
+    for (const { a, b } of tables) {
+      for (const page of [a.page, b.page]) {
+        assert.equal(await page.locator(".game-finish").count(), 0, "game winner appeared immediately");
+      }
+    }
+    await Promise.all(
+      tables.flatMap(({ a, b }) => [a.page.waitForTimeout(2500), b.page.waitForTimeout(2500)]),
+    );
+    for (const { a, b } of tables) {
+      for (const page of [a.page, b.page]) {
+        assert.equal(await page.locator(".game-finish").count(), 0, "game winner appeared before hand result delay");
+      }
+    }
+    await Promise.all(
+      tables.flatMap(({ a, b }) =>
+        [a, b].map((trace) => trace.page.locator(".game-finish").waitFor({ timeout: 5000 })),
       ),
     );
 

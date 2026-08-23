@@ -67,12 +67,16 @@ const browserVerifier = "https://github.com/ishanrk/noir-poker/blob/main/apps/we
 const circuitSource = "https://github.com/ishanrk/noir-poker/blob/main/circuits/deck-v1/shuffle/src/main.nr";
 const noirDocs = "https://noir-lang.org/docs/getting_started_manually";
 
+function proofFileName(audit: DealAudit) {
+  return `noir-poker-${audit.room}-hand-${audit.hand_no + 1}-deck-proof.json`;
+}
+
 function downloadProofs(audit: DealAudit) {
   const file = new Blob([JSON.stringify(audit, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(file);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `noir-poker-${audit.room}-hand-${audit.hand_no + 1}-deck-proof.json`;
+  link.download = proofFileName(audit);
   document.body.append(link);
   link.click();
   link.remove();
@@ -132,7 +136,7 @@ function proofDetails(step: number, audit: DealAudit) {
       ["Complete records", `${records("complete")} final deck record`],
     ],
     [
-      ["Local command", "npm --prefix apps/web run deal:verify -- audit.json"],
+      ["Local command", `npm --prefix apps/web run deal:verify -- ${proofFileName(audit)}`],
       ["Expected card count", "52 reconstructed cards"],
     ],
   ];
