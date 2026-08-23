@@ -266,7 +266,9 @@ export function MultiplayerGame({ room }: { room: string }) {
   const [claimCompleted, setClaimCompleted] = useState<boolean>();
   const [challengeError, setChallengeError] = useState<string>();
   const [drawStates, setDrawStates] = useState<Record<number, ProofState>>({});
-  const [claimState, setClaimState] = useState<ProofState>("idle");
+  const [claimStates, setClaimStates] = useState<Record<number, ProofState>>({});
+  const [drawJobs, setDrawJobs] = useState<Record<number, Assignment>>({});
+  const [claimJobs, setClaimJobs] = useState<Record<number, ClaimView>>({});
   const [autoAttempts, setAutoAttempts] = useState<Record<string, number>>({});
   const [localProofs, setLocalProofs] = useState<Record<string, LocalProofState>>({});
   const [notices, setNotices] = useState<ActionNoticeView[]>([]);
@@ -290,6 +292,10 @@ export function MultiplayerGame({ room }: { room: string }) {
 
   const setDrawState = useCallback((hand: number, state: ProofState) => {
     setDrawStates((current) => ({ ...current, [hand]: state }));
+  }, []);
+
+  const setClaimState = useCallback((hand: number, state: ProofState) => {
+    setClaimStates((current) => ({ ...current, [hand]: state }));
   }, []);
 
   const setNoticeQueue = useCallback(
