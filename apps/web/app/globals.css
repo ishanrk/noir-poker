@@ -709,7 +709,7 @@ code { font-family: "Courier New", ui-monospace, monospace; }
   .deck-opening-stream .card { width: 50px; }
   .deck-unavailable, .deck-protocol { width: calc(100% - 32px); }
   .deck-protocol-path { grid-template-columns: repeat(10, 34px); }
-  .deck-protocol-path::before { top: 20px; }
+  .deck-protocol-path::before { top: 16px; }
   .deck-protocol-path button { width: 34px; height: 34px; clip-path: polygon(7px 0, 27px 0, 34px 7px, 34px 27px, 27px 34px, 7px 34px, 0 27px, 0 7px); }
   .deck-protocol-step { min-height: 390px; padding: 22px 8px 30px 28px; }
   .deck-protocol-step p { font-size: 15px; }

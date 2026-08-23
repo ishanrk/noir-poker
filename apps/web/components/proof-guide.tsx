@@ -1,34 +1,44 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 
 export type ProofGuideStep = {
   title: string;
   text: string;
   detail?: ReactNode;
+  result?: ReactNode;
+  source?: ReactNode;
 };
 
 export function ProofGuide({
   label,
   title,
   intro,
+  actions,
   steps,
 }: {
   label: string;
   title: string;
   intro: string;
+  actions?: ReactNode;
   steps: readonly ProofGuideStep[];
 }) {
   const [currentStep, setCurrentStep] = useState(0);
   const current = steps[currentStep];
 
   return (
-    <section className="proof-guide" aria-label={title}>
+    <section
+      className="proof-guide"
+      aria-label={title}
+      style={{ "--proof-step-count": steps.length } as CSSProperties}
+    >
       <header className="proof-guide-head">
         <p>{label}</p>
         <h2>{title}</h2>
         <span>{intro}</span>
       </header>
+
+      {actions && <div className="proof-guide-actions" aria-label="Proof actions">{actions}</div>}
 
       <nav className="proof-guide-path" aria-label={`${title} steps`}>
         {steps.map((step, index) => (
@@ -50,6 +60,8 @@ export function ProofGuide({
         <h2>{current.title}</h2>
         <p>{current.text}</p>
         {current.detail && <div className="proof-guide-detail">{current.detail}</div>}
+        {current.result && <strong className="proof-guide-result">{current.result}</strong>}
+        {current.source && <div className="proof-guide-source">{current.source}</div>}
       </article>
 
       <div className="proof-guide-controls">

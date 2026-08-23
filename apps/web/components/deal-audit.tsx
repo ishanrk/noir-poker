@@ -13,15 +13,15 @@ type AuditState = "loading" | "verified" | "unavailable" | "failed";
 const protocol = [
   {
     title: "Every participant creates a key",
-    text: "Participant 0 is the server. Every later participant is a human seat in seat order. Each participant creates a random secret scalar inside its own process. It publishes only the matching Grumpkin public point. The keys array stores the x and y coordinates of those points. Each key_proofs entry stores the Schnorr values a b and z. Verification proves the sender knows the secret scalar linked to its public point. The secret scalar stays private. The public points combine into one joint encryption key. No participant owns the full joint secret.",
+    text: "Participant 0 is the server. Every later participant is a human seat in seat order. Each participant creates a random secret scalar inside its own process. It publishes only the matching Grumpkin public point. The keys array stores the x and y coordinates of those points. Each key_proofs entry stores the Schnorr values a b and z. Value a is the random proof commitment. Value b is zero in this key proof version. Value z is the response binding that commitment to the private scalar. Verification proves the sender knows the secret scalar linked to its public point. The secret scalar stays private. The public points combine into one joint encryption key. No participant owns the full joint secret.",
     check: "Every accepted public key has a valid proof of secret key ownership",
     source: "Barnett and Smart on mental poker",
     href: "https://research-information.bris.ac.uk/en/publications/mental-poker-revisited/",
   },
   {
-    title: "The server encrypts the ordered deck",
-    text: "The hand begins with card identifiers 0 through 51 in canonical order. Every identifier becomes a Grumpkin point. The server encrypts each point under the joint public key. One encrypted card contains a left point and a right point. The resulting 52 ciphertexts hide the card values while preserving a fixed complete starting set. The first shuffle input in the transcript must equal this canonical encrypted deck. This check prevents a participant from inserting a second ace or removing another card before shuffling begins.",
-    check: "The first encrypted input contains one copy of every canonical card",
+    title: "The deck starts in public order",
+    text: "The hand begins with card identifiers 0 through 51 in canonical order. Every identifier becomes a Grumpkin point. Its starting ciphertext has a zero left point and the card point on the right. The values are public at this stage. The first participant consumes this exact array then applies its secret permutation and encryption masks under the joint key. The first shuffle output hides the new ordering. Requiring the canonical input prevents a participant from inserting a second ace or removing another card before shuffling begins.",
+    check: "The first shuffle input contains one copy of every canonical card",
     source: "Barnett and Smart on encrypted card decks",
     href: "https://research-information.bris.ac.uk/en/publications/mental-poker-revisited/",
   },
@@ -137,8 +137,8 @@ function proofDetails(step: number, audit: DealAudit) {
       ["Key proofs", `${audit.key_proofs.length} proofs of secret key ownership`],
     ],
     [
-      ["Canonical identifiers", "0 through 51 encrypted in fixed order"],
-      ["Starting ciphertexts", "52 pairs of Grumpkin points"],
+      ["Canonical identifiers", "0 through 51 in fixed public order"],
+      ["Starting pairs", "52 zero left points and 52 card points"],
     ],
     [
       ["Deck transitions", `${audit.shuffles.length} proven input and output deck pairs`],

@@ -109,6 +109,13 @@ const MAX_AUTO_PROOF_DELAY_MS = 10_000;
 const GAME_OVER_DELAY_MS = 3000;
 const GAME_OVER_DISPLAY_MS = 2000;
 
+function withoutHand<T>(current: Record<number, T>, hand: number) {
+  if (!current[hand]) return current;
+  const next = { ...current };
+  delete next[hand];
+  return next;
+}
+
 function deckSecret(room: string, hand: number) {
   const key = deckSecretKey(room, hand);
   const stored = sessionStorage.getItem(key);
@@ -382,13 +389,14 @@ export function MultiplayerGame({ room }: { room: string }) {
       actionWait.current = undefined;
       readyWait.current = undefined;
       const draw = drawing.current;
+      const claim = claiming.current;
       drawing.current = undefined;
       claiming.current = undefined;
       dealing.current = false;
       deckBusy.current = false;
       deckActive.current = false;
       if (draw !== undefined) setDrawState(draw, "failed");
-      setClaimState((state) => state === "preparing" || state === "proving" || state === "verifying" ? "failed" : state);
+      if (claim !== undefined) setClaimState(claim, "failed");
       setConnecting(false);
       setConnected(false);
       setPending(false);
@@ -602,6 +610,36 @@ export function MultiplayerGame({ room }: { room: string }) {
         const claimed = message.view.claim?.status === "claimed";
         const currentClaim = privateObjective(room, current.seat, claimAssignment(message.view.claim));
         const completion = contractCompletion(message.view.claim, current.seat, currentClaim.index);
+        const assignments = [
+          challengeAssignment(message.view.challenge),
+          claimAssignment(message.view.claim),
+        ].filter((assignment): assignment is Assignment => assignment !== undefined);
+
+        if (assignments.length > 0) {
+          setDrawJobs((currentJobs) => {
+            let changed = false;
+            const nextJobs = { ...currentJobs };
+            for (const assignment of assignments) {
+              if (assignment.draw_verified) {
+                if (nextJobs[assignment.hand_no]) {
+                  delete nextJobs[assignment.hand_no];
+                  changed = true;
+                }
+              } else if (!nextJobs[assignment.hand_no]) {
+                nextJobs[assignment.hand_no] = assignment;
+                changed = true;
+              }
+            }
+            return changed ? nextJobs : currentJobs;
+          });
+        }
+
+        const snapshotClaim = message.view.claim;
+        if (snapshotClaim && completion.completed === true && !claimed) {
+          setClaimJobs((currentJobs) => currentJobs[snapshotClaim.hand_no]
+            ? currentJobs
+            : { ...currentJobs, [snapshotClaim.hand_no]: snapshotClaim });
+        }
 
         if (message.view.challenge?.draw_verified) {
           if (drawing.current === message.view.challenge.hand_no) drawing.current = undefined;
@@ -612,11 +650,12 @@ export function MultiplayerGame({ room }: { room: string }) {
           setDrawState(message.view.claim.hand_no, "verified");
         }
 
-        if (claimed && message.view.claim) {
-          if (claiming.current === message.view.claim.hand_no) claiming.current = undefined;
-          setClaimState("verified");
-        } else if (claiming.current === undefined) {
-          setClaimState("idle");
+        if (claimed && snapshotClaim) {
+          if (claiming.current === snapshotClaim.hand_no) claiming.current = undefined;
+          setClaimState(snapshotClaim.hand_no, "verified");
+          setClaimJobs((currentJobs) => {
+            return withoutHand(currentJobs, snapshotClaim.hand_no);
+          });
         }
 
         setWaiting(undefined);
@@ -677,21 +716,33 @@ export function MultiplayerGame({ room }: { room: string }) {
       if (message.type === "proof_error") {
         if (message.kind === "draw" && drawing.current === message.hand_no) {
           drawing.current = undefined;
-          setDrawState(message.hand_no, "failed");
-          setChallengeError(message.message);
+          if (message.message === "draw already verified") {
+            setDrawState(message.hand_no, "verified");
+            setDrawJobs((currentJobs) => withoutHand(currentJobs, message.hand_no));
+          } else {
+            setDrawState(message.hand_no, "failed");
+            setChallengeError(message.message);
+          }
         } else if (message.kind === "completion" && claiming.current === message.hand_no) {
           claiming.current = undefined;
-          setClaimState("failed");
-          setChallengeError(message.message);
+          if (message.message === "challenge already claimed") {
+            setClaimState(message.hand_no, "verified");
+            setClaimJobs((currentJobs) => withoutHand(currentJobs, message.hand_no));
+          } else {
+            setClaimState(message.hand_no, "failed");
+            setChallengeError(message.message);
+          }
         }
       }
       if (message.type === "proof_accepted") {
         if (message.kind === "draw" && drawing.current === message.hand_no) {
           drawing.current = undefined;
           setDrawState(message.hand_no, "verified");
+          setDrawJobs((currentJobs) => withoutHand(currentJobs, message.hand_no));
         } else if (message.kind === "completion" && claiming.current === message.hand_no) {
           claiming.current = undefined;
-          setClaimState("verified");
+          setClaimState(message.hand_no, "verified");
+          setClaimJobs((currentJobs) => withoutHand(currentJobs, message.hand_no));
         }
       }
     };
@@ -702,12 +753,13 @@ export function MultiplayerGame({ room }: { room: string }) {
         actionWait.current = undefined;
         readyWait.current = undefined;
         const draw = drawing.current;
+        const claim = claiming.current;
         drawing.current = undefined;
         claiming.current = undefined;
         dealing.current = false;
         deckActive.current = false;
         if (draw !== undefined) setDrawState(draw, "failed");
-        setClaimState((state) => state === "preparing" || state === "proving" || state === "verifying" ? "failed" : state);
+        if (claim !== undefined) setClaimState(claim, "failed");
         setConnecting(false);
         setConnected(false);
         setPending(false);
@@ -715,7 +767,7 @@ export function MultiplayerGame({ room }: { room: string }) {
         setError((currentError) => currentError ?? "Disconnected");
       }
     };
-  }, [room, setDrawState, setNoticeQueue, setPending]);
+  }, [room, setClaimState, setDrawState, setNoticeQueue, setPending]);
 
   useEffect(() => {
     let live = true;
