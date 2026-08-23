@@ -86,6 +86,8 @@ export type DealAudit = {
   protocol_version: number;
   room: string;
   hand_no: number;
+  dealer?: number;
+  human?: boolean[];
   transcript_hash: string;
   keys: DeckPoint[];
   key_proofs: DeckProof[];

@@ -1680,7 +1680,7 @@ async fn deck_shares(
         let _ = room.notify.send(rev);
     }
     if drive {
-        start_bots(state, id, false);
+        start_bots(state, id, true);
     }
     Ok(())
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState } from "react";
 
 import { Card } from "@/components/card";
 import { SiteHeader } from "@/components/site-header";
@@ -12,48 +12,114 @@ type AuditState = "loading" | "verified" | "unavailable" | "failed";
 
 const protocol = [
   {
-    title: "Build a key nobody owns",
-    text: "The server and every human browser create a fresh secret key for this hand. Only the public points leave their devices. Those points combine into one deck key. No participant knows the full secret.",
-    check: "The transcript checks every public key proof in participant order",
+    title: "Every player starts with a cryptographic key",
+    text: "The server and every player create a new secret key for the hand. Only the public keys leave their devices. Each key proof shows that its owner knows the secret without revealing it. The public keys combine into one deck key.",
+    check: "One public key and one key proof for each deck participant",
     source: "Barnett and Smart on mental poker",
     href: "https://research-information.bris.ac.uk/en/publications/mental-poker-revisited/",
   },
   {
-    title: "Encrypt the known deck",
-    text: "The protocol begins with the same public list of 52 card points. Every card gets encrypted under the joint key. The verifier first confirms that exact canonical starting deck.",
-    check: "The card identities become hidden while the starting set stays fixed",
+    title: "The deck starts encrypted",
+    text: "The protocol starts with the standard 52 cards. Each card becomes a curve point encrypted with the shared deck key. The first encrypted deck stays public so every verifier starts from the same cards.",
+    check: "52 encrypted card points in canonical order before shuffling",
     source: "Mental Poker Revisited",
     href: "https://research-information.bris.ac.uk/en/publications/mental-poker-revisited/",
   },
   {
-    title: "Shuffle without showing the order",
-    text: "The server shuffles first. Every human browser follows with a secret permutation and fresh encryption masks. The Noir circuit proves each output contains the prior 52 ciphertexts in a new hidden order.",
-    check: "One honest shuffle prevents every earlier participant from knowing the final order",
+    title: "Every player shuffles the deck",
+    text: "The server shuffles first. Every player then changes the order and refreshes the encryption. Each UltraHonk proof connects one input deck to one output deck without exposing the secret order.",
+    check: "One accepted shuffle proof for every participant",
     source: "Neff on verifiable secret shuffles",
     href: "https://dl.acm.org/doi/10.1145/501983.502000",
   },
   {
-    title: "Open only cards in play",
-    text: "Participants release proven decryption shares only for the positions needed now. A player finishes their hole cards locally. Community cards open when their street begins.",
-    check: "Equality proofs bind each share to the same participant key",
+    title: "Only dealt cards get opened",
+    text: "Players release key shares only for cards needed in the game. Each share proof shows that the share came from the same secret as the published key. Hole cards open for their owner and board cards open for everyone.",
+    check: "Share records open dealt positions without opening the remaining deck",
     source: "Chaum and Pedersen equality proofs",
     href: "https://chaum.com/wp-content/uploads/2021/12/Wallet_Databases.pdf",
   },
   {
-    title: "Check every shuffle proof",
-    text: "Each browser loads the accepted proof bytes and the pinned verification key. Barretenberg verifies the UltraHonk proof. The public inputs bind the hand number transcript state joint key input deck and output deck.",
-    check: "A valid proof permits a permutation and fresh masks but no swapped or invented card",
+    title: "Every shuffle gets checked",
+    text: "The proof bytes contain the private shuffle argument. The public inputs name the hand the transcript state the shared key and both encrypted decks. Barretenberg checks them against the pinned verification key.",
+    check: "Proof bytes stay compact while public inputs bind the exact shuffle",
     source: "Noir proving and verification",
     href: "https://noir-lang.org/docs/getting_started_manually",
   },
   {
-    title: "Reconstruct the final deck",
-    text: "After settlement every participant opens their hand key. The verifier matches each opening to its public key then decrypts all 52 positions. It also checks that every card from 0 through 51 appears once.",
-    check: "SHA 256 identifies the exact ordered transcript but the proof checks establish fairness",
+    title: "The final deck gets reconstructed",
+    text: "After the hand every player opens their key. The verifier matches each opening to its public key then decrypts all 52 cards. The SHA 256 fingerprint identifies the exact ordered transcript. Changing any record changes that fingerprint.",
+    check: "Key openings reconstruct the deck while SHA 256 identifies the transcript",
     source: "NIST SHA 256 standard",
     href: "https://csrc.nist.gov/pubs/fips/180-4/upd1/final",
   },
 ] as const;
+
+const verifierSource = "https://github.com/ishanrk/noir-poker/blob/crypto-verification/apps/web/lib/deck-audit.ts";
+
+function downloadProofs(audit: DealAudit) {
+  const file = new Blob([JSON.stringify(audit, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `noir-poker-${audit.room}-hand-${audit.hand_no + 1}-deck-proof.json`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function cardMarker(index: number, audit: DealAudit) {
+  const human = audit.human;
+  const dealer = audit.dealer;
+  if (!human?.length || dealer === undefined || dealer >= human.length) return "";
+
+  const players = human.length;
+  if (index < players * 2) {
+    const owner = ((dealer + 1) % players + index % players) % players;
+    const single = human.filter(Boolean).length === 1 && human[0];
+    return single ? owner === 0 ? "You" : `B${owner}` : `P${owner + 1}`;
+  }
+
+  const board = index - players * 2;
+  if (board === 0 || board === 4 || board === 6) return "Burn";
+  if (board >= 1 && board <= 3) return "F";
+  if (board === 5) return "T";
+  if (board === 7) return "R";
+  return "";
+}
+
+function proofDetails(step: number, audit: DealAudit) {
+  const records = (kind: string) => audit.records.filter((record) => record.kind === kind).length;
+  const values = [
+    [
+      ["Public keys", `${audit.keys.length} combined for this hand`],
+      ["Key proofs", `${audit.key_proofs.length} proofs of secret key ownership`],
+    ],
+    [
+      ["Encrypted cards", `${audit.shuffles[0]?.input.length ?? 0} canonical card points`],
+      ["Shared key", `${audit.keys.length} public keys added together`],
+    ],
+    [
+      ["Shuffle proofs", `${audit.shuffles.length} accepted UltraHonk proofs`],
+      ["Deck transitions", `${audit.shuffles.length} proven input to output changes`],
+    ],
+    [
+      ["Share records", `${records("share")} groups of proven key shares`],
+      ["Reveal records", `${records("reveal")} groups of opened card positions`],
+    ],
+    [
+      ["Proof bytes", `${audit.shuffles.length} accepted proof payloads`],
+      ["Public inputs", `${audit.shuffles.length} hand and deck bindings`],
+    ],
+    [
+      ["Key openings", `${audit.openings.length} secrets matched to public keys`],
+      ["SHA 256", audit.transcript_hash],
+    ],
+  ];
+
+  return values[step];
+}
 
 export function DealAuditView({ room, hand }: { room: string; hand: number }) {
   const [audit, setAudit] = useState<DealAudit>();
@@ -61,7 +127,6 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
   const [state, setState] = useState<AuditState>("loading");
   const [step, setStep] = useState("loading transcript");
   const [error, setError] = useState<string>();
-  const [all, setAll] = useState(false);
   const [protocolStep, setProtocolStep] = useState(0);
 
   useEffect(() => {
@@ -84,7 +149,7 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
     return () => { live = false; };
   }, [hand, room]);
 
-  const shown = check?.deck.slice(0, all ? 52 : 20) ?? [];
+  const shown = check?.deck.slice(0, 20) ?? [];
   const current = protocol[protocolStep];
 
   return (
@@ -119,27 +184,33 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
             <div><dt>shuffle proofs</dt><dd>{audit.shuffles.length} UltraHonk proofs</dd></div>
             <div><dt>final openings</dt><dd>{audit.openings.length} keys matched</dd></div>
           </dl>
+          <div className="audit-proof-actions">
+            <button type="button" className="primary-action" onClick={() => downloadProofs(audit)}>
+              Download Proof Transcript
+            </button>
+            <a className="text-action" href={verifierSource} target="_blank" rel="noreferrer">
+              Inspect Verification Script
+            </a>
+          </div>
         </section>
       )}
 
-      {check && (
+      {check && audit && (
         <section className="deck-opening">
           <header>
             <p className="protocol-label">Deterministic reconstruction</p>
-            <h2>{all ? "All 52 cards" : "First 20 cards"}</h2>
-            <p>Cards open in their final encrypted deck positions after every proof and final key opening passes</p>
+            <h2>First 20 cards</h2>
+            <p>The verifier checks all 52 cards and shows the first 20 here</p>
           </header>
           <div className="deck-opening-stream">
             {shown.map((card, index) => (
-              <div key={`${index}-${card}`} style={{ "--open-index": index } as CSSProperties}>
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                <Card value={cardValue(card)} delay={index * 125} />
+              <div key={`${index}-${card}`}>
+                <span className="deck-card-marker">{cardMarker(index, audit)}</span>
+                <span className="deck-card-position">{String(index + 1).padStart(2, "0")}</span>
+                <Card value={cardValue(card)} />
               </div>
             ))}
           </div>
-          <button type="button" className="proof-link" onClick={() => setAll((value) => !value)}>
-            {all ? "Show First 20" : "Open All 52"}
-          </button>
         </section>
       )}
 
@@ -147,7 +218,7 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
         <header>
           <p className="protocol-label">Protocol walkthrough</p>
           <h2>Follow the deck</h2>
-          <p>Six checks from public keys to the final 52 cards</p>
+          <p>Six steps from new keys to the verified deck</p>
         </header>
         <nav className="deck-protocol-path" aria-label="Deck protocol steps">
           {protocol.map((item, index) => (
@@ -166,6 +237,16 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
           <span>STEP {String(protocolStep + 1).padStart(2, "0")}</span>
           <h2>{current.title}</h2>
           <p>{current.text}</p>
+          {audit && (
+            <dl className="deck-protocol-data">
+              {proofDetails(protocolStep, audit).map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
           <strong>{current.check}</strong>
           <a href={current.href} target="_blank" rel="noreferrer">Source&nbsp; {current.source} ↗</a>
         </article>

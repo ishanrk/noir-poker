@@ -70,6 +70,8 @@ pub struct AuditWire {
     pub protocol_version: u8,
     pub room: Uuid,
     pub hand_no: u64,
+    pub dealer: usize,
+    pub human: Vec<bool>,
     pub transcript_hash: String,
     pub keys: Vec<PointWire>,
     pub key_proofs: Vec<ProofWire>,
@@ -516,6 +518,8 @@ impl MentalDeck {
             protocol_version: VERSION,
             room: self.room,
             hand_no: self.hand_no,
+            dealer: self.dealer,
+            human: self.human.clone(),
             transcript_hash: hex(&self.head),
             keys,
             key_proofs,
@@ -777,6 +781,9 @@ mod tests {
                 .len(),
             52
         );
-        assert_eq!(deck.audit().unwrap().transcript_hash, hex(&deck.head));
+        let audit = deck.audit().unwrap();
+        assert_eq!(audit.dealer, 0);
+        assert_eq!(audit.human, vec![true, false]);
+        assert_eq!(audit.transcript_hash, hex(&deck.head));
     }
 }

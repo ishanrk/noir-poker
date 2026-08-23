@@ -158,6 +158,30 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
     const message = JSON.parse(frame.payload);
     return message.type === "challenge_draw" || message.type === "challenge_claim";
   }), false);
+  const ready = page.getByRole("button", { name: "Ready for Next Hand" });
+  await ready.waitFor({ state: "visible", timeout: 30_000 });
+  await waitForEnabled(ready, "next hand unavailable");
+  const afterReady = frames.length;
+  await ready.click();
+  const nextHand = await waitForFrame(
+    (direction, message) =>
+      direction === "received" &&
+      message.type === "snapshot" &&
+      message.view?.hand_no === 1,
+    "next hand missing",
+    afterReady,
+  );
+  const nextKeys = frames.slice(afterReady, nextHand + 1).filter((frame) => {
+    if (frame.direction !== "sent" || typeof frame.payload !== "string") return false;
+    const message = JSON.parse(frame.payload);
+    return message.type === "deck_key" && message.hand_no === 1;
+  });
+  assert.equal(nextKeys.length, 1, "next hand deck key repeated");
+  assert.equal(frames.slice(afterReady, nextHand + 1).some((frame) => {
+    if (frame.direction !== "received" || typeof frame.payload !== "string") return false;
+    const message = JSON.parse(frame.payload);
+    return message.type === "error" && message.message === "invalid deck key";
+  }), false, "next hand deck key rejected");
   await visit("/", "home-after-single", ["Create a game"]);
 }
 

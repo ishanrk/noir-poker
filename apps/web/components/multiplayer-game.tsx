@@ -214,6 +214,7 @@ export function MultiplayerGame({ room }: { room: string }) {
   const dealing = useRef(false);
   const committing = useRef(false);
   const deckBusy = useRef(false);
+  const deckRequests = useRef(new Set<string>());
   const localHole = useRef<{ hand: number; cards: [string, string] } | undefined>(undefined);
   const seenAction = useRef<{ hand: number; seq: number } | undefined>(undefined);
   const viewRef = useRef<View | undefined>(undefined);
@@ -267,6 +268,7 @@ export function MultiplayerGame({ room }: { room: string }) {
     setConnected(false);
     setActionPending(false);
     setError(undefined);
+    deckRequests.current.clear();
 
     let next: WebSocket;
     try {
@@ -283,8 +285,18 @@ export function MultiplayerGame({ room }: { room: string }) {
         setDeckStage(message.stage);
         return;
       }
-      if (deckBusy.current) return;
+      const request = message.type === "deck_key"
+        ? `${message.hand_no}:key:${message.context}`
+        : message.type === "deck_shuffle"
+          ? `${message.hand_no}:shuffle:${message.participant}:${message.context}`
+          : message.type === "deck_shares"
+            ? `${message.hand_no}:shares:${message.context}:${message.positions.join(":")}`
+            : message.type === "deck_private"
+              ? `${message.hand_no}:private:${message.context}`
+              : `${message.hand_no}:open`;
+      if (deckBusy.current || deckRequests.current.has(request)) return;
       deckBusy.current = true;
+      deckRequests.current.add(request);
       setDeckStage(
         message.type === "deck_key"
           ? "creating private key"
@@ -367,6 +379,7 @@ export function MultiplayerGame({ room }: { room: string }) {
           next.send(JSON.stringify({ type: "deck_open", hand_no: message.hand_no, secret } satisfies ClientAction));
         }
       } catch (cause) {
+        deckRequests.current.delete(request);
         setError(cause instanceof Error ? cause.message : "deck protocol failed");
       } finally {
         deckBusy.current = false;
@@ -385,8 +398,13 @@ export function MultiplayerGame({ room }: { room: string }) {
       }
 
       if (message.type.startsWith("deck_")) {
+        const deckMessage = message as Extract<ServerMessage, { type: `deck_${string}` }>;
         setWaiting(undefined);
-        void handleDeck(message as Extract<ServerMessage, { type: `deck_${string}` }>);
+        if (seenAction.current?.hand !== deckMessage.hand_no) {
+          seenAction.current = { hand: deckMessage.hand_no, seq: -1 };
+          setNotices([]);
+        }
+        void handleDeck(deckMessage);
         return;
       }
 
@@ -434,7 +452,10 @@ export function MultiplayerGame({ room }: { room: string }) {
           } else {
             const next = log.filter((entry) => entry.seq > seen.seq);
             if (next.length) {
-              setNotices((currentNotices) => [...currentNotices, ...next]);
+              setNotices((currentNotices) => {
+                const queued = new Set(currentNotices.map((entry) => entry.seq));
+                return [...currentNotices, ...next.filter((entry) => !queued.has(entry.seq))];
+              });
             }
           }
         }

@@ -471,6 +471,7 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .audit-transcript dl > div { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .audit-transcript dt { color: var(--muted); font-size: 11px; }
 .audit-transcript dd { overflow-wrap: anywhere; margin: 0; font-family: "Courier New", monospace; font-size: 10px; }
+.audit-proof-actions { display: flex; grid-column: 2; flex-wrap: wrap; align-items: center; gap: 18px; margin-top: -10px; }
 .deal-replay { width: min(100% - 40px, 1040px); margin: 0 auto; padding: 76px 0; border-bottom: 1px solid var(--line-strong); }
 .deal-replay > header { display: flex; justify-content: space-between; align-items: end; gap: 24px; }
 .deal-replay h2 { margin-top: 7px; }
@@ -602,6 +603,7 @@ code { font-family: "Courier New", ui-monospace, monospace; }
   .lobby-wrap, .protocol-section { width: min(100% - 32px, 1040px); padding: 58px 0; }
   .receipt-statement, .audit-transcript { display: block; width: min(100% - 32px, 1040px); padding: 58px 0; }
   .receipt-statement > .section-index, .audit-transcript > .section-index { margin-bottom: 24px; }
+  .audit-proof-actions { margin-top: 24px; }
   .blind-scales { grid-template-columns: 1fr; }
   .table-page-header { display: block; width: calc(100% - 32px); }
   .table-page-header > p { margin-top: 12px; text-align: left; }
@@ -666,10 +668,11 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .deck-opening h2 { margin: 7px 0 8px; font: 800 32px/1.1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
 .deck-opening header > p:last-child { max-width: 670px; color: var(--muted); line-height: 1.55; }
 .deck-opening-stream { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 16px 9px; margin: 36px 0 28px; }
-.deck-opening-stream > div { display: grid; justify-items: center; gap: 5px; opacity: 0; animation: deck-open 360ms steps(4, end) forwards; animation-delay: calc(var(--open-index) * 125ms); }
-.deck-opening-stream span { color: var(--blue); font: 700 9px/1 ui-sans-serif, system-ui, sans-serif; }
+.deck-opening-stream > div { display: grid; justify-items: center; gap: 5px; }
+.deck-card-marker { min-height: 11px; color: var(--ink); font-size: 10px; font-weight: 800; line-height: 1; }
+.deck-card-position { color: var(--blue); font-size: 9px; font-weight: 700; line-height: 1; }
 .deck-opening-stream .card { width: 58px; }
-.proof-link { padding: 13px 18px; border: 2px solid var(--blue); color: white; background: var(--blue); box-shadow: 5px 5px 0 var(--lime); font: 800 12px/1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
+.deck-opening-stream .card[data-filled="true"] { animation: none; }
 .deck-protocol { width: min(100% - 40px, 1040px); margin: 70px auto 0; }
 .deck-protocol > header { display: grid; gap: 7px; max-width: 620px; }
 .deck-protocol > header h2 { margin: 0; font-size: 34px; line-height: 1; }
@@ -678,11 +681,16 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .deck-protocol-path::before { position: absolute; z-index: 0; top: 24px; right: 20px; left: 20px; height: 2px; background: var(--blue); content: ""; }
 .deck-protocol-path button { position: relative; z-index: 1; width: 52px; height: 50px; padding: 0; border: 0; color: var(--blue); background: var(--paper); clip-path: polygon(10px 0, 42px 0, 52px 10px, 52px 40px, 42px 50px, 10px 50px, 0 40px, 0 10px); box-shadow: inset 0 0 0 2px var(--blue); cursor: pointer; font-size: 13px; font-weight: 800; }
 .deck-protocol-path button[data-current="true"] { color: white; background: var(--blue); box-shadow: inset 0 -6px 0 var(--lime); }
-.deck-protocol-step { position: relative; min-height: 330px; padding: 24px 8% 34px 52px; border-left: 5px solid var(--blue); background: linear-gradient(90deg, rgb(42 22 216 / 5%), transparent 62%); animation: protocol-step-in 260ms steps(4, end) both; }
+.deck-protocol-step { position: relative; min-height: 330px; padding: 24px 8% 34px 52px; border-left: 5px solid var(--blue); background: linear-gradient(90deg, rgb(42 22 216 / 5%), transparent 62%); animation: protocol-step-in 110ms ease-out both; }
 .deck-protocol-step::before { position: absolute; top: 0; left: -11px; width: 17px; height: 17px; background: var(--lime); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); content: ""; }
 .deck-protocol-step > span { color: var(--blue); font-size: 12px; font-weight: 800; }
 .deck-protocol-step h2 { max-width: 760px; margin: 20px 0 16px; font-size: clamp(29px, 4vw, 44px); line-height: 1; }
 .deck-protocol-step p { max-width: 780px; margin: 0; color: var(--ink); font-size: 17px; line-height: 1.65; }
+.deck-protocol-data { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 780px; margin: 24px 0 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
+.deck-protocol-data > div { padding: 13px 16px 13px 0; }
+.deck-protocol-data > div + div { padding-left: 16px; border-left: 1px solid var(--line); }
+.deck-protocol-data dt { color: var(--blue); font-size: 10px; font-weight: 800; }
+.deck-protocol-data dd { overflow-wrap: anywhere; margin: 7px 0 0; color: var(--ink); font-size: 12px; line-height: 1.4; }
 .deck-protocol-step strong { display: block; max-width: 760px; margin: 28px 0 24px; padding-left: 18px; border-left: 3px solid var(--lime); color: var(--blue); font-size: 15px; line-height: 1.45; }
 .deck-protocol-step a { color: var(--blue); font-size: 12px; font-weight: 800; text-underline-offset: 4px; }
 .deck-protocol-controls { display: grid; grid-template-columns: 150px 1fr 150px; align-items: center; gap: 18px; margin: 22px 0 70px 52px; }
@@ -692,8 +700,7 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .deck-limit { width: min(100% - 40px, 1040px); margin: 0 auto 80px; padding: 26px 28px; color: white; background: var(--blue); box-shadow: 8px 8px 0 var(--lime); }
 .deck-limit strong { color: var(--lime); font: 800 15px/1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
 .deck-limit p { max-width: 780px; margin: 10px 0 0; line-height: 1.6; }
-@keyframes deck-open { from { opacity: 0; transform: translateY(-18px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes protocol-step-in { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes protocol-step-in { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: translateX(0); } }
 
 @media (max-width: 700px) {
   .deck-proof-seal { justify-self: start; }
@@ -706,6 +713,8 @@ code { font-family: "Courier New", ui-monospace, monospace; }
   .deck-protocol-path button { width: 42px; height: 42px; clip-path: polygon(8px 0, 34px 0, 42px 8px, 42px 34px, 34px 42px, 8px 42px, 0 34px, 0 8px); }
   .deck-protocol-step { min-height: 390px; padding: 22px 8px 30px 28px; }
   .deck-protocol-step p { font-size: 15px; }
+  .deck-protocol-data { grid-template-columns: 1fr; }
+  .deck-protocol-data > div + div { padding-left: 0; border-top: 1px solid var(--line); border-left: 0; }
   .deck-protocol-controls { grid-template-columns: 1fr 62px 1fr; margin-left: 0; }
   .deck-limit { width: calc(100% - 32px); }
 }

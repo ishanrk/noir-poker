@@ -52,6 +52,7 @@ export function UiSounds() {
     }
 
     function onClick(event: MouseEvent) {
+      if (window.location.pathname !== "/") return;
       const node = event.target instanceof Element ? event.target : null;
       const control = node?.closest(
         "button, .mode-switch label, .key-choice, .home-actions a:first-child",
@@ -62,6 +63,7 @@ export function UiSounds() {
     }
 
     function onInput(event: Event) {
+      if (window.location.pathname !== "/") return;
       const node = event.target instanceof HTMLInputElement ? event.target : null;
       if (!node || node.type !== "range" || node.disabled) return;
 
