@@ -77,6 +77,7 @@ export type View = {
   settled: boolean;
   game_over?: { winners: number[]; chips: number };
   last_action?: ActionNoticeView;
+  action_notices: ActionNoticeView[];
   actions: ActionView | undefined;
   result?: HandResultView;
   ready?: ReadyView;
@@ -284,7 +285,7 @@ export function Table({
 
       <div className="table-stage">
         {noticeName && noticeAction && (
-          <div className="table-action-notice" role="status" aria-live="polite">
+          <div key={`${view.hand_no}:${notice?.seq}`} className="table-action-notice" role="status" aria-live="polite">
             <strong>{noticeName}</strong>
             <span>{noticeAction}</span>
           </div>

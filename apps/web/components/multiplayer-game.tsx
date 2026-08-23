@@ -215,8 +215,7 @@ export function MultiplayerGame({ room }: { room: string }) {
   const committing = useRef(false);
   const deckBusy = useRef(false);
   const localHole = useRef<{ hand: number; cards: [string, string] } | undefined>(undefined);
-  const seenAction = useRef<string | undefined>(undefined);
-  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const seenAction = useRef<{ hand: number; seq: number } | undefined>(undefined);
   const finishTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const viewRef = useRef<View | undefined>(undefined);
   const actionWait = useRef<{ hand: number; seq: number } | undefined>(undefined);
@@ -235,7 +234,7 @@ export function MultiplayerGame({ room }: { room: string }) {
   const [drawState, setDrawState] = useState<ProofState>("idle");
   const [claimState, setClaimState] = useState<ProofState>("idle");
   const [localProofs, setLocalProofs] = useState<Record<string, LocalProofState>>({});
-  const [notice, setNotice] = useState<ActionNoticeView>();
+  const [notices, setNotices] = useState<ActionNoticeView[]>([]);
   const [finish, setFinish] = useState(false);
   const [deckStage, setDeckStage] = useState<string>();
 
@@ -251,6 +250,13 @@ export function MultiplayerGame({ room }: { room: string }) {
 
     return () => clearTimeout(timer);
   }, [finish, router]);
+
+  useEffect(() => {
+    if (!notices.length) return;
+
+    const timer = setTimeout(() => setNotices((current) => current.slice(1)), 1100);
+    return () => clearTimeout(timer);
+  }, [notices]);
 
   const connect = useCallback(() => {
     const current = auth.current;
@@ -418,16 +424,20 @@ export function MultiplayerGame({ room }: { room: string }) {
           message.view.hole = [{ value: local.cards[0] }, { value: local.cards[1] }];
         }
         viewRef.current = message.view;
-        const actionKey = message.view.last_action
-          ? `${message.view.hand_no}:${message.view.last_action.seq}`
-          : undefined;
-
-        if (rev.current >= 0 && actionKey && actionKey !== seenAction.current) {
-          setNotice(message.view.last_action);
-          if (noticeTimer.current) clearTimeout(noticeTimer.current);
-          noticeTimer.current = setTimeout(() => setNotice(undefined), 1100);
+        const log = message.view.action_notices;
+        const last = log.at(-1)?.seq ?? -1;
+        const seen = seenAction.current;
+        if (rev.current >= 0) {
+          const next = seen?.hand === message.view.hand_no
+            ? log.filter((notice) => notice.seq > seen.seq)
+            : log;
+          if (next.length) {
+            setNotices((currentNotices) => seen?.hand === message.view.hand_no
+              ? [...currentNotices, ...next]
+              : next);
+          }
         }
-        seenAction.current = actionKey;
+        seenAction.current = { hand: message.view.hand_no, seq: last };
         if (message.view.game_over) {
           if (rev.current < 0) {
             setFinish(true);
@@ -559,7 +569,6 @@ export function MultiplayerGame({ room }: { room: string }) {
     return () => {
       live = false;
       if (socket.current) closeSocket(socket.current);
-      if (noticeTimer.current) clearTimeout(noticeTimer.current);
       if (finishTimer.current) clearTimeout(finishTimer.current);
     };
   }, [connect, room]);
@@ -816,8 +825,8 @@ export function MultiplayerGame({ room }: { room: string }) {
         viewer={seat}
         room={room}
         error={error}
-        disabled={actionPending || Boolean(notice) || !connected}
-        notice={notice}
+        disabled={actionPending || notices.length > 0 || !connected}
+        notice={notices[0]}
         finish={finish}
         raiseTo={raiseTo}
         setRaiseTo={setRaiseTo}

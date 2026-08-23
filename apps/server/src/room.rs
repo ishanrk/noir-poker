@@ -351,6 +351,7 @@ impl Room {
                 result: None,
                 next_seq: 0,
                 actions: Vec::new(),
+                notices: Vec::new(),
                 last_action: None,
             })),
             Err(NextHandError::CannotStart) => Ok(None),
@@ -650,6 +651,7 @@ impl Room {
         hand.result = action.result;
         hand.next_seq = action.next_seq;
         hand.actions = action.actions;
+        hand.notices.push(action.notice);
         hand.last_action = Some(action.notice);
 
         if let (Some(facts), Some(commits)) = (action.facts, action.fact_commitments) {
@@ -728,6 +730,7 @@ pub(super) struct LiveHand {
     pub(super) result: Option<HandResult>,
     pub(super) next_seq: u64,
     pub(super) actions: Vec<PlayedAction>,
+    pub(super) notices: Vec<ActionNotice>,
     pub(super) last_action: Option<ActionNotice>,
 }
 

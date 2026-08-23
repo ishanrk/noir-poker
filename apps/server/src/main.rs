@@ -302,6 +302,7 @@ struct SeatView {
     game_over: Option<GameOverView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_action: Option<ActionNoticeView>,
+    action_notices: Vec<ActionNoticeView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     actions: Option<ActionView>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1134,6 +1135,7 @@ async fn join_fair(
         result: None,
         next_seq: 0,
         actions: Vec::new(),
+        notices: Vec::new(),
         last_action: None,
     });
     let next = if final_join && !room.config.last_hand(0) {
@@ -1251,6 +1253,7 @@ async fn single_entropy(
         result: None,
         next_seq: 0,
         actions: Vec::new(),
+        notices: Vec::new(),
         last_action: None,
     };
     let next = (!room.config.last_hand(0))
@@ -2627,6 +2630,12 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
     view.hand_no = hand.no;
     view.total_hands = room.config.hands;
     view.last_action = hand.last_action.map(action_notice_view);
+    view.action_notices = hand
+        .notices
+        .iter()
+        .copied()
+        .map(action_notice_view)
+        .collect();
     view.deal = room.deck.as_ref().map(|deck| DealView {
         hand_no: hand.no,
         commitment: encode_hex(deck.head),
@@ -3220,6 +3229,7 @@ fn restore_hand(
             result,
             next_seq,
             actions,
+            notices: Vec::new(),
             last_action: None,
         },
         facts,
@@ -3519,6 +3529,7 @@ fn seat_view(game: &State, seat: usize) -> SeatView {
         settled: game.settled,
         game_over: None,
         last_action: None,
+        action_notices: Vec::new(),
         actions: game.legal_actions(seat).map(action_view),
         result: None,
         ready: None,
@@ -3685,6 +3696,7 @@ mod tests {
             result: None,
             next_seq: 0,
             actions: Vec::new(),
+            notices: Vec::new(),
             last_action: None,
         }
     }
@@ -5065,6 +5077,7 @@ mod tests {
             result: None,
             next_seq: 0,
             actions: Vec::new(),
+            notices: Vec::new(),
             last_action: None,
         };
 
@@ -5113,6 +5126,7 @@ mod tests {
             result: None,
             next_seq: 0,
             actions: Vec::new(),
+            notices: Vec::new(),
             last_action: None,
         };
 
