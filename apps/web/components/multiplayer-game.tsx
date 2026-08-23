@@ -100,8 +100,13 @@ type Assignment = {
 };
 type PrivateObjective = { objective?: string; index?: number; error?: string };
 type ContractCompletion = { completed?: boolean; error?: string };
+type ProofJobs = {
+  draw: Record<number, Assignment>;
+  claim: Record<number, ClaimView>;
+};
 
 const proofKey = (seat: number, hand: number, kind: ProofKind) => `${seat}:${hand}:${kind}`;
+const proofJobsKey = (room: string, seat: number) => `noir-poker-proofs-${room}-${seat}`;
 const deckSecretKey = (room: string, hand: number) => `noir-poker-deck-${room}-${hand}`;
 const deckHoleKey = (room: string, hand: number, seat: number) =>
   `noir-poker-hole-${room}-${hand}-${seat}`;
@@ -114,6 +119,62 @@ function withoutHand<T>(current: Record<number, T>, hand: number) {
   const next = { ...current };
   delete next[hand];
   return next;
+}
+
+function objectValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function storedAssignment(value: unknown): value is Assignment {
+  return objectValue(value) &&
+    Number.isInteger(value.hand_no) &&
+    typeof value.hand_tag === "string" &&
+    typeof value.commitment === "string" &&
+    typeof value.nonce === "string" &&
+    typeof value.catalog_root === "string" &&
+    typeof value.draw_verified === "boolean";
+}
+
+function storedClaim(value: unknown): value is ClaimView {
+  if (!objectValue(value) || !storedAssignment(value)) return false;
+  const record = value as unknown as Record<string, unknown>;
+  return typeof record.facts_salt === "string" &&
+    typeof record.facts_hash === "string" &&
+    Array.isArray(record.facts) &&
+    record.facts.length === 6 &&
+    record.facts.every((fact: unknown) => typeof fact === "number") &&
+    (record.status === "claimable" || record.status === "claimed") &&
+    (record.nullifier === undefined || typeof record.nullifier === "string");
+}
+
+function storedJobs(value: unknown): ProofJobs {
+  if (!objectValue(value) || !objectValue(value.draw) || !objectValue(value.claim)) {
+    return { draw: {}, claim: {} };
+  }
+
+  const draw = Object.values(value.draw).filter(storedAssignment);
+  const claim = Object.values(value.claim).filter(storedClaim);
+  return {
+    draw: Object.fromEntries(draw.map((job) => [job.hand_no, job])),
+    claim: Object.fromEntries(claim.map((job) => [job.hand_no, job])),
+  };
+}
+
+function loadProofJobs(room: string, seat: number) {
+  try {
+    const value = sessionStorage.getItem(proofJobsKey(room, seat));
+    return value ? storedJobs(JSON.parse(value) as unknown) : { draw: {}, claim: {} };
+  } catch {
+    return { draw: {}, claim: {} };
+  }
+}
+
+function saveProofJobs(room: string, seat: number, jobs: ProofJobs) {
+  try {
+    sessionStorage.setItem(proofJobsKey(room, seat), JSON.stringify(jobs));
+  } catch {
+    // private proof work stays best effort
+  }
 }
 
 function deckSecret(room: string, hand: number) {
@@ -247,6 +308,8 @@ export function MultiplayerGame({ room }: { room: string }) {
   const rev = useRef(-1);
   const drawing = useRef<number | undefined>(undefined);
   const claiming = useRef<number | undefined>(undefined);
+  const proofTurn = useRef<ProofKind>("draw");
+  const proofJobsLoaded = useRef(false);
   const dealing = useRef(false);
   const deckBusy = useRef(false);
   const deckActive = useRef(false);
@@ -263,6 +326,7 @@ export function MultiplayerGame({ room }: { room: string }) {
   const [seat, setSeat] = useState<number | null>();
   const [waiting, setWaiting] = useState<Waiting>();
   const [view, setView] = useState<View>();
+  const [roomRev, setRoomRev] = useState(-1);
   const [error, setError] = useState<string>();
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -606,6 +670,7 @@ export function MultiplayerGame({ room }: { room: string }) {
         syncing.current = false;
         seenAction.current = { hand: message.view.hand_no, seq: last };
         rev.current = message.rev;
+        setRoomRev(message.rev);
         const currentChallenge = privateObjective(room, current.seat, challengeAssignment(message.view.challenge));
         const claimed = message.view.claim?.status === "claimed";
         const currentClaim = privateObjective(room, current.seat, claimAssignment(message.view.claim));
@@ -721,7 +786,6 @@ export function MultiplayerGame({ room }: { room: string }) {
             setDrawJobs((currentJobs) => withoutHand(currentJobs, message.hand_no));
           } else {
             setDrawState(message.hand_no, "failed");
-            setChallengeError(message.message);
           }
         } else if (message.kind === "completion" && claiming.current === message.hand_no) {
           claiming.current = undefined;
@@ -730,7 +794,6 @@ export function MultiplayerGame({ room }: { room: string }) {
             setClaimJobs((currentJobs) => withoutHand(currentJobs, message.hand_no));
           } else {
             setClaimState(message.hand_no, "failed");
-            setChallengeError(message.message);
           }
         }
       }
@@ -771,10 +834,15 @@ export function MultiplayerGame({ room }: { room: string }) {
 
   useEffect(() => {
     let live = true;
+    proofJobsLoaded.current = false;
     const current = loadSeat(room);
     queueMicrotask(() => {
       if (!live) return;
       if (!current) { setSeat(null); return; }
+      const jobs = loadProofJobs(room, current.seat);
+      setDrawJobs(jobs.draw);
+      setClaimJobs(jobs.claim);
+      proofJobsLoaded.current = true;
       auth.current = current;
       setSeat(current.seat);
       connect();
@@ -790,6 +858,11 @@ export function MultiplayerGame({ room }: { room: string }) {
       if (currentSocket) closeSocket(currentSocket);
     };
   }, [connect, room]);
+
+  useEffect(() => {
+    if (typeof seat !== "number" || !proofJobsLoaded.current) return;
+    saveProofJobs(room, seat, { draw: drawJobs, claim: claimJobs });
+  }, [claimJobs, drawJobs, room, seat]);
 
   const send = useCallback((action: ClientAction) => {
     const current = socket.current;
@@ -853,7 +926,6 @@ export function MultiplayerGame({ room }: { room: string }) {
     const hand = assignment.hand_no;
     const stored = loadChallengeSecret(room, assignment.hand_no, seat);
     if (!stored) {
-      setChallengeError("Draw secret unavailable");
       setDrawState(hand, "failed");
       return;
     }
@@ -875,7 +947,6 @@ export function MultiplayerGame({ room }: { room: string }) {
       ) throw new Error("challenge mismatch");
 
       drawing.current = hand;
-      setChallengeError(undefined);
       setDrawState(hand, "preparing");
       const result = await proveChallenge({
         mode: 0,
@@ -906,13 +977,11 @@ export function MultiplayerGame({ room }: { room: string }) {
       if (drawing.current === hand) {
         drawing.current = undefined;
         setDrawState(hand, "failed");
-        setChallengeError("Draw proof failed");
       }
     }
   }, [connected, room, seat, setDrawState]);
 
-  const claimChallenge = useCallback(async () => {
-    const claim = view?.claim;
+  const claimChallenge = useCallback(async (claim: ClaimView | undefined) => {
     const current = socket.current;
     if (
       !claim ||
@@ -925,7 +994,10 @@ export function MultiplayerGame({ room }: { room: string }) {
     ) return;
     const hand = claim.hand_no;
     const stored = loadChallengeSecret(room, claim.hand_no, seat);
-    if (!stored) { setChallengeError("Draw secret unavailable"); setClaimState("failed"); return; }
+    if (!stored) {
+      setClaimState(hand, "failed");
+      return;
+    }
 
     try {
       const handTag = decodeHex(claim.hand_tag);
@@ -948,8 +1020,7 @@ export function MultiplayerGame({ room }: { room: string }) {
       if (!objectiveMet(objective, claim.facts)) { setClaimCompleted(false); return; }
 
       claiming.current = hand;
-      setChallengeError(undefined);
-      setClaimState("preparing");
+      setClaimState(hand, "preparing");
       const result = await proveChallenge({
         mode: 1,
         handTag,
@@ -966,23 +1037,22 @@ export function MultiplayerGame({ room }: { room: string }) {
         mustFalse: objective.mustFalse,
         siblings,
       }, (status: ProofStatus) => {
-        if (claiming.current === hand) setClaimState(status);
+        if (claiming.current === hand) setClaimState(hand, status);
       });
       if (
         claiming.current !== hand ||
         socket.current !== current ||
         current.readyState !== WebSocket.OPEN
       ) throw new Error("stale completion proof");
-      setClaimState("verifying");
+      setClaimState(hand, "verifying");
       current.send(JSON.stringify({ type: "challenge_claim", hand_no: claim.hand_no, proof: result.proof, public_inputs: result.public_inputs } satisfies ClientAction));
     } catch {
       if (claiming.current === hand) {
         claiming.current = undefined;
-        setClaimState("failed");
-        setChallengeError("Completion proof failed");
+        setClaimState(hand, "failed");
       }
     }
-  }, [connected, room, seat, view?.claim]);
+  }, [connected, room, seat, setClaimState]);
 
   useEffect(() => {
     const challenge = view?.challenge;
@@ -1011,63 +1081,57 @@ export function MultiplayerGame({ room }: { room: string }) {
     if (view?.mode !== "multiplayer" || typeof seat !== "number" || !connected) return;
     if (drawing.current !== undefined || claiming.current !== undefined) return;
 
-    const candidates = [claimAssignment(view.claim), challengeAssignment(view.challenge)]
-      .filter((assignment): assignment is Assignment => assignment !== undefined);
-    const assignment = candidates.find((candidate) => {
-      const state = drawStates[candidate.hand_no] ?? "idle";
-      return !candidate.draw_verified &&
-        state !== "verified";
-    });
-    if (!assignment) return;
+    const claim = Object.values(claimJobs)
+      .filter((candidate) => {
+        const state = claimStates[candidate.hand_no] ?? "idle";
+        return candidate.status === "claimable" &&
+          state !== "preparing" &&
+          state !== "proving" &&
+          state !== "verifying" &&
+          state !== "verified";
+      })
+      .sort((left, right) => left.hand_no - right.hand_no)[0];
+    const assignment = Object.values(drawJobs)
+      .filter((candidate) => {
+        const state = drawStates[candidate.hand_no] ?? "idle";
+        return !candidate.draw_verified &&
+          state !== "preparing" &&
+          state !== "proving" &&
+          state !== "verifying" &&
+          state !== "verified";
+      })
+      .sort((left, right) => left.hand_no - right.hand_no)[0];
+    if (!claim && !assignment) return;
 
-    const state = drawStates[assignment.hand_no] ?? "idle";
-    if (state === "preparing" || state === "proving" || state === "verifying") return;
-
-    const key = `draw:${assignment.hand_no}`;
+    const kind: ProofKind = claim && assignment ? proofTurn.current : claim ? "completion" : "draw";
+    const job = kind === "draw" ? assignment : claim;
+    if (!job) return;
+    const key = `${kind}:${job.hand_no}`;
     const attempts = autoAttempts[key] ?? 0;
     const timer = window.setTimeout(() => {
       if (drawing.current !== undefined || claiming.current !== undefined) return;
-      setAutoAttempts((current) => ({ ...current, [key]: Math.max(current[key] ?? 0, attempts + 1) }));
-      void drawChallenge(assignment);
+      proofTurn.current = kind === "draw" ? "completion" : "draw";
+      setAutoAttempts((current) => ({
+        ...current,
+        [key]: Math.max(current[key] ?? 0, attempts + 1),
+      }));
+      if (kind === "draw") void drawChallenge(assignment);
+      else void claimChallenge(claim);
     }, attempts === 0 ? 0 : Math.min(attempts * 1200, MAX_AUTO_PROOF_DELAY_MS));
 
     return () => window.clearTimeout(timer);
-  }, [autoAttempts, claimState, connected, drawChallenge, drawStates, seat, view?.challenge, view?.claim, view?.mode]);
-
-  useEffect(() => {
-    const claim = view?.claim;
-    if (
-      view?.mode !== "multiplayer" ||
-      !claim ||
-      claim.status !== "claimable" ||
-      claimCompleted !== true ||
-      typeof seat !== "number" ||
-      !connected ||
-      drawing.current !== undefined ||
-      claiming.current !== undefined ||
-      claimState === "preparing" ||
-      claimState === "proving" ||
-      claimState === "verifying" ||
-      claimState === "verified"
-    ) return;
-
-    const key = `completion:${claim.hand_no}`;
-    const attempts = autoAttempts[key] ?? 0;
-    const timer = window.setTimeout(() => {
-      const latest = viewRef.current?.claim;
-      if (
-        !latest ||
-        latest.hand_no !== claim.hand_no ||
-        latest.status !== "claimable" ||
-        drawing.current !== undefined ||
-        claiming.current !== undefined
-      ) return;
-      setAutoAttempts((current) => ({ ...current, [key]: Math.max(current[key] ?? 0, attempts + 1) }));
-      void claimChallenge();
-    }, attempts === 0 ? 0 : Math.min(attempts * 1200, MAX_AUTO_PROOF_DELAY_MS));
-
-    return () => window.clearTimeout(timer);
-  }, [autoAttempts, claimChallenge, claimCompleted, claimState, connected, drawStates, seat, view?.claim, view?.mode]);
+  }, [
+    autoAttempts,
+    claimChallenge,
+    claimJobs,
+    claimStates,
+    connected,
+    drawChallenge,
+    drawJobs,
+    drawStates,
+    seat,
+    view?.mode,
+  ]);
 
   async function verifyProof(owner: number, hand: number, kind: ProofKind) {
     const key = proofKey(owner, hand, kind);
@@ -1114,19 +1178,6 @@ export function MultiplayerGame({ room }: { room: string }) {
   }
   if (!view) return <div className={`room-status${error ? " ui-shake" : ""}`}><strong>{error ?? deckStage ?? "Connecting to table"}</strong>{!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><Keycap>Reconnect</Keycap></button>}</div>;
 
-  const automaticCompletionPending = Boolean(
-    view.mode === "multiplayer" &&
-    view.settled &&
-    view.claim?.status === "claimable" &&
-    claimCompleted === true &&
-    claimState !== "verified",
-  );
-  const automaticDrawPending = Boolean(
-    view.mode === "multiplayer" &&
-    view.settled &&
-    ((view.claim && !view.claim.draw_verified) ||
-      (view.challenge?.assigned && !view.challenge.draw_verified)),
-  );
   const tourBlocking = Boolean(
     view.mode === "multiplayer" &&
     view.hand_no === 1 &&
@@ -1137,8 +1188,6 @@ export function MultiplayerGame({ room }: { room: string }) {
     notices.length > 0 ||
     Boolean(deckStage) ||
     !connected ||
-    automaticCompletionPending ||
-    automaticDrawPending ||
     tourBlocking;
 
   const contract: ContractView = {
@@ -1162,7 +1211,7 @@ export function MultiplayerGame({ room }: { room: string }) {
           handNo: view.claim.hand_no,
           objective: claimObjective,
           completed: claimCompleted,
-          state: claimState,
+          state: claimStates[view.claim.hand_no] ?? "idle",
           drawVerified: view.claim.draw_verified,
           drawState: drawStates[view.claim.hand_no] ?? "idle",
         }
@@ -1221,7 +1270,7 @@ export function MultiplayerGame({ room }: { room: string }) {
         contract={contract}
         onCommitContract={commitChallenge}
         onVerifyDraw={() => void drawChallenge(challengeAssignment(view.challenge))}
-        onGenerateProof={() => void claimChallenge()}
+        onGenerateProof={() => void claimChallenge(view.claim)}
         onVerifyProof={(owner, hand, kind) => void verifyProof(owner, hand, kind)}
       />
       {view.mode === "multiplayer" && (
@@ -1232,10 +1281,14 @@ export function MultiplayerGame({ room }: { room: string }) {
       {view.mode === "multiplayer" && (
         <PlayProofs
           room={room}
+          rev={roomRev}
           handNo={view.hand_no}
           settled={view.settled}
           gameOver={Boolean(view.game_over)}
           view={contract}
+          viewer={seat}
+          drawStates={drawStates}
+          completionStates={claimStates}
         />
       )}
     </div>

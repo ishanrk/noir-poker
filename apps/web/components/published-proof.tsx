@@ -100,6 +100,7 @@ export function PublishedProofPage({ room, hand, seat, kind }: {
     <>
       <button className="proof-guide-download" type="button" onClick={download}>Download JSON</button>
       <button type="button" onClick={() => void verify()}>Run Browser Check</button>
+      <Link href={LOCAL_VERIFIER} target="_blank" rel="noreferrer">Local Verifier</Link>
       <Link href={`/room/${proof.room}/proofs`} target="_blank" rel="noreferrer">Proof History</Link>
     </>
   ) : null;
@@ -230,7 +231,7 @@ function proofSteps({
       title: draw ? "Mode 0 proves the challenge draw" : "Mode 1 proves challenge completion",
       text: draw
         ? "The circuit recomputes the commitment from the private secret. It hashes the secret with the server nonce. The low three selector bits choose one of eight catalog leaves. Three private sibling hashes rebuild the fixed catalog root."
-        : "Mode 1 repeats the commitment selector and catalog root checks. It binds six private fact bits to the public facts hash. The selected private catalog rule checks those bits. The circuit derives the public nullifier from the hand tag seat and secret.",
+        : "Mode 1 independently repeats the commitment selector and catalog root checks. It binds six private fact bits to the public facts hash. The selected private catalog rule checks those bits. The circuit derives the public nullifier from the hand tag seat and secret. Mode 1 verification uses its own proof bytes and 194 public fields.",
       detail: (
         <dl>
           <Value label="Commitment" value={proof.commitment} />
@@ -310,7 +311,7 @@ function Value({ label, value }: { label: string; value: string }) {
 }
 
 function Source({ href, children }: { href: string; children: ReactNode }) {
-  return <Link href={href} target="_blank" rel="noreferrer">{children}</Link>;
+  return <Link href={href} target="_blank" rel="noreferrer">Source&nbsp; {children} ↗</Link>;
 }
 
 function encodedBytes(value: string) {

@@ -60,6 +60,48 @@ async function until(test, message, timeout = 240_000) {
   throw new Error(message);
 }
 
+async function proofGate(page) {
+  const blocked = new Set(["challenge_draw", "challenge_claim"]);
+  const held = [];
+
+  await page.routeWebSocket(/\/rooms\//, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const raw = typeof message === "string" ? message : message.toString();
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        server.send(message);
+        return;
+      }
+      if (blocked.has(parsed.type)) {
+        held.push({ kind: parsed.type, message, server });
+        return;
+      }
+      server.send(message);
+    });
+  });
+
+  return {
+    async wait(kind) {
+      await until(
+        () => held.some((item) => item.kind === kind),
+        `${kind} was not held`,
+      );
+    },
+    release(kind) {
+      blocked.delete(kind);
+      for (let index = held.length - 1; index >= 0; index -= 1) {
+        const item = held[index];
+        if (item.kind !== kind) continue;
+        held.splice(index, 1);
+        item.server.send(item.message);
+      }
+    },
+  };
+}
+
 async function frame(trace, test, after = 0, message = "message missing") {
   const found = await until(() => {
     for (let i = after; i < trace.frames.length; i += 1) {
@@ -456,10 +498,13 @@ async function verifyPublic(viewer, owner, kind) {
   watch(page, `${viewer.name}-${kind.toLowerCase().replaceAll(" ", "-")}`);
   await page.getByText("VERIFIED LOCALLY", { exact: true }).waitFor({ timeout: 120_000 });
   const download = page.getByRole("button", { name: "Download JSON", exact: true });
-  for (let step = 0; step < 10 && !(await download.isVisible()); step += 1) {
-    await page.getByRole("button", { name: "Next Step", exact: true }).click();
-  }
-  await download.waitFor();
+  await download.waitFor({ state: "visible" });
+  const [file] = await Promise.all([page.waitForEvent("download"), download.click()]);
+  assert.match(
+    file.suggestedFilename(),
+    new RegExp(`^noir-poker-${kind.toLowerCase()}-\\d+-\\d+\\.json$`),
+    `${kind} proof download name`,
+  );
   await page.getByRole("link", { name: "Local Verifier", exact: true }).waitFor();
   const body = await page.locator("body").innerText();
   for (const objective of objectives) {
@@ -483,8 +528,12 @@ async function dismissTour(trace) {
 async function multiplayerStress() {
   const ca = await browser.newContext();
   const cb = await browser.newContext();
-  const a = watch(await ca.newPage(), "a");
-  const b = watch(await cb.newPage(), "b");
+  const aPage = await ca.newPage();
+  const bPage = await cb.newPage();
+  const aGate = await proofGate(aPage);
+  const bGate = await proofGate(bPage);
+  const a = watch(aPage, "a");
+  const b = watch(bPage, "b");
 
   await openLobby(a, "Multiplayer", 2, 1);
   await setName(a.page, "Alice");
@@ -508,6 +557,23 @@ async function multiplayerStress() {
 
   await foldCurrent(a, b, 0);
   const [aChallenge, bChallenge] = await Promise.all([challenge(a.page), challenge(b.page)]);
+
+  const aReady = a.page.getByRole("button", { name: "Ready for Next Hand" });
+  const bReady = b.page.getByRole("button", { name: "Ready for Next Hand" });
+  await Promise.all([
+    until(async () => await aReady.isEnabled(), "first ready unavailable while draw proof pending"),
+    until(async () => await bReady.isEnabled(), "second ready unavailable while draw proof pending"),
+  ]);
+  await Promise.all([aReady.click(), bReady.click()]);
+  const [aNext, bNext] = await Promise.all([waitHand(a, 1), waitHand(b, 1)]);
+  assert.notDeepEqual(aNext, bNext, "next hand private cards match");
+
+  await Promise.all([
+    aGate.wait("challenge_draw"),
+    bGate.wait("challenge_draw"),
+  ]);
+  aGate.release("challenge_draw");
+  bGate.release("challenge_draw");
   await Promise.all([
     frame(a, (message) => message.type === "proof_accepted" && message.kind === "draw" && message.hand_no === 1, 0, "automatic draw proof missing"),
     frame(b, (message) => message.type === "proof_accepted" && message.kind === "draw" && message.hand_no === 1, 0, "automatic draw proof missing"),
@@ -516,6 +582,7 @@ async function multiplayerStress() {
   assert.equal(sent(b, "challenge_draw").length, 1, "bob draw proof not automatic");
   assert.equal(await a.page.getByRole("button", { name: /Generate|Draw Challenge/ }).count(), 0);
   assert.equal(await b.page.getByRole("button", { name: /Generate|Draw Challenge/ }).count(), 0);
+  await Promise.all([dismissTour(a), dismissTour(b)]);
   await verifyPublic(a, "Bob", "DRAW");
   await Promise.all([
     waitNotices(a.page, "multiplayer hand 1 a"),
@@ -525,18 +592,6 @@ async function multiplayerStress() {
     checkNoticePacing(a, "multiplayer hand 1 a", 0),
     checkNoticePacing(b, "multiplayer hand 1 b", 0),
   ]);
-
-  const aReady = a.page.getByRole("button", { name: "Ready for Next Hand" });
-  await until(async () => await aReady.isEnabled(), "first ready unavailable");
-  await aReady.click();
-  await a.page.getByRole("button", { name: "Ready 1/2" }).waitFor({ timeout: 15_000 });
-
-  const bReady = b.page.getByRole("button", { name: "Ready for Next Hand" });
-  await until(async () => await bReady.isEnabled(), "second ready unavailable");
-  await bReady.click();
-  const [aNext, bNext] = await Promise.all([waitHand(a, 1), waitHand(b, 1)]);
-  assert.notDeepEqual(aNext, bNext, "next hand private cards match");
-  await Promise.all([dismissTour(a), dismissTour(b)]);
 
   const before = a.frames.length;
   await a.page.reload({ waitUntil: "domcontentloaded" });
@@ -591,6 +646,19 @@ async function multiplayerStress() {
     }
     return undefined;
   }, "showdown profit challenge not completed");
+
+  const aNextReady = a.page.getByRole("button", { name: "Ready for Next Hand" });
+  const bNextReady = b.page.getByRole("button", { name: "Ready for Next Hand" });
+  await Promise.all([
+    until(async () => await aNextReady.isEnabled(), "ready blocked by completion proof"),
+    until(async () => await bNextReady.isEnabled(), "ready blocked by completion proof"),
+  ]);
+  await Promise.all([aNextReady.click(), bNextReady.click()]);
+  await Promise.all([waitHand(a, 2), waitHand(b, 2)]);
+
+  await (completed.trace === a ? aGate : bGate).wait("challenge_claim");
+  aGate.release("challenge_claim");
+  bGate.release("challenge_claim");
   await frame(
     completed.trace,
     (message) => message.type === "proof_accepted" && message.kind === "completion" && message.hand_no === 1,

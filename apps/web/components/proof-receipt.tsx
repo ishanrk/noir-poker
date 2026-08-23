@@ -189,6 +189,7 @@ export function ProofReceiptView({ nullifier }: { nullifier: string }) {
     <>
       <button className="proof-guide-download" type="button" onClick={exportReceipt}>Download JSON</button>
       <button type="button" onClick={() => void verify()}>Run Browser Check</button>
+      <Link href={LOCAL_VERIFIER} target="_blank" rel="noreferrer">Local Verifier</Link>
       <button type="button" onClick={() => void copyLink()}>Copy Public Link</button>
     </>
   ) : null;
@@ -320,7 +321,7 @@ function receiptSteps({
     },
     {
       title: "Mode 0 proves the challenge draw",
-      text: "The circuit recomputes the commitment from the private secret. It hashes the secret with the server nonce. The low three selector bits choose one of eight catalog leaves. Three private sibling hashes rebuild the fixed catalog root. Mode 1 repeats these checks inside every completion proof.",
+      text: "The circuit recomputes the commitment from the private secret. It hashes the secret with the server nonce. The low three selector bits choose one of eight catalog leaves. Three private sibling hashes rebuild the fixed catalog root. Mode 1 independently repeats these checks inside every completion proof.",
       detail: (
         <dl>
           <ReceiptValue label="Secret commitment" value={receipt.commitment} />
@@ -339,7 +340,7 @@ function receiptSteps({
     },
     {
       title: "Mode 1 proves challenge completion",
-      text: "At settlement the game records six fact bits for this player. The player browser receives those bits and their private salt. Mode 1 binds them to the public facts hash. The selected private catalog rule checks the bits. The circuit derives the public nullifier from the hand tag seat and secret.",
+      text: "At settlement the game records six fact bits for this player. The player browser receives those bits and their private salt. Mode 1 binds them to the public facts hash. The selected private catalog rule checks the bits. The circuit derives the public nullifier from the hand tag seat and secret. Mode 1 verification uses its own proof bytes and 194 public fields.",
       detail: (
         <dl>
           <ReceiptValue label="Fact 0" value="Saw the flop" />
@@ -396,7 +397,9 @@ function receiptSteps({
     },
     {
       title: "Verify the receipt in this browser or a terminal",
-      text: "This page validates the receipt metadata and every public binding. It runs the included Mode 0 proof first then the Mode 1 proof. Download the JSON with the action above. The local command checks the circuit artifact SHA 256 decodes all 194 fields for each proof and runs UltraHonk. Success prints the room hand and proof count.",
+      text: drawIncluded
+        ? "This page validates the receipt metadata and every public binding. It runs the included Mode 0 proof first then the Mode 1 proof. Download the JSON with the action above. The local command checks the circuit artifact SHA 256 decodes all 194 fields for each proof and runs UltraHonk. Success prints the room hand and proof count."
+        : "This page validates the receipt metadata and every public binding. It runs the included Mode 1 proof. Download the JSON with the action above. The local command checks the circuit artifact SHA 256 decodes all 194 fields and runs UltraHonk. Success prints the room hand and proof count.",
       detail: verificationActions,
       result: "A changed receipt byte makes browser or terminal verification return an error",
       source: (
@@ -414,5 +417,5 @@ function ReceiptValue({ label, value }: { label: string; value: string }) {
 }
 
 function Source({ href, children }: { href: string; children: ReactNode }) {
-  return <Link href={href} target="_blank" rel="noreferrer">{children}</Link>;
+  return <Link href={href} target="_blank" rel="noreferrer">Source&nbsp; {children} ↗</Link>;
 }

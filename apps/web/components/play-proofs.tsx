@@ -4,15 +4,29 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import styles from "@/components/crypto.module.css";
-import type { ContractView } from "@/components/contract";
+import type { ContractView, ProofState } from "@/components/contract";
 import { loadProofHistory, type ProofMeta } from "@/lib/server";
 
-export function PlayProofs({ room, handNo, settled, gameOver, view }: {
+export function PlayProofs({
+  room,
+  rev,
+  handNo,
+  settled,
+  gameOver,
+  view,
+  viewer,
+  drawStates,
+  completionStates,
+}: {
   room: string;
+  rev: number;
   handNo: number;
   settled: boolean;
   gameOver: boolean;
   view: ContractView;
+  viewer: number;
+  drawStates: Record<number, ProofState>;
+  completionStates: Record<number, ProofState>;
 }) {
   const [history, setHistory] = useState<ProofMeta[]>([]);
   const [error, setError] = useState<string>();
@@ -32,6 +46,12 @@ export function PlayProofs({ room, handNo, settled, gameOver, view }: {
     view.claim
       ? `${view.claim.handNo}:${view.claim.drawVerified || view.claim.drawState === "verified"}:${view.claim.state === "verified"}`
       : "",
+    ...Object.entries(drawStates)
+      .filter(([, state]) => state === "verified")
+      .map(([hand]) => `draw:${hand}`),
+    ...Object.entries(completionStates)
+      .filter(([, state]) => state === "verified")
+      .map(([hand]) => `completion:${hand}`),
   ].join("|");
 
   useEffect(() => {
@@ -47,10 +67,14 @@ export function PlayProofs({ room, handNo, settled, gameOver, view }: {
         setError(cause instanceof Error ? cause.message : "proof history unavailable");
       });
     return () => { live = false; };
-  }, [handNo, localPublicationVersion, proofVersion, room, settled]);
+  }, [handNo, localPublicationVersion, proofVersion, rev, room, settled]);
 
   const latestHand = Math.max(
     handNo,
+    view.assignment.kind === "available" ? handNo : view.assignment.handNo,
+    view.claim?.handNo ?? handNo,
+    ...Object.keys(drawStates).map(Number),
+    ...Object.keys(completionStates).map(Number),
     ...view.proofs.flatMap((player) => [
       player.draw?.handNo ?? handNo,
       player.completion?.handNo ?? handNo,
@@ -95,6 +119,8 @@ export function PlayProofs({ room, handNo, settled, gameOver, view }: {
                     seat={player.seat}
                     proof={records.get(`${player.seat}:${hand}`)}
                     checking={settled && !gameOver && hand === handNo}
+                    drawState={player.seat === viewer ? drawStates[hand] : undefined}
+                    completionState={player.seat === viewer ? completionStates[hand] : undefined}
                   />
                 ))}
               </tr>
@@ -107,21 +133,42 @@ export function PlayProofs({ room, handNo, settled, gameOver, view }: {
   );
 }
 
-function ProofCell({ room, hand, seat, proof, checking }: {
+function unpublishedStatus(kind: "DRAW" | "COMPLETION", state: ProofState | undefined) {
+  if (state === "preparing" || state === "proving") return `${kind} GENERATING`;
+  if (state === "verifying") return `${kind} VERIFYING`;
+  if (state === "failed") return `${kind} RETRYING`;
+  if (state === "verified") return `${kind} PUBLISHED`;
+  return undefined;
+}
+
+function ProofCell({
+  room,
+  hand,
+  seat,
+  proof,
+  checking,
+  drawState,
+  completionState,
+}: {
   room: string;
   hand: number;
   seat: number;
   proof?: ProofMeta;
   checking: boolean;
+  drawState?: ProofState;
+  completionState?: ProofState;
 }) {
-  if (!proof) {
+  const drawStatus = unpublishedStatus("DRAW", drawState);
+  const completionStatus = unpublishedStatus("COMPLETION", completionState);
+
+  if (!proof && !drawStatus && !completionStatus) {
     return <td><span className={styles.proofEmpty}>{hand === 0 ? "NO CHALLENGE" : "WAITING"}</span></td>;
   }
 
   return (
     <td>
       <span className={styles.proofCell}>
-        {proof.draw_published ? (
+        {proof?.draw_published ? (
           <Link
             href={`/room/${room}/proofs/${hand}/${seat}/draw`}
             target="_blank"
@@ -129,10 +176,12 @@ function ProofCell({ room, hand, seat, proof, checking }: {
           >
             DRAW PROOF
           </Link>
-        ) : (
+        ) : drawStatus ? (
+          <span>{drawStatus}</span>
+        ) : proof ? (
           <span>DRAW PENDING</span>
-        )}
-        {proof.completion_published ? (
+        ) : null}
+        {proof?.completion_published ? (
           <Link
             href={`/room/${room}/proofs/${hand}/${seat}/completion`}
             target="_blank"
@@ -140,9 +189,11 @@ function ProofCell({ room, hand, seat, proof, checking }: {
           >
             COMPLETION PROOF
           </Link>
-        ) : (
+        ) : completionStatus ? (
+          <strong>{completionStatus}</strong>
+        ) : proof ? (
           <strong>{proof.finished ? checking ? "CHECKING" : "MISSED" : "IN PLAY"}</strong>
-        )}
+        ) : null}
       </span>
     </td>
   );

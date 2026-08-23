@@ -569,15 +569,6 @@ impl Room {
         if !hand.game.settled {
             return Err("hand not settled");
         }
-        if self.challenge_awarded
-            || self
-                .seats
-                .get(seat)
-                .is_some_and(|player| player.ready_hand == Some(hand.id))
-        {
-            return Err("challenge review finished");
-        }
-
         if hand.no != hand_no {
             return Err("wrong challenge hand");
         }
@@ -625,6 +616,12 @@ impl Room {
             challenge.points = Some(claim.points);
         }
         self.seats[claim.seat].proof_points = claim.next_points;
+        if self.challenge_awarded {
+            let bonuses = challenge_bonuses(self.config.stack, &self.seats);
+            for (seat, bonus) in self.seats.iter_mut().zip(bonuses) {
+                seat.challenge_bonus = bonus;
+            }
+        }
         self.changed(claim.rev);
     }
 
@@ -768,6 +765,7 @@ impl Ceremony {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct Seat {
     pub(super) token_hash: TokenHash,
     pub(super) name: String,

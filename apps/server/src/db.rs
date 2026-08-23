@@ -83,6 +83,7 @@ pub struct ClaimUpdate {
     pub points: u32,
     pub prior_points: u64,
     pub next_points: u64,
+    pub bonuses: Option<Vec<u32>>,
     pub rev: u64,
     pub next_rev: u64,
 }
@@ -684,12 +685,30 @@ impl Db {
             return Err(io::Error::other("seat points mismatch").into());
         }
 
-        let changed = query("UPDATE rooms SET rev = $2 WHERE id = $1 AND rev = $3")
-            .bind(claim.room)
-            .bind(i64::try_from(claim.next_rev)?)
-            .bind(i64::try_from(claim.rev)?)
-            .execute(&mut *tx)
-            .await?;
+        if let Some(bonuses) = &claim.bonuses {
+            for (seat, bonus) in bonuses.iter().copied().enumerate() {
+                let changed =
+                    query("UPDATE seats SET challenge_bonus = $3 WHERE room_id = $1 AND seat = $2")
+                        .bind(claim.room)
+                        .bind(i32::try_from(seat)?)
+                        .bind(i64::from(bonus))
+                        .execute(&mut *tx)
+                        .await?;
+
+                one_row(changed)?;
+            }
+        }
+
+        let changed = query(
+            "UPDATE rooms SET rev = $2 \
+             WHERE id = $1 AND rev = $3 AND challenge_awarded = $4",
+        )
+        .bind(claim.room)
+        .bind(i64::try_from(claim.next_rev)?)
+        .bind(i64::try_from(claim.rev)?)
+        .bind(claim.bonuses.is_some())
+        .execute(&mut *tx)
+        .await?;
 
         one_row(changed)?;
         tx.commit().await?;

@@ -30,7 +30,7 @@ use game_core::{Action, Card, LegalActions, Rank, State, Street, Suit};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio::time::sleep;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
@@ -259,6 +259,12 @@ enum ServerMessage {
         hand_no: u64,
         stage: &'static str,
     },
+}
+
+struct ProofReply {
+    kind: &'static str,
+    hand_no: u64,
+    result: Result<(), &'static str>,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
@@ -1377,6 +1383,10 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
         return;
     }
 
+    // proof persistence survives disconnect
+    let (proof_tx, mut proof_rx) = mpsc::unbounded_channel();
+    let mut pending_proofs = HashSet::new();
+
     loop {
         tokio::select! {
             message = socket.recv() => {
@@ -1399,49 +1409,105 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                     }
                     Message::Ping(_) | Message::Pong(_) => continue,
                 };
-                let (result, proof_kind) = match message {
-                    ClientMessage::Fold => (apply_action(&state, id, seat, Action::Fold).await, None),
-                    ClientMessage::Check => (apply_action(&state, id, seat, Action::Check).await, None),
-                    ClientMessage::Call => (apply_action(&state, id, seat, Action::Call).await, None),
+                let result = match message {
+                    ClientMessage::Fold => apply_action(&state, id, seat, Action::Fold).await,
+                    ClientMessage::Check => apply_action(&state, id, seat, Action::Check).await,
+                    ClientMessage::Call => apply_action(&state, id, seat, Action::Call).await,
                     ClientMessage::RaiseTo { to } => {
-                        (apply_action(&state, id, seat, Action::RaiseTo(to)).await, None)
+                        apply_action(&state, id, seat, Action::RaiseTo(to)).await
                     }
                     ClientMessage::ChallengeCommit {
                         hand_no,
                         commitment,
                     } => {
-                        (challenge_room(&state, id, seat, hand_no, &commitment).await, None)
+                        challenge_room(&state, id, seat, hand_no, &commitment).await
                     }
                     ClientMessage::ChallengeDraw {
                         hand_no,
                         proof,
                         public_inputs,
                     } => {
-                        (
-                            draw_room(&state, id, seat, hand_no, &proof, &public_inputs).await,
-                            Some(("draw", hand_no)),
-                        )
+                        let key = ("draw", hand_no);
+                        if !pending_proofs.insert(key) {
+                            let _ = send_message(
+                                &mut socket,
+                                &ServerMessage::ProofError {
+                                    kind: key.0,
+                                    hand_no: key.1,
+                                    message: "proof already pending",
+                                },
+                            )
+                            .await;
+                            continue;
+                        }
+                        let state = state.clone();
+                        let proof_tx = proof_tx.clone();
+                        tokio::spawn(async move {
+                            let reply = ProofReply {
+                                kind: key.0,
+                                hand_no: key.1,
+                                result: draw_room(
+                                    &state,
+                                    id,
+                                    seat,
+                                    hand_no,
+                                    &proof,
+                                    &public_inputs,
+                                )
+                                .await,
+                            };
+                            let _ = proof_tx.send(reply);
+                        });
+                        continue;
                     }
                     ClientMessage::ChallengeClaim {
                         hand_no,
                         proof,
                         public_inputs,
                     } => {
-                        (
-                            claim_room(&state, id, seat, hand_no, &proof, &public_inputs).await,
-                            Some(("completion", hand_no)),
-                        )
+                        let key = ("completion", hand_no);
+                        if !pending_proofs.insert(key) {
+                            let _ = send_message(
+                                &mut socket,
+                                &ServerMessage::ProofError {
+                                    kind: key.0,
+                                    hand_no: key.1,
+                                    message: "proof already pending",
+                                },
+                            )
+                            .await;
+                            continue;
+                        }
+                        let state = state.clone();
+                        let proof_tx = proof_tx.clone();
+                        tokio::spawn(async move {
+                            let reply = ProofReply {
+                                kind: key.0,
+                                hand_no: key.1,
+                                result: claim_room(
+                                    &state,
+                                    id,
+                                    seat,
+                                    hand_no,
+                                    &proof,
+                                    &public_inputs,
+                                )
+                                .await,
+                            };
+                            let _ = proof_tx.send(reply);
+                        });
+                        continue;
                     }
                     ClientMessage::Ready { entropy } => match entropy {
-                        Some(entropy) => (ready_room_entropy(&state, id, seat, &entropy).await, None),
-                        None => (Err("deal entropy required"), None),
+                        Some(entropy) => ready_room_entropy(&state, id, seat, &entropy).await,
+                        None => Err("deal entropy required"),
                     },
-                    ClientMessage::Finish => (finish_room(&state, id, seat).await, None),
+                    ClientMessage::Finish => finish_room(&state, id, seat).await,
                     ClientMessage::DealEntropy { entropy } => {
-                        (single_entropy(&state, id, seat, &entropy).await, None)
+                        single_entropy(&state, id, seat, &entropy).await
                     }
                     ClientMessage::DeckKey { hand_no, key, proof } => {
-                        (deck_key(&state, id, seat, hand_no, key, proof).await, None)
+                        deck_key(&state, id, seat, hand_no, key, proof).await
                     }
                     ClientMessage::DeckShuffle {
                         hand_no,
@@ -1449,7 +1515,7 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                         output,
                         proof,
                         public_inputs,
-                    } => (
+                    } =>
                         deck_shuffle(&state, id, seat, SubmittedShuffle {
                             hand_no,
                             context: &context,
@@ -1458,47 +1524,39 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                             public_inputs: &public_inputs,
                         })
                         .await,
-                        None,
-                    ),
-                    ClientMessage::DeckShares { hand_no, context, shares } => (
+                    ClientMessage::DeckShares { hand_no, context, shares } =>
                         deck_shares(&state, id, seat, hand_no, &context, shares).await,
-                        None,
-                    ),
-                    ClientMessage::DeckPrivateReady { hand_no } => (
+                    ClientMessage::DeckPrivateReady { hand_no } =>
                         deck_private_ready(&state, id, seat, hand_no).await,
-                        None,
-                    ),
-                    ClientMessage::DeckOpen { hand_no, secret } => (
+                    ClientMessage::DeckOpen { hand_no, secret } =>
                         deck_open(&state, id, seat, hand_no, &secret).await,
-                        None,
-                    ),
                     ClientMessage::Auth { .. } => {
                         send_error(&mut socket, "already authenticated").await;
                         continue;
                     }
                 };
 
-                match (result, proof_kind) {
-                    (Err(err), Some((kind, hand_no))) => {
-                        let _ = send_message(
-                            &mut socket,
-                            &ServerMessage::ProofError {
-                                kind,
-                                hand_no,
-                                message: err,
-                            },
-                        )
-                        .await;
+                if let Err(err) = result {
+                    send_error(&mut socket, err).await;
+                }
+            }
+            proof = proof_rx.recv() => {
+                if let Some(reply) = proof {
+                    pending_proofs.remove(&(reply.kind, reply.hand_no));
+                    let message = match reply.result {
+                        Ok(()) => ServerMessage::ProofAccepted {
+                            kind: reply.kind,
+                            hand_no: reply.hand_no,
+                        },
+                        Err(message) => ServerMessage::ProofError {
+                            kind: reply.kind,
+                            hand_no: reply.hand_no,
+                            message,
+                        },
+                    };
+                    if !send_message(&mut socket, &message).await {
+                        return;
                     }
-                    (Err(err), None) => send_error(&mut socket, err).await,
-                    (Ok(()), Some((kind, hand_no))) => {
-                        let _ = send_message(
-                            &mut socket,
-                            &ServerMessage::ProofAccepted { kind, hand_no },
-                        )
-                        .await;
-                    }
-                    (Ok(()), None) => {}
                 }
             }
             change = changes.recv() => {
@@ -2255,6 +2313,15 @@ async fn claim_room(
         return Err("challenge proof mismatch");
     }
 
+    // late proof updates final ranking
+    let bonuses = if room.challenge_awarded {
+        let mut seats = room.seats.clone();
+        seats[pending.seat].proof_points = pending.next_points;
+        Some(challenge_bonuses(room.config.stack, &seats))
+    } else {
+        None
+    };
+
     state
         .db
         .claim(ClaimUpdate {
@@ -2273,6 +2340,7 @@ async fn claim_room(
             points: pending.points,
             prior_points: pending.prior_points,
             next_points: pending.next_points,
+            bonuses,
             rev: room.rev,
             next_rev: pending.rev,
         })
@@ -2318,10 +2386,6 @@ fn persisted_claim(
     }
 
     let player = room.seats.get(seat).ok_or("invalid player")?;
-    let hand = room.hand.as_ref().ok_or("game not started")?;
-    if room.challenge_awarded || player.ready_hand == Some(hand.id) {
-        return Err("challenge review finished");
-    }
     let points = u32::from(POINTS);
     let next_points = player
         .proof_points
@@ -5208,10 +5272,33 @@ mod tests {
         finished.config.hands = 2;
         let pending = finished.stage_finish(0).unwrap();
         finished.commit_finish(0, pending);
-        assert_eq!(
-            finished.stage_claim(0, 1).err(),
-            Some("challenge review finished")
-        );
+        let claim = finished.stage_claim(0, 1).unwrap();
+        finished.commit_claim(claim, [8; 32]);
+        let pending = finished.stage_finish(1).unwrap();
+        finished.commit_finish(1, pending);
+
+        assert_eq!(finished.seats[0].proof_points, u64::from(POINTS));
+        assert_eq!(finished.seats[0].challenge_bonus, 100);
+        assert_eq!(finished.seats[1].challenge_bonus, 84);
+    }
+
+    #[test]
+    fn late_claim_updates_final_bonus() {
+        let mut awarded = claimable_room();
+        awarded.config.hands = 2;
+        let first = awarded.stage_finish(0).unwrap();
+        awarded.commit_finish(0, first);
+        let last = awarded.stage_finish(1).unwrap();
+        awarded.commit_finish(1, last);
+
+        assert_eq!(awarded.seats[0].challenge_bonus, 92);
+        assert_eq!(awarded.seats[1].challenge_bonus, 92);
+
+        let claim = awarded.stage_claim(0, 1).unwrap();
+        awarded.commit_claim(claim, [8; 32]);
+
+        assert_eq!(awarded.seats[0].challenge_bonus, 100);
+        assert_eq!(awarded.seats[1].challenge_bonus, 84);
     }
 
     #[test]
@@ -6640,6 +6727,7 @@ mod tests {
             points: claim.points,
             prior_points: claim.prior_points,
             next_points: claim.next_points,
+            bonuses: None,
             rev: room.rev,
             next_rev: claim.rev,
         })
@@ -6682,6 +6770,7 @@ mod tests {
                 points: other.points,
                 prior_points: other.prior_points,
                 next_points: other.next_points,
+                bonuses: None,
                 rev,
                 next_rev: other.rev,
             })
