@@ -70,7 +70,7 @@ type ServerMessage =
   | { type: "proof_error"; kind: ProofKind; message: string }
   | { type: "error"; message: string }
   | { type: "deck_wait"; hand_no: number; stage: string }
-  | { type: "deck_key"; hand_no: number; start: string; context: string; server_key: PointValue; server_proof: ShareProof }
+  | { type: "deck_key"; hand_no: number; start: string; context: string; keys: Array<{ seat?: number; key: PointValue; proof: ShareProof }> }
   | { type: "deck_shuffle"; hand_no: number; participant: number; context: string; key: PointValue; deck: CipherValue[] }
   | { type: "deck_shares"; hand_no: number; context: string; deck: CipherValue[]; positions: number[] }
   | { type: "deck_private"; hand_no: number; context: string; keys: PointValue[]; cards: Array<{ position: number; card: CipherValue; shares: Array<{ participant: number; position: number; context: string; value: PointValue; proof: ShareProof }> }> }
@@ -293,11 +293,13 @@ export function MultiplayerGame({ room }: { room: string }) {
       try {
         const secret = deckSecret(room, message.hand_no);
         if (message.type === "deck_key") {
-          const start = deckBytes(message.start);
-          if (!(await verifyKey(message.server_key, message.server_proof, start))) {
-            throw new Error("invalid server deck key");
+          let head = deckBytes(message.start);
+          for (const [seq, entry] of message.keys.entries()) {
+            if (!(await verifyKey(entry.key, entry.proof, head))) {
+              throw new Error("invalid deck key");
+            }
+            head = transcriptNext(head, seq, "key", entry.seat, keyPayload(entry.key, entry.proof));
           }
-          const head = transcriptNext(start, 0, "key", undefined, keyPayload(message.server_key, message.server_proof));
           if (deckHex(head) !== message.context) throw new Error("invalid deck transcript");
           const key = await publicKey(secret);
           const proof = await keyProof(secret, deckBytes(message.context));

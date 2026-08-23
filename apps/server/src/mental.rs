@@ -252,14 +252,24 @@ impl MentalDeck {
         });
         self.private_ready.fill(false);
         let context = self.head;
-        let opening = self.opening.as_mut().expect("deck opening");
-        for &position in &opening.positions {
+        let positions = self
+            .opening
+            .as_ref()
+            .expect("deck opening")
+            .positions
+            .clone();
+        let mut payload = Vec::new();
+        for position in positions {
             let nonce = share_nonce(self.server_secret, context, position);
             let value = prove_share(self.deck[position], self.server_secret, nonce, &context);
-            opening
+            self.opening
+                .as_mut()
+                .expect("deck opening")
                 .shares
                 .insert((SERVER, position), (value.0, value.1, context));
+            payload.extend(share_payload(position, value.0, value.1));
         }
+        self.record("share", None, &payload);
         Ok(())
     }
 
@@ -309,9 +319,7 @@ impl MentalDeck {
             if !verify_share(self.deck[position], key, value, proof, &context) {
                 return Err("invalid deck share proof");
             }
-            payload.extend_from_slice(&(position as u64).to_be_bytes());
-            payload.extend_from_slice(&point_bytes(value));
-            payload.extend_from_slice(&proof_payload(proof));
+            payload.extend(share_payload(position, value, proof));
             parsed.push((position, value, proof));
         }
         let opening = self.opening.as_mut().expect("deck opening");
@@ -454,7 +462,7 @@ impl MentalDeck {
     }
 
     pub fn finish(&mut self) -> Result<[u8; CARD_COUNT], &'static str> {
-        if !self.all_secrets() {
+        if self.complete || !self.all_secrets() {
             return Err("deck openings missing");
         }
         let secrets = self.secrets.iter().flatten().copied().collect::<Vec<_>>();
@@ -465,6 +473,7 @@ impl MentalDeck {
                 .collect::<Vec<_>>();
             open(self.deck[position], &shares).expect("verified deck opening")
         });
+        self.record("opening", None, &scalar_bytes(self.server_secret));
         self.complete = true;
         self.record("complete", None, &deck);
         Ok(deck)
@@ -608,6 +617,15 @@ fn proof_payload(proof: Proof) -> Vec<u8> {
         point_bytes(proof.a).as_slice(),
         point_bytes(proof.b).as_slice(),
         scalar_bytes(proof.z).as_slice(),
+    ]
+    .concat()
+}
+
+fn share_payload(position: usize, value: Affine, proof: Proof) -> Vec<u8> {
+    [
+        (position as u64).to_be_bytes().as_slice(),
+        point_bytes(value).as_slice(),
+        proof_payload(proof).as_slice(),
     ]
     .concat()
 }

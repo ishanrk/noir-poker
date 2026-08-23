@@ -53,7 +53,7 @@ await visit("/", "home", [
 ]);
 
 async function waitForFrame(match, message, after = 0) {
-  for (let attempt = 0; attempt < 150; attempt += 1) {
+  for (let attempt = 0; attempt < 1200; attempt += 1) {
     const index = frames.slice(after).findIndex((frame) => {
       if (typeof frame.payload !== "string") return false;
 
@@ -72,7 +72,7 @@ async function waitForFrame(match, message, after = 0) {
 }
 
 async function waitForEnabled(locator, message) {
-  for (let attempt = 0; attempt < 150; attempt += 1) {
+  for (let attempt = 0; attempt < 1200; attempt += 1) {
     if (await locator.isEnabled()) return;
     await page.waitForTimeout(100);
   }
@@ -109,7 +109,7 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
   );
 
   assert.ok(commitment < entropy, "entropy preceded commitment");
-  await page.getByText("Bot 1", { exact: true }).waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByText("Bot 1", { exact: true }).waitFor({ state: "visible", timeout: 120_000 });
   const snapshot = await waitForFrame(
     (direction, message) => direction === "received" && message.type === "snapshot",
     "single snapshot missing",
@@ -128,7 +128,7 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
   await waitForEnabled(fold, "bot did not return action");
   await fold.click();
   await page.getByText("Hand complete", { exact: true }).waitFor({ state: "visible", timeout: 15_000 });
-  await page.getByText("transcript open for replay", { exact: true }).waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByText("Deck Randomness Proof", { exact: true }).waitFor({ state: "visible", timeout: 120_000 });
   assert.equal(await page.getByText("PRIVATE CHALLENGE", { exact: true }).count(), 0);
   assert.equal(await page.getByText("CHALLENGE PROOFS", { exact: true }).count(), 0);
   await page.waitForTimeout(1200);

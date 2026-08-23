@@ -1,4 +1,5 @@
 import circuit from "../zk/deck_shuffle.json" with { type: "json" };
+import { deckShuffleVk } from "../zk/deck-shuffle-vk";
 
 import { bytes, type CipherValue, type PointValue } from "@/lib/deck-crypto";
 
@@ -46,7 +47,7 @@ export async function verifyShuffle(
   proofValue: string,
   publicValue: string,
 ) {
-  const [{ BackendType, Barretenberg, UltraHonkBackend }] = await Promise.all([
+  const [{ BackendType, Barretenberg, UltraHonkVerifierBackend }] = await Promise.all([
     import("@aztec/bb.js"),
   ]);
   const publicInputs = split(unbase64(publicValue));
@@ -54,10 +55,17 @@ export async function verifyShuffle(
   if (publicInputs.length !== expected.length || publicInputs.some((value, index) => value !== expected[index])) {
     throw new Error("shuffle public inputs mismatch");
   }
-  const api = await Barretenberg.new({ backend: BackendType.WasmWorker });
+  const api = await Barretenberg.new({ backend: BackendType.WasmWorker, srsSize: 2 ** 17 });
   try {
-    const backend = new UltraHonkBackend(circuit.bytecode, api);
-    return backend.verifyProof({ proof: unbase64(proofValue), publicInputs });
+    const backend = new UltraHonkVerifierBackend(api);
+    return await backend.verifyProof(
+      {
+        proof: unbase64(proofValue),
+        publicInputs,
+        verificationKey: unbase64(deckShuffleVk),
+      },
+      { verifierTarget: "noir-recursive" },
+    );
   } finally {
     await api.destroy();
   }

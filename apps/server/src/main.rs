@@ -226,8 +226,7 @@ enum ServerMessage {
         hand_no: u64,
         start: String,
         context: String,
-        server_key: PointWire,
-        server_proof: ProofWire,
+        keys: Vec<KeyView>,
     },
     DeckShuffle {
         hand_no: u64,
@@ -262,6 +261,14 @@ struct PrivateCardView {
     position: usize,
     card: CipherWire,
     shares: Vec<ShareWire>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct KeyView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seat: Option<usize>,
+    key: PointWire,
+    proof: ProofWire,
 }
 
 struct SubmittedShuffle<'a> {
@@ -1051,12 +1058,19 @@ async fn join_room(
         return Err((StatusCode::CONFLICT, "single room full"));
     }
     let (token, token_hash) = room_token(&room);
-    let seat = join_fair(&state.db, id, &mut room, token_hash, share)
-        .await
-        .map_err(|err| match err {
-            "room full" => (StatusCode::CONFLICT, err),
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, err),
-        })?;
+    let seat = join_fair(
+        &state.db,
+        id,
+        &mut room,
+        token_hash,
+        share,
+        state.deck_proof.is_some(),
+    )
+    .await
+    .map_err(|err| match err {
+        "room full" => (StatusCode::CONFLICT, err),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, err),
+    })?;
 
     Ok(Json(SeatResponse {
         room: room_code(id),
@@ -1072,6 +1086,7 @@ async fn join_fair(
     room: &mut Room,
     token_hash: TokenHash,
     share: [u8; 32],
+    mental: bool,
 ) -> Result<usize, &'static str> {
     let seat = room.next_seat().map_err(|_| "room full")?;
     let next_rev = room.rev.checked_add(1).ok_or("revision limit reached")?;
@@ -1100,12 +1115,22 @@ async fn join_fair(
         no: 0,
         seed,
         starting_stacks: stacks.clone().expect("starting stacks"),
-        game: State::hidden(
-            0,
-            &stacks.clone().expect("starting stacks"),
-            room.config.small_blind,
-            room.config.big_blind,
-        ),
+        game: if mental {
+            State::hidden(
+                0,
+                &stacks.clone().expect("starting stacks"),
+                room.config.small_blind,
+                room.config.big_blind,
+            )
+        } else {
+            State::new(
+                seed,
+                0,
+                &stacks.clone().expect("starting stacks"),
+                room.config.small_blind,
+                room.config.big_blind,
+            )
+        },
         result: None,
         next_seq: 0,
         actions: Vec::new(),
@@ -1135,13 +1160,13 @@ async fn join_fair(
     )
     .await
     .map_err(|_| "cannot join room")?;
-    if let Some(hand_id) = hand_id {
+    if mental && let Some(hand_id) = hand_id {
         db.begin_deck(id, 0, hand_id)
             .await
             .map_err(|_| "cannot persist deck protocol")?;
     }
     room.commit_fair_join(token_hash, seat, share, game, next, next_rev);
-    if final_join {
+    if mental && final_join {
         room.deck = Some(new_deck(id, 0, 0, room.mode, room.config.players)?);
         room.mental = true;
     }
@@ -1206,12 +1231,23 @@ async fn single_entropy(
         })
         .ok_or("cannot derive deal seed")?;
     let stacks = vec![room.config.stack; room.config.players];
+    let mental = state.deck_proof.is_some();
     let hand = LiveHand {
         id: Uuid::new_v4(),
         no: 0,
         seed,
         starting_stacks: stacks.clone(),
-        game: State::hidden(0, &stacks, room.config.small_blind, room.config.big_blind),
+        game: if mental {
+            State::hidden(0, &stacks, room.config.small_blind, room.config.big_blind)
+        } else {
+            State::new(
+                seed,
+                0,
+                &stacks,
+                room.config.small_blind,
+                room.config.big_blind,
+            )
+        },
         result: None,
         next_seq: 0,
         actions: Vec::new(),
@@ -1242,14 +1278,18 @@ async fn single_entropy(
     )
     .await
     .map_err(|_| "cannot start single deal")?;
-    state
-        .db
-        .begin_deck(id, hand.no, hand.id)
-        .await
-        .map_err(|_| "cannot persist deck protocol")?;
+    if mental {
+        state
+            .db
+            .begin_deck(id, hand.no, hand.id)
+            .await
+            .map_err(|_| "cannot persist deck protocol")?;
+    }
     room.commit_single_start(tokens, hand, next, next_rev);
-    room.deck = Some(new_deck(id, 0, 0, room.mode, room.config.players)?);
-    room.mental = true;
+    if mental {
+        room.deck = Some(new_deck(id, 0, 0, room.mode, room.config.players)?);
+        room.mental = true;
+    }
     drop(room);
     drive_bots(state, id).await
 }
@@ -2368,8 +2408,10 @@ async fn ready_room_entropy_once(
         None => None,
         Some(_) => None,
     };
-    let next_deck = next_hand
-        .as_ref()
+    let next_deck = room
+        .mental
+        .then_some(next_hand.as_ref())
+        .flatten()
         .map(|hand| {
             new_deck(
                 id,
@@ -2394,7 +2436,9 @@ async fn ready_room_entropy_once(
     )
     .await
     .map_err(|_| "cannot persist deal contribution")?;
-    if let Some(hand) = next_hand.as_ref() {
+    if room.mental
+        && let Some(hand) = next_hand.as_ref()
+    {
         state
             .db
             .begin_deck(id, hand.no, hand.id)
@@ -2483,8 +2527,6 @@ fn room_message(id: Uuid, room: &Room, seat: usize) -> ServerMessage {
 fn deck_message(room: &Room, seat: usize) -> Option<ServerMessage> {
     let deck = room.deck.as_ref()?;
     let hand = room.hand.as_ref()?;
-    let server = deck.keys[0]?;
-
     if let Some(next) = deck.next_key() {
         return Some(if next == seat {
             ServerMessage::DeckKey {
@@ -2494,8 +2536,20 @@ fn deck_message(room: &Room, seat: usize) -> Option<ServerMessage> {
                     deck.hand_no,
                 )),
                 context: encode_hex(deck.head),
-                server_key: point_wire(server.0),
-                server_proof: proof_wire(server.1),
+                keys: deck
+                    .keys
+                    .iter()
+                    .enumerate()
+                    .map_while(|(participant, entry)| {
+                        entry.map(|(key, proof)| KeyView {
+                            seat: participant
+                                .checked_sub(1)
+                                .and_then(|index| deck.seats.get(index).copied()),
+                            key: point_wire(key),
+                            proof: proof_wire(proof),
+                        })
+                    })
+                    .collect(),
             }
         } else {
             ServerMessage::DeckWait {
@@ -2797,18 +2851,18 @@ fn new_deck(
     dealer: usize,
     mode: RoomMode,
     players: usize,
-) -> Result<MentalDeck, &'static str> {
+) -> Result<Box<MentalDeck>, &'static str> {
     let human = (0..players)
         .map(|seat| mode != RoomMode::Single || seat == 0)
         .collect();
-    Ok(MentalDeck::new(
+    Ok(Box::new(MentalDeck::new(
         room,
         hand_no,
         dealer,
         human,
         secure_scalar()?,
         secure_scalar()?,
-    ))
+    )))
 }
 
 async fn finish_pending_challenges(
@@ -5077,7 +5131,7 @@ mod tests {
         let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();
@@ -5119,7 +5173,7 @@ mod tests {
         let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();
@@ -6233,7 +6287,7 @@ mod tests {
         let bb = std::env::var("BB_PATH").expect("BB_PATH");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();
