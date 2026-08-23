@@ -93,6 +93,7 @@ pub(super) struct Room {
     pub(super) deck: Option<Box<MentalDeck>>,
     pub(super) last_deck: Option<Box<MentalDeck>>,
     pub(super) mental: bool,
+    pub(super) action_pause: bool,
     pub(super) rev: u64,
     pub(super) notify: broadcast::Sender<u64>,
 }
@@ -141,6 +142,7 @@ impl Room {
             deck: None,
             last_deck: None,
             mental: false,
+            action_pause: false,
             rev: 0,
             notify,
         })

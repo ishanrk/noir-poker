@@ -385,6 +385,7 @@ export function MultiplayerGame({ room }: { room: string }) {
       }
 
       if (message.type.startsWith("deck_")) {
+        setWaiting(undefined);
         void handleDeck(message as Extract<ServerMessage, { type: `deck_${string}` }>);
         return;
       }
@@ -733,6 +734,16 @@ export function MultiplayerGame({ room }: { room: string }) {
   if (seat === undefined) return <p className="table-status">Loading room…</p>;
   if (seat === null) return <div className="room-status"><strong>No seat for this room</strong><Link href="/">Back to lobby</Link></div>;
   if (waiting) {
+    if (waiting.mode === "single") {
+      return (
+        <div className={`waiting-room${error ? " ui-shake" : ""}`}>
+          <p className="protocol-label">Room {room}</p>
+          <h2>Preparing the table</h2>
+          <p>Creating the private deck</p>
+          {error && <p className="form-error">{error}</p>}
+        </div>
+      );
+    }
     return (
       <div className={`waiting-room${error ? " ui-shake" : ""}`}>
         <p className="protocol-label">Room {room}</p>
@@ -817,6 +828,7 @@ export function MultiplayerGame({ room }: { room: string }) {
         error={error}
         disabled={actionPending || notices.length > 0 || !connected}
         notice={notice}
+        stage={deckStage}
         finish={finish}
         raiseTo={raiseTo}
         setRaiseTo={setRaiseTo}

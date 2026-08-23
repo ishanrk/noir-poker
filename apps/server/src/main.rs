@@ -1294,7 +1294,9 @@ async fn single_entropy(
         room.mental = true;
     }
     drop(room);
-    start_bots(state, id);
+    if !mental {
+        start_bots(state, id, true);
+    }
     Ok(())
 }
 
@@ -1678,7 +1680,7 @@ async fn deck_shares(
         let _ = room.notify.send(rev);
     }
     if drive {
-        start_bots(state, id);
+        start_bots(state, id, false);
     }
     Ok(())
 }
@@ -1729,7 +1731,7 @@ async fn deck_private_ready(
         }
         let _ = room.notify.send(rev);
     }
-    start_bots(state, id);
+    start_bots(state, id, true);
     Ok(())
 }
 
@@ -1788,13 +1790,13 @@ async fn deck_open(
     Ok(())
 }
 
-fn queue_open(room: &mut Room) -> Result<(), &'static str> {
+fn queue_open(room: &mut Room) -> Result<bool, &'static str> {
     let hand = room.hand.as_ref().ok_or("game not started")?;
     if !hand.game.round_complete || hand.game.settled || hand.game.fold_winner.is_some() {
-        return Ok(());
+        return Ok(false);
     }
     if hand.game.street == Street::River {
-        return Ok(());
+        return Ok(false);
     }
     let next = hand.game.next_card;
     let positions = match hand.game.street {
@@ -1805,7 +1807,8 @@ fn queue_open(room: &mut Room) -> Result<(), &'static str> {
     room.deck
         .as_mut()
         .ok_or("deck protocol missing")?
-        .begin_open(OpenKind::Board, positions)
+        .begin_open(OpenKind::Board, positions)?;
+    Ok(true)
 }
 
 fn random_permutation() -> Result<[usize; ENCRYPTED_CARD_COUNT], &'static str> {
@@ -1877,7 +1880,7 @@ async fn apply_action(
     action: Action,
 ) -> Result<(), &'static str> {
     apply_action_once(state, id, seat, action).await?;
-    start_bots(state, id);
+    start_bots(state, id, true);
     Ok(())
 }
 
@@ -1889,6 +1892,9 @@ async fn apply_action_once(
 ) -> Result<(), &'static str> {
     let room = find_room(state, id).await.ok_or("room not found")?;
     let mut room = room.lock().await;
+    if room.action_pause {
+        return Err("action pending");
+    }
     let mut next = room.stage_action(seat, action)?;
 
     if next.facts.is_some() {
@@ -1920,36 +1926,59 @@ async fn apply_action_once(
         })
         .await
         .map_err(|_| "cannot persist action")?;
+    room.action_pause = true;
     room.commit_action(next);
-    queue_open(&mut room)?;
     Ok(())
 }
 
-async fn drive_bots(state: &AppState, id: Uuid) -> Result<(), &'static str> {
+async fn drive_bots(state: &AppState, id: Uuid, mut pause: bool) -> Result<(), &'static str> {
     // bot loop bound
     for _ in 0..128 {
+        if pause {
+            let pending = {
+                let room = find_room(state, id).await.ok_or("room not found")?;
+                let room = room.lock().await;
+
+                room.action_pause || next_bot_action(id, &room)?.is_some()
+            };
+            if !pending {
+                return Ok(());
+            }
+            sleep(Duration::from_secs(2)).await;
+        }
         let next = {
             let room = find_room(state, id).await.ok_or("room not found")?;
-            let room = room.lock().await;
+            let mut room = room.lock().await;
 
-            next_bot_action(id, &room)?
+            room.action_pause = false;
+            if queue_open(&mut room)? {
+                let _ = room.notify.send(room.rev);
+                return Ok(());
+            }
+
+            let next = next_bot_action(id, &room)?;
+            if next.is_none() {
+                let _ = room.notify.send(room.rev);
+            }
+
+            next
         };
 
         let Some((seat, action)) = next else {
             return Ok(());
         };
 
-        sleep(Duration::from_secs(2)).await;
         apply_action_once(state, id, seat, action).await?;
+        pause = true;
     }
 
     Err("bot action limit")
 }
 
-fn start_bots(state: &AppState, id: Uuid) {
+fn start_bots(state: &AppState, id: Uuid, pause: bool) {
     let state = state.clone();
     tokio::spawn(async move {
-        if let Err(err) = drive_bots(&state, id).await {
+        if let Err(err) = drive_bots(&state, id, pause).await {
             eprintln!("bot action error: {err}");
         }
     });
@@ -1959,13 +1988,12 @@ fn next_bot_action(room: Uuid, state: &Room) -> Result<Option<(usize, Action)>, 
     if state.mode != RoomMode::Single {
         return Ok(None);
     }
-    if state.mental && !state.deck.as_ref().is_some_and(|deck| deck.private_done()) {
-        return Ok(None);
-    }
-
     let hand = state.hand.as_ref().ok_or("game not started")?;
 
     if hand.game.settled || hand.game.round_complete || hand.game.turn == 0 {
+        return Ok(None);
+    }
+    if state.mental && !hand.game.hole_known(hand.game.turn) {
         return Ok(None);
     }
 
@@ -2376,7 +2404,7 @@ async fn ready_room_entropy(
 ) -> Result<(), &'static str> {
     ready_room_entropy_once(state, id, seat, entropy).await?;
     drive_bot_ready(state, id).await?;
-    start_bots(state, id);
+    start_bots(state, id, true);
     Ok(())
 }
 
@@ -2544,6 +2572,9 @@ fn room_message(id: Uuid, room: &Room, seat: usize) -> ServerMessage {
 }
 
 fn deck_message(room: &Room, seat: usize) -> Option<ServerMessage> {
+    if room.action_pause {
+        return None;
+    }
     let deck = room.deck.as_ref()?;
     let hand = room.hand.as_ref()?;
     if let Some(next) = deck.next_key() {
@@ -3155,6 +3186,7 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
         deck: None,
         last_deck: None,
         mental,
+        action_pause: false,
         current_challenges,
         next_challenges,
         rev,

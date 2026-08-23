@@ -100,6 +100,7 @@ type TableProps = {
   error?: string;
   disabled?: boolean;
   notice?: ActionNoticeView;
+  stage?: string;
   finish?: boolean;
   raiseTo: number;
   setRaiseTo: (to: number) => void;
@@ -212,6 +213,7 @@ export function Table({
   error,
   disabled = false,
   notice,
+  stage,
   finish = false,
   raiseTo,
   setRaiseTo,
@@ -255,6 +257,7 @@ export function Table({
 
   if (view.settled) [status, message] = ["Hand complete", "Pot settled"];
   if (result?.kind === "showdown") status = "Showdown";
+  if (stage) [status, message] = ["Dealing", stage];
   if (notice) {
     const mine = notice.player === viewer;
     noticeName = playerName(notice.player, viewer, view.mode);
