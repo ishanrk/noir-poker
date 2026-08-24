@@ -528,13 +528,18 @@ async function verifyPublic(viewer, owner, kind) {
 async function dismissTour(trace) {
   const guide = trace.page.locator(".proof-tour-note");
   await guide.waitFor({ timeout: 30_000 });
-  await guide.getByText("The last hand has a deck proof", { exact: true }).waitFor();
+  assert.equal(await trace.page.locator(".action-bar").getAttribute("aria-busy"), "true");
+  await until(
+    async () => await trace.page.locator('[data-proof-focus="true"]').count() === 1,
+    "proof tour target missing",
+  );
+  await guide.getByText("Deck proof from the last hand", { exact: true }).waitFor();
   await guide.getByRole("button", { name: "Next", exact: true }).click();
-  await guide.getByText("Each hand has a new challenge", { exact: true }).waitFor();
+  await guide.getByText("A new challenge for every hand", { exact: true }).waitFor();
   await guide.getByRole("button", { name: "Next", exact: true }).click();
-  await guide.getByText("Challenge proofs publish here", { exact: true }).waitFor();
+  await guide.getByText("Challenge proof history", { exact: true }).waitFor();
   await guide.getByRole("button", { name: "Next", exact: true }).click();
-  await guide.getByText("Challenge wins set the final bonus", { exact: true }).waitFor();
+  await guide.getByText("Leaderboard score and final bonus", { exact: true }).waitFor();
   await guide.getByRole("button", { name: "Okay", exact: true }).click();
   await guide.waitFor({ state: "hidden" });
 }
@@ -933,11 +938,11 @@ async function tableStress() {
       }
     }
     await Promise.all(
-      tables.flatMap(({ a, b }) => [a.page.waitForTimeout(2500), b.page.waitForTimeout(2500)]),
+      tables.flatMap(({ a, b }) => [a.page.waitForTimeout(6500), b.page.waitForTimeout(6500)]),
     );
     for (const { a, b } of tables) {
       for (const page of [a.page, b.page]) {
-        assert.equal(await page.locator(".game-finish").count(), 0, "game winner appeared before hand result delay");
+        assert.equal(await page.locator(".game-finish").count(), 0, "game winner appeared before bonus display delay");
       }
     }
     await Promise.all(

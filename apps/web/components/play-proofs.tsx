@@ -80,7 +80,7 @@ export function PlayProofs({
       player.completion?.handNo ?? handNo,
     ]),
   );
-  const firstHand = Math.max(0, latestHand - 4);
+  const firstHand = Math.max(0, latestHand - 3);
   const hands = Array.from({ length: latestHand - firstHand + 1 }, (_, index) => firstHand + index);
   const records = useMemo(
     () => new Map(history.map((proof) => [`${proof.seat}:${proof.hand_no}`, proof])),
@@ -97,7 +97,7 @@ export function PlayProofs({
         <table className={styles.proofTable}>
           <caption>
             CHALLENGE PROOFS
-            <span>Last five hands</span>
+            <span>Last four hands</span>
           </caption>
           <thead>
             <tr>

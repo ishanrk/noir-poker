@@ -274,7 +274,7 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
       <section className="deck-protocol">
         <header>
           <p className="protocol-label">Protocol walkthrough</p>
-          <h2>Follow the deck</h2>
+          <h2>Explanation of the Protocol</h2>
           <p>Ten steps from public keys to a local verification</p>
         </header>
         <nav className="deck-protocol-path" aria-label="Deck protocol steps">

@@ -406,20 +406,11 @@ html[data-noir-mode="aztec"] .aztec-guide {
   color: var(--aztec-muted);
 }
 
-html[data-noir-mode="aztec"] .aztec-guide summary {
-  width: fit-content;
-  color: var(--aztec-bronze);
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
 html[data-noir-mode="aztec"] .aztec-guide ol {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0;
-  margin: 16px 0 12px;
+  margin: 0 0 12px;
   padding: 0;
   counter-reset: aztec-guide;
   list-style: none;

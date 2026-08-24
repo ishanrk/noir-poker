@@ -28,6 +28,7 @@ type PlayerView = {
   bet: number;
   folded: boolean;
   challenge_wins: number;
+  challenge_score: number;
   challenge_bonus: number;
 };
 type ActionView = {
@@ -119,6 +120,8 @@ type TableProps = {
   stage?: string;
   finish?: boolean;
   bonusFocus?: boolean;
+  bonusApplied?: boolean;
+  bonusBase?: number[];
   raiseTo: number;
   setRaiseTo: (to: number) => void;
   onFold: () => void;
@@ -137,6 +140,22 @@ type TableProps = {
 const POSITIONS = [0, 1, 2, 3, 4, 5] as const;
 const PROOF_UI = false;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const challengeScore = (score: number) => score % 10 === 0
+  ? String(score / 10)
+  : (score / 10).toFixed(1);
+
+function deckStatus(stage: string): [string, string] {
+  if (stage.includes("shuffle") || stage.includes("proof") || stage.includes("verifying")) {
+    return ["Proving deck randomness", "Checking the encrypted shuffle proof"];
+  }
+  if (stage.includes("key") || stage.includes("collecting")) {
+    return ["Building the encrypted deck", "Each player adds a private key"];
+  }
+  if (stage.includes("opening") || stage.includes("decrypting") || stage.includes("cards")) {
+    return ["Opening the dealt cards", "Decrypting only the cards now in play"];
+  }
+  return ["Preparing the next hand", stage];
+}
 const playerName = (
   player: number,
   viewer: number,
@@ -244,6 +263,8 @@ export function Table({
   stage,
   finish = false,
   bonusFocus = false,
+  bonusApplied = false,
+  bonusBase,
   raiseTo,
   setRaiseTo,
   onFold,
@@ -276,9 +297,15 @@ export function Table({
   const handWinners = result
     ? [...new Set(result.awards.map((award) => award.player))]
     : [];
+  const players = view.players.map((player, seat) => ({
+    ...player,
+    stack: bonusFocus && !bonusApplied && bonusBase?.[seat] !== undefined
+      ? bonusBase[seat]
+      : player.stack,
+  }));
   const leaders = view.players
     .map((player, seat) => ({ ...player, seat }))
-    .sort((a, b) => b.challenge_wins - a.challenge_wins || a.seat - b.seat);
+    .sort((a, b) => b.challenge_score - a.challenge_score || a.seat - b.seat);
   let status = actions ? "Your turn" : "Waiting";
   let message = actions
     ? "Choose an action"
@@ -290,7 +317,7 @@ export function Table({
 
   if (view.settled) [status, message] = ["Hand complete", "Pot settled"];
   if (result?.kind === "showdown") status = "Showdown";
-  if (stage) [status, message] = ["Securing deck", stage];
+  if (stage) [status, message] = deckStatus(stage);
   if (notice) {
     const mine = notice.player === viewer;
     const name = playerName(notice.player, viewer, view.mode, view.players);
@@ -315,7 +342,6 @@ export function Table({
       data-room-mode={view.mode}
       aria-label="Six-max poker table"
     >
-      <div className="table-hand-count">Hand {view.hand_no + 1} of {view.total_hands}</div>
       {view.mode !== "single" && (
         <aside
           className="challenge-leaderboard"
@@ -323,18 +349,27 @@ export function Table({
           data-proof-tour="leaderboard"
         >
           <strong>Challenge Leaderboard</strong>
-          {bonusFocus && <em>Bonus chips added</em>}
+          {bonusFocus && <em>{bonusApplied ? "Bonus chips added" : "Adding bonus chips"}</em>}
           <ol>
             {leaders.map((player) => (
               <li key={player.seat}>
                 <span>{playerName(player.seat, viewer, view.mode, view.players)}</span>
-                <b>{player.challenge_wins}</b>
+                <b>{challengeScore(player.challenge_score)} points</b>
                 {player.challenge_bonus > 0 && <small>+{player.challenge_bonus.toLocaleString("en-US")}</small>}
+                {bonusFocus && bonusBase?.[player.seat] !== undefined && (
+                  <output>
+                    {bonusBase[player.seat].toLocaleString("en-US")}
+                    {bonusApplied
+                      ? ` plus ${player.challenge_bonus.toLocaleString("en-US")} equals ${player.stack.toLocaleString("en-US")}`
+                      : " before bonus"}
+                  </output>
+                )}
               </li>
             ))}
           </ol>
         </aside>
       )}
+      <div className="table-hand-count">Hand {view.hand_no + 1} of {view.total_hands}</div>
       {view.hand_no > 0 && <PreviousDealIntegrity room={room} hand={view.hand_no - 1} />}
 
       {PROOF_UI && (
@@ -401,7 +436,7 @@ export function Table({
         </div>
 
         {POSITIONS.map((position) => {
-          const player = view.players[position];
+          const player = players[position];
           const revealed = result?.revealed[position];
           const out = !!player && player.folded && player.stack === 0;
           const cards =
@@ -461,7 +496,7 @@ export function Table({
       )}
 
       <div className="action-bar" aria-label="Player actions" aria-busy={disabled}>
-        <div className="action-copy" data-stage={stage ? "crypto" : undefined} aria-live="polite">
+        <div key={stage ?? status} className="action-copy" data-stage={stage ? "crypto" : undefined} aria-live="polite">
           <span>{status}</span>
           <strong>{message}</strong>
         </div>

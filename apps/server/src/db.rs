@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::io;
 
-use challenge_core::PROTOCOL_VERSION;
+use challenge_core::{POINTS, PROTOCOL_VERSION};
 use game_core::Action;
 use sqlx::postgres::{PgConnection, PgPoolOptions, PgQueryResult, PgRow};
 use sqlx::{PgPool, Postgres, Row, Transaction, query};
@@ -1032,11 +1032,33 @@ impl Db {
         self.append_action_with_settlement(action, None).await
     }
 
+    #[cfg(test)]
     pub async fn append_action_with_settlement(
         &self,
         action: NewAction<'_>,
         settlement: Option<&NewSettlement>,
     ) -> DbResult<()> {
+        self.append_action_inner(action, settlement, false)
+            .await
+            .map(|_| ())
+    }
+
+    pub async fn append_scored_action_with_settlement(
+        &self,
+        action: NewAction<'_>,
+        settlement: Option<&NewSettlement>,
+        score_fold: bool,
+    ) -> DbResult<Option<u64>> {
+        self.append_action_inner(action, settlement, score_fold)
+            .await
+    }
+
+    async fn append_action_inner(
+        &self,
+        action: NewAction<'_>,
+        settlement: Option<&NewSettlement>,
+        score_fold: bool,
+    ) -> DbResult<Option<u64>> {
         let mut tx = self.pool.begin().await?;
         let (name, raise_to) = action_data(action.action);
 
@@ -1051,6 +1073,46 @@ impl Db {
         .bind(raise_to)
         .execute(&mut *tx)
         .await?;
+
+        let score = if score_fold {
+            let rows = query(
+                "SELECT hands.hand_no FROM hand_actions \
+                 JOIN hands ON hands.id = hand_actions.hand_id \
+                 WHERE hands.room_id = $1 AND hand_actions.player = $2 \
+                 AND hand_actions.action = 'fold' AND hands.hand_no <= $3 \
+                 ORDER BY hands.hand_no DESC",
+            )
+            .bind(action.room)
+            .bind(i32::try_from(action.player)?)
+            .bind(i64::try_from(action.hand_no)?)
+            .fetch_all(&mut *tx)
+            .await?;
+            let mut expected = i64::try_from(action.hand_no)?;
+            let mut streak = 0u32;
+            for row in rows {
+                if row.try_get::<i64, _>("hand_no")? != expected {
+                    break;
+                }
+                streak = streak.saturating_add(1);
+                if expected == 0 {
+                    break;
+                }
+                expected -= 1;
+            }
+            let penalty = fold_penalty(streak);
+            let row = query(
+                "UPDATE seats SET proof_points = GREATEST(0, proof_points - $3) \
+                 WHERE room_id = $1 AND seat = $2 RETURNING proof_points",
+            )
+            .bind(action.room)
+            .bind(i32::try_from(action.player)?)
+            .bind(i64::try_from(penalty.min(i64::MAX as u64))?)
+            .fetch_one(&mut *tx)
+            .await?;
+            Some(u64::try_from(row.try_get::<i64, _>("proof_points")?)?)
+        } else {
+            None
+        };
 
         if let Some(facts) = action.facts {
             for fact in facts {
@@ -1085,7 +1147,7 @@ impl Db {
             insert_settlement(&mut tx, settlement).await?;
         }
         tx.commit().await?;
-        Ok(())
+        Ok(score)
     }
 
     pub async fn load_rooms(&self) -> DbResult<Vec<StoredRoom>> {
@@ -1636,6 +1698,12 @@ fn action_data(action: Action) -> (&'static str, Option<i64>) {
     }
 }
 
+fn fold_penalty(streak: u32) -> u64 {
+    let base = u64::from(POINTS) / 10;
+    base.checked_shl(streak.saturating_sub(1))
+        .unwrap_or(u64::MAX)
+}
+
 fn one_row(result: PgQueryResult) -> DbResult<()> {
     if result.rows_affected() != 1 {
         return Err(io::Error::other("room revision mismatch").into());
@@ -1654,6 +1722,13 @@ mod tests {
         assert_eq!(action_data(Action::Check), ("check", None));
         assert_eq!(action_data(Action::Call), ("call", None));
         assert_eq!(action_data(Action::RaiseTo(40)), ("raise_to", Some(40)));
+    }
+
+    #[test]
+    fn consecutive_fold_penalties() {
+        assert_eq!(fold_penalty(1), 2);
+        assert_eq!(fold_penalty(2), 4);
+        assert_eq!(fold_penalty(3), 8);
     }
 
     #[tokio::test]

@@ -121,11 +121,7 @@ export function PublishedProofPage({ room, hand, seat, kind }: {
         <header className={styles.hero}>
           <p className={styles.label}>HAND {hand + 1}&nbsp;&nbsp;&nbsp;PLAYER {seat + 1}</p>
           <h1>{draw ? "DRAW PROOF" : "COMPLETION PROOF"}</h1>
-          <p>
-            {draw
-              ? "Follow the challenge draw from private randomness to public verification"
-              : "Follow the completed hand from recorded actions to public verification"}
-          </p>
+          <p>Explanation of the Protocol</p>
         </header>
         <div className={styles.verifyState} data-state={state} aria-live="polite">
           {state === "loading"

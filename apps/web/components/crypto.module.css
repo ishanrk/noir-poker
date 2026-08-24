@@ -278,18 +278,18 @@
 
 .proofTable {
   width: 100%;
-  min-width: 620px;
+  min-width: 700px;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
-  font-size: 13px;
+  font-size: 15px;
   text-align: left;
 }
 
 .proofTable caption {
   padding: 0 0 10px;
   color: var(--blue);
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-align: left;
@@ -299,14 +299,14 @@
   display: block;
   margin-top: 5px;
   color: var(--ink-soft);
-  font-size: 11px;
+  font-size: 13px;
   letter-spacing: 0;
 }
 
 .proofTable th,
 .proofTable td {
   min-width: 128px;
-  padding: 10px 12px;
+  padding: 13px 14px;
   border-bottom: 1px solid var(--line-strong);
   vertical-align: top;
 }
@@ -333,7 +333,7 @@
   grid-template-columns: 1fr;
   gap: 2px;
   margin-top: 4px;
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1.35;
 }
 
@@ -341,7 +341,7 @@
   position: relative;
   padding-left: 24px;
   color: var(--blue);
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .proofTable tbody th::before {
@@ -364,21 +364,21 @@
 
 .proofCellLine {
   display: grid;
-  grid-template-columns: 62px minmax(0, 1fr);
+  grid-template-columns: 82px minmax(0, 1fr);
   align-items: baseline;
   gap: 7px;
 }
 
 .proofCellLine i {
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 800;
 }
 
 .proofCellLine b {
   color: var(--ink-soft);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .proofCell a {

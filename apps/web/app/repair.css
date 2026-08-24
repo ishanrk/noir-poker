@@ -1394,12 +1394,11 @@ button.key-space { width: min(420px, 100%); height: 68px; justify-self: center; 
 }
 
 .challenge-leaderboard {
-  position: absolute;
+  position: relative;
   z-index: 12;
-  top: 0;
-  right: 0;
-  width: 210px;
-  padding: 15px 17px 16px 24px;
+  width: min(760px, calc(100% - 32px));
+  margin: 0 auto 18px;
+  padding: 20px 26px 21px 32px;
   border: 0;
   clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
   background:
@@ -1410,22 +1409,26 @@ button.key-space { width: min(420px, 100%); height: 68px; justify-self: center; 
 }
 
 .challenge-leaderboard > strong {
-  font-size: 12px;
+  display: block;
+  font-size: 19px;
   line-height: 1.25;
+  text-align: center;
 }
 
 .challenge-leaderboard > em {
   display: block;
   margin-top: 5px;
   color: white;
-  font-size: 10px;
+  font-size: 13px;
   font-style: normal;
+  text-align: center;
 }
 
 .challenge-leaderboard ol {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 0;
-  margin: 10px 0 0;
+  margin: 14px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -1435,35 +1438,49 @@ button.key-space { width: min(420px, 100%); height: 68px; justify-self: center; 
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: baseline;
-  padding: 6px 0;
+  padding: 10px 12px;
   border-top: 1px solid rgb(199 255 50 / 32%);
   color: white;
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .challenge-leaderboard li b {
   color: var(--lime);
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .challenge-leaderboard li small {
   color: var(--lime);
-  font-size: 10px;
+  font-size: 13px;
+}
+
+.challenge-leaderboard li output {
+  grid-column: 1 / -1;
+  color: white;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+  animation: challenge-total-in 320ms ease-out both;
 }
 
 .table-bonus-focus .challenge-leaderboard {
-  animation: challenge-bonus-focus 4000ms ease-in-out both;
+  animation: challenge-bonus-focus 7200ms ease-in-out both;
 }
 
 @keyframes challenge-bonus-focus {
   0%, 100% { box-shadow: 5px 5px 0 var(--lime); transform: scale(1); }
-  28%, 62% { box-shadow: 10px 10px 0 var(--lime); transform: scale(1.06); }
+  16%, 58% { box-shadow: 10px 10px 0 var(--lime); transform: scale(1.06); }
+}
+
+@keyframes challenge-total-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .table-shell > .deal-integrity-compact {
-  width: min(820px, calc(100% - 220px));
+  width: min(820px, calc(100% - 32px));
   margin-right: auto;
-  margin-left: 0;
+  margin-left: auto;
   padding: 17px 22px;
   border: 0;
   clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
@@ -1500,9 +1517,13 @@ button.key-space { width: min(420px, 100%); height: 68px; justify-self: center; 
 
 @media (max-width: 700px) {
   .challenge-leaderboard {
-    position: relative;
-    width: min(260px, calc(100% - 24px));
+    width: calc(100% - 24px);
     margin: 0 auto 10px;
+    padding: 17px 18px 18px 24px;
+  }
+
+  .challenge-leaderboard ol {
+    grid-template-columns: 1fr;
   }
 
   .table-shell > .deal-integrity-compact {
@@ -1514,10 +1535,11 @@ button.key-space { width: min(420px, 100%); height: 68px; justify-self: center; 
 
 .action-copy {
   min-height: 56px;
+  transition: color 260ms ease-out;
 }
 
 .action-copy strong {
-  animation: action-notice-in 180ms ease-out both;
+  animation: action-notice-in 320ms ease-out both;
 }
 
 .action-copy[data-stage="crypto"] span {

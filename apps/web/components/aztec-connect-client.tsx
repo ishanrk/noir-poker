@@ -378,8 +378,7 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
         </p>
       )}
 
-      <details className="aztec-guide">
-        <summary>How Aztec mode works</summary>
+      <section className="aztec-guide" aria-label="Aztec mode steps">
         <ol>
           <li>Connect wallet</li>
           <li>Claim 10,000 Tajaderos</li>
@@ -388,7 +387,7 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
         </ol>
         <p>Testnet only  Tajaderos have no monetary value</p>
         <Link href="/protocol">View Aztec protocol</Link>
-      </details>
+      </section>
     </section>
   );
 }

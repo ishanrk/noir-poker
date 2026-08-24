@@ -597,6 +597,7 @@ struct PlayerView {
     bet: u32,
     folded: bool,
     challenge_wins: u64,
+    challenge_score: u64,
     challenge_bonus: u32,
 }
 
@@ -2688,9 +2689,11 @@ async fn apply_action_once(
     let settlement = stage_aztec_settlement(id, &room, &next.game)?;
 
     // command commit before state swap
-    state
+    let score_player = next.player;
+    let score_fold = room.mode == RoomMode::Multiplayer && next.action == Action::Fold;
+    let score = state
         .db
-        .append_action_with_settlement(
+        .append_scored_action_with_settlement(
             NewAction {
                 room: id,
                 hand: next.hand,
@@ -2703,11 +2706,15 @@ async fn apply_action_once(
                 next_rev: next.rev,
             },
             settlement.as_ref(),
+            score_fold,
         )
         .await
         .map_err(|_| "cannot persist action")?;
     room.action_pause = true;
     room.commit_action(next);
+    if let Some(score) = score {
+        room.seats[score_player].proof_points = score;
+    }
     if settlement.is_some() {
         room.settlement = Some(SettlementState::Pending);
     }
@@ -3778,6 +3785,7 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
     for (player, stored) in view.players.iter_mut().zip(&room.seats) {
         player.name.clone_from(&stored.name);
         player.challenge_wins = stored.proof_points / u64::from(POINTS);
+        player.challenge_score = stored.proof_points / (u64::from(POINTS) / 10);
         player.challenge_bonus = stored.challenge_bonus;
         if room.challenge_awarded {
             player.stack += u64::from(stored.challenge_bonus);
@@ -4781,6 +4789,7 @@ fn seat_view(game: &State, seat: usize) -> SeatView {
             bet: player.bet,
             folded: player.folded,
             challenge_wins: 0,
+            challenge_score: 0,
             challenge_bonus: 0,
         })
         .collect();

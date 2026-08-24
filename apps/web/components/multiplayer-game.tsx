@@ -118,8 +118,10 @@ const deckHoleKey = (room: string, hand: number, seat: number) =>
   `noir-poker-hole-${room}-${hand}-${seat}`;
 const MAX_AUTO_PROOF_DELAY_MS = 10_000;
 const GAME_OVER_DELAY_MS = 3000;
-const BONUS_DELAY_MS = 4000;
+const BONUS_ADD_MS = 1200;
+const BONUS_DELAY_MS = 6000;
 const GAME_OVER_DISPLAY_MS = 2000;
+const DECK_STAGE_MS = 900;
 
 function noticeKey(notice: TableNoticeView) {
   return notice.kind === "action"
@@ -365,6 +367,12 @@ export function MultiplayerGame({
   const [notices, setNotices] = useState<TableNoticeView[]>([]);
   const noticeQueue = useRef<TableNoticeView[]>([]);
   const [deckStage, setDeckStage] = useState<string>();
+  const [shownDeckStage, setShownDeckStage] = useState<string>();
+  const shownDeckRef = useRef<string | undefined>(undefined);
+  const shownDeckAt = useRef(0);
+  const [tourOpen, setTourOpen] = useState(false);
+  const [bonusBase, setBonusBase] = useState<number[]>();
+  const [bonusApplied, setBonusApplied] = useState(false);
   const [finishHand, setFinishHand] = useState<number>();
   const notice = notices[0];
   const gameReady = Boolean(
@@ -376,6 +384,20 @@ export function MultiplayerGame({
   );
   const finish = gameReady && finishHand === view?.hand_no;
   const bonusFocus = gameReady && view?.mode === "multiplayer" && !finish;
+
+  useEffect(() => {
+    const elapsed = performance.now() - shownDeckAt.current;
+    const delay = shownDeckRef.current === undefined
+      ? 0
+      : Math.max(0, DECK_STAGE_MS - elapsed);
+    const timer = window.setTimeout(() => {
+      shownDeckRef.current = deckStage;
+      shownDeckAt.current = performance.now();
+      setShownDeckStage(deckStage);
+    }, delay);
+
+    return () => window.clearTimeout(timer);
+  }, [deckStage]);
 
   useEffect(() => {
     const mode = view?.mode ?? waiting?.mode ?? initialMode;
@@ -422,26 +444,30 @@ export function MultiplayerGame({
     if (!gameReady) return;
 
     const hand = view?.hand_no;
-    const delay = view?.mode === "multiplayer" ? BONUS_DELAY_MS : GAME_OVER_DELAY_MS;
+    const multiplayer = view?.mode === "multiplayer";
+    const delay = multiplayer ? BONUS_ADD_MS + BONUS_DELAY_MS : GAME_OVER_DELAY_MS;
     const top = window.scrollY;
-    const target = view?.mode === "multiplayer"
+    const target = multiplayer
       ? document.querySelector<HTMLElement>(".challenge-leaderboard")
       : null;
     let frame: number | undefined;
     let back: number | undefined;
+    let added: number | undefined;
     if (target) {
       frame = window.requestAnimationFrame(() => {
         target.scrollIntoView({ behavior: "smooth", block: "center" });
       });
+      added = window.setTimeout(() => setBonusApplied(true), BONUS_ADD_MS);
       back = window.setTimeout(() => {
         window.scrollTo({ top, behavior: "smooth" });
-      }, delay / 2);
+      }, BONUS_ADD_MS + BONUS_DELAY_MS / 2);
     }
     const timer = window.setTimeout(() => setFinishHand(hand), delay);
 
     return () => {
       if (frame !== undefined) window.cancelAnimationFrame(frame);
       if (back !== undefined) window.clearTimeout(back);
+      if (added !== undefined) window.clearTimeout(added);
       window.clearTimeout(timer);
     };
   }, [gameReady, view?.hand_no, view?.mode]);
@@ -701,6 +727,7 @@ export function MultiplayerGame({
         if (message.rev < rev.current) return;
         deckActive.current = false;
         const wasSyncing = syncing.current;
+        const priorView = viewRef.current;
         let local = localHole.current;
         if (local?.hand !== message.view.hand_no) {
           local = loadDeckHole(room, message.view.hand_no, current.seat);
@@ -708,6 +735,13 @@ export function MultiplayerGame({
         }
         if (local?.hand === message.view.hand_no) {
           message.view.hole = [{ value: local.cards[0] }, { value: local.cards[1] }];
+        }
+        if (message.view.game_over && !priorView?.game_over) {
+          setBonusBase(priorView?.players.map((player) => player.stack)
+            ?? message.view.players.map((player) => player.stack - player.challenge_bonus));
+        } else if (!message.view.game_over) {
+          setBonusBase(undefined);
+          setBonusApplied(false);
         }
         viewRef.current = message.view;
         const log = message.view.action_notices ?? (message.view.last_action ? [message.view.last_action] : []);
@@ -1272,6 +1306,7 @@ export function MultiplayerGame({
     actionPending ||
     notices.length > 0 ||
     Boolean(deckStage) ||
+    tourOpen ||
     !connected;
 
   const contract: ContractView = {
@@ -1331,7 +1366,7 @@ export function MultiplayerGame({
   return (
     <div className={`game-view${error || challengeError ? " ui-shake" : ""}`}>
       {view.mode !== "single" && (
-        <ProofTour room={room} seat={seat} handNo={view.hand_no} />
+        <ProofTour room={room} seat={seat} handNo={view.hand_no} onOpenChange={setTourOpen} />
       )}
       {!connected && <div className="connection-bar"><span>{connecting ? "Connecting" : "Disconnected"}</span>{!connecting && <button type="button" onClick={connect}>Reconnect</button>}</div>}
       <Table
@@ -1341,9 +1376,11 @@ export function MultiplayerGame({
         error={error}
         disabled={interactionDisabled}
         notice={notice}
-        stage={deckStage}
+        stage={shownDeckStage}
         finish={finish}
         bonusFocus={bonusFocus}
+        bonusApplied={bonusApplied}
+        bonusBase={bonusBase}
         raiseTo={raiseTo}
         setRaiseTo={setRaiseTo}
         onFold={() => send({ type: "fold" })}

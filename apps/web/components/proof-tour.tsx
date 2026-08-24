@@ -2,28 +2,28 @@
 
 import { useEffect, useState } from "react";
 
-const TOUR_VERSION = 3;
+const TOUR_VERSION = 4;
 
 const STEPS = [
   {
     target: "deck",
-    title: "The last hand has a deck proof",
-    text: "Open it to check every encrypted shuffle and the cards dealt in that hand",
+    title: "Deck proof from the last hand",
+    text: "Every hand uses a new encrypted deck. After the hand ends this link opens the accepted shuffle proofs and the final card openings",
   },
   {
     target: "challenge",
-    title: "Each hand has a new challenge",
-    text: "Your challenge stays private while the hand plays",
+    title: "A new challenge for every hand",
+    text: "Your browser draws one private challenge from the fixed catalog. Other players only see its public proof after the hand finishes",
   },
   {
     target: "challenge-proofs",
-    title: "Challenge proofs publish here",
-    text: "The draw proof checks the challenge choice and the completion proof checks the finished hand",
+    title: "Challenge proof history",
+    text: "Draw checks that the challenge was selected fairly. Completion checks that the recorded hand met it. Missed means no completion proof was created",
   },
   {
     target: "leaderboard",
-    title: "Challenge wins set the final bonus",
-    text: "Each completed challenge adds one win. First place gets the full buy in then each lower rank gets sixteen percent less",
+    title: "Leaderboard score and final bonus",
+    text: "A completed challenge adds one point. Consecutive folded hands remove 0.1 then 0.2 then 0.4 points and keep doubling while the score stays at least zero. Final rank adds bonus chips based on the buy in. First receives 100 percent then each lower rank receives 16 percentage points less",
   },
 ] as const;
 
@@ -31,10 +31,11 @@ function storageKey(room: string, seat: number) {
   return `noir-poker-proof-tour-${TOUR_VERSION}-${room}-${seat}`;
 }
 
-export function ProofTour({ room, seat, handNo }: {
+export function ProofTour({ room, seat, handNo, onOpenChange }: {
   room: string;
   seat: number;
   handNo: number;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
@@ -46,9 +47,13 @@ export function ProofTour({ room, seat, handNo }: {
       if (localStorage.getItem(storageKey(room, seat)) === "complete") return;
     } catch {}
 
+    onOpenChange?.(true);
     const timer = window.setTimeout(() => setOpen(true), 0);
-    return () => window.clearTimeout(timer);
-  }, [handNo, room, seat]);
+    return () => {
+      window.clearTimeout(timer);
+      onOpenChange?.(false);
+    };
+  }, [handNo, onOpenChange, room, seat]);
 
   useEffect(() => {
     if (!open || handNo !== 1) return;
@@ -78,6 +83,7 @@ export function ProofTour({ room, seat, handNo }: {
       localStorage.setItem(storageKey(room, seat), "complete");
     } catch {}
     setOpen(false);
+    onOpenChange?.(false);
   }
 
   if (!open || handNo !== 1) return null;
