@@ -9,6 +9,6 @@ type BrowserGlobals = typeof globalThis & {
 
 const root = globalThis as BrowserGlobals;
 
-root.Buffer ??= Buffer;
+root.Buffer = Buffer;
 root.process ??= process;
 root.global ??= globalThis;

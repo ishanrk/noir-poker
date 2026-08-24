@@ -1,5 +1,3 @@
-import Image from "next/image";
-
 import { AztecPlayChips } from "@/components/aztec-play-chips";
 import { SiteHeader } from "@/components/site-header";
 
@@ -14,16 +12,10 @@ export default function ChipsPage() {
       <section className="chips-story-hero">
         <div>
           <p className="story-kicker">Aztec testnet</p>
-          <h1>Tajadero</h1>
+          <h1>Tajaderos</h1>
           <p>
-            The table name for the PLAY testnet chip. Claim a balance, then lock a private buy-in to
-            one room and seat.
+            Private test credits on Aztec. Claim a balance then lock one table buy-in.
           </p>
-        </div>
-        <div className="chip-orbit" aria-hidden="true">
-          <Image src="/assets/poker-chip.svg" alt="" width={112} height={112} />
-          <Image src="/assets/poker-chip.svg" alt="" width={112} height={112} />
-          <Image src="/assets/poker-chip-light.svg" alt="" width={112} height={112} />
         </div>
       </section>
 
@@ -31,7 +23,7 @@ export default function ChipsPage() {
         <span>Why Tajadero</span>
         <p>
           Copper tajaderos circulated as hoe or axe money in central Mexico and parts of Central
-          America. The contract still exposes the test unit as PLAY.
+          America. Noir Poker uses the name for its private test credit.
         </p>
         <a href={TAJADERO} target="_blank" rel="noreferrer">
           Smithsonian record

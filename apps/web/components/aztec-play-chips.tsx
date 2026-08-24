@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AztecConnect } from "@/components/aztec-connect";
 import { AZTEC_TESTNET_NODE_URL } from "@/lib/aztec/config";
@@ -17,6 +17,15 @@ export function AztecPlayChips() {
   const [receipt, setReceipt] = useState<AztecEntryReceipt>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.noirMode = "aztec";
+
+    return () => {
+      if (root.dataset.noirMode === "aztec") delete root.dataset.noirMode;
+    };
+  }, []);
 
   async function enter() {
     if (!session) return;
@@ -37,9 +46,9 @@ export function AztecPlayChips() {
   return (
     <section className="chips-console">
       <header className="chips-intro">
-        <p className="eyebrow">PLAY contract</p>
-        <h1>Wallet and table entry</h1>
-        <p>Connect a testnet wallet, claim chips and lock one table buy-in.</p>
+        <p className="eyebrow">Tajadero account</p>
+        <h1>Balance and table entry</h1>
+        <p>Connect a testnet wallet then claim Tajaderos or lock one table buy-in.</p>
       </header>
 
       <AztecConnect onSession={setSession} />
@@ -48,7 +57,7 @@ export function AztecPlayChips() {
         <section className="chips-buy-in">
           <header>
             <h2>Table entry</h2>
-            <p>Lock PLAY against one room and seat.</p>
+            <p>Lock Tajaderos against one room and seat.</p>
           </header>
 
           <label className="line-input">
@@ -82,8 +91,8 @@ export function AztecPlayChips() {
 
           <label className="scale-control">
             <span>
-              Buy-in
-              <output>{buyIn.toLocaleString()} PLAY</output>
+              Tajadero buy-in
+              <output>{buyIn.toLocaleString()}</output>
             </span>
             <input
               type="range"
@@ -105,7 +114,7 @@ export function AztecPlayChips() {
             onClick={() => void enter()}
             disabled={busy || room.length !== 36 || session.balance < BigInt(buyIn)}
           >
-            {busy ? "Working" : "Lock buy-in"}
+            {busy ? "Locking Tajaderos" : `Lock ${buyIn.toLocaleString()} Tajaderos`}
           </button>
 
           {error && <p className="aztec-connect-error">{error}</p>}
@@ -115,7 +124,7 @@ export function AztecPlayChips() {
       {receipt && (
         <section className="chips-receipt">
           <p className="eyebrow">Entry confirmed</p>
-          <h2>{Number(receipt.amount).toLocaleString()} PLAY</h2>
+          <h2>{Number(receipt.amount).toLocaleString()} Tajaderos locked</h2>
           <dl>
             <div>
               <dt>Room</dt>
@@ -137,10 +146,11 @@ export function AztecPlayChips() {
         </section>
       )}
 
-      <footer className="chips-network">
-        <span>Aztec 5.1.0</span>
+      <details className="chips-network">
+        <summary>Technical details</summary>
+        <span>Aztec 5.1.0 testnet</span>
         <code>{AZTEC_TESTNET_NODE_URL}</code>
-      </footer>
+      </details>
     </section>
   );
 }

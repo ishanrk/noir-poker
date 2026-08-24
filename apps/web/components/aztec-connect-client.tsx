@@ -37,6 +37,7 @@ type Phase =
   | "discovering"
   | "connecting"
   | "verifying"
+  | "claiming"
   | "connected"
   | "error";
 
@@ -51,6 +52,8 @@ type AztecConnectProps = {
   compact?: boolean;
   onSession?: (session: AztecSession | undefined) => void;
 };
+
+const AZTEC_WALLETS = "https://docs.aztec.network/participate/basics/wallets";
 
 export function AztecConnect({ compact = false, onSession }: AztecConnectProps) {
   const discovery = useRef<ReturnType<typeof discoverAztecWallets> | null>(null);
@@ -221,7 +224,7 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
     }
 
     setError(undefined);
-    setPhase("connecting");
+    setPhase("claiming");
 
     try {
       await claimPlayChips(contract, connection.account.item);
@@ -275,14 +278,15 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
   }, [connect]);
 
   const address = connection?.account.item.toString();
-  const busy = phase === "discovering" || phase === "connecting";
+  const busy = phase === "discovering" || phase === "connecting" || phase === "claiming";
   const tableReady = claimed && balance !== undefined && balance >= BigInt(AZTEC_TABLE_STACK);
+  const noWallet = error === "No Aztec wallet responded";
 
   return (
     <section className={`aztec-connect${compact ? " aztec-connect-compact" : ""}`}>
       <div className="aztec-connect-label">
-        <span>Aztec</span>
-        <small>Private PLAY</small>
+        <span>Aztec Poker</span>
+        <small>Testnet wallet</small>
       </div>
 
       {!connection && phase !== "verifying" && (
@@ -293,13 +297,17 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
             onClick={() => connect(false)}
             disabled={busy}
           >
-            {phase === "discovering" ? "Open your wallet" : "Connect Aztec"}
+            {phase === "discovering"
+              ? "Finding wallet"
+              : phase === "connecting"
+                ? "Open your wallet"
+                : "Connect Aztec"}
           </button>
           <p>
             {phase === "discovering"
-              ? "Approve Noir Poker in the wallet extension"
+              ? "Looking for an Aztec browser wallet"
               : configured
-                ? "Testnet only"
+                ? "Testnet only  Tajaderos have no monetary value"
                 : "Contract not deployed"}
           </p>
         </div>
@@ -307,8 +315,9 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
 
       {phase === "verifying" && pending && (
         <div className="aztec-verify">
-          <p>Match this code with {pending.provider.name}</p>
+          <p>Verify connection with {pending.provider.name}</p>
           <strong>{pending.emojis}</strong>
+          <small>Match this fingerprint in your wallet</small>
           <div>
             <button className="primary-action" type="button" onClick={() => void approve()}>
               Approve connection
@@ -327,8 +336,9 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
       {connection && balance !== undefined && (
         <div className="aztec-account">
           <div>
+            <small>Tajadero balance</small>
+            <strong>{balance.toLocaleString()} Tajaderos</strong>
             <span>{shortAddress(address ?? "")}</span>
-            <strong>{balance.toLocaleString()} PLAY</strong>
           </div>
           <div className="aztec-account-actions">
             {!claimed && (
@@ -338,11 +348,13 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
                 onClick={() => void claim()}
                 disabled={busy}
               >
-                Claim {PLAY_CHIPS_CLAIM_AMOUNT.toLocaleString()} PLAY
+                {phase === "claiming"
+                  ? "Claiming"
+                  : `Claim ${PLAY_CHIPS_CLAIM_AMOUNT.toLocaleString()} Tajaderos`}
               </button>
             )}
-            {tableReady && <span className="aztec-ready">Ready</span>}
-            {claimed && !tableReady && <span className="aztec-low">Low balance</span>}
+            {tableReady && <span className="aztec-ready">Ready to enter</span>}
+            {claimed && !tableReady && <span className="aztec-low">Not enough Tajaderos</span>}
             {compact && <Link href="/chips">Manage</Link>}
             <button className="text-action" type="button" onClick={() => void disconnect()}>
               Disconnect
@@ -352,9 +364,30 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
       )}
 
       {providerName && busy && !connection && (
-        <p className="aztec-connect-status">Connecting {providerName}</p>
+        <p className="aztec-connect-status">Open {providerName}</p>
       )}
-      {error && <p className="aztec-connect-error">{error}</p>}
+      {error && (
+        <p className="aztec-connect-error">
+          {noWallet ? "No Aztec wallet found" : error}
+          {noWallet && (
+            <a href={AZTEC_WALLETS} target="_blank" rel="noreferrer">
+              View supported wallets
+            </a>
+          )}
+        </p>
+      )}
+
+      <details className="aztec-guide">
+        <summary>How Aztec mode works</summary>
+        <ol>
+          <li>Connect wallet</li>
+          <li>Claim 10,000 Tajaderos</li>
+          <li>Lock 1,000 to enter</li>
+          <li>Final stack returns to your wallet</li>
+        </ol>
+        <p>Testnet only  Tajaderos have no monetary value</p>
+        <Link href="/protocol">View Aztec protocol</Link>
+      </details>
     </section>
   );
 }

@@ -292,7 +292,11 @@ export function Table({
   }
 
   return (
-    <section className={`table-shell${finish ? " table-game-over" : ""}`} aria-label="Six-max poker table">
+    <section
+      className={`table-shell${finish ? " table-game-over" : ""}`}
+      data-room-mode={view.mode}
+      aria-label="Six-max poker table"
+    >
       <div className="table-hand-count">Hand {view.hand_no + 1} of {view.total_hands}</div>
       {view.mode === "multiplayer" && (
         <aside className="challenge-leaderboard" aria-label="Challenge leaderboard">

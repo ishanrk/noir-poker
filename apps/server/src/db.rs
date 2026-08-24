@@ -4,12 +4,12 @@ use std::io;
 use challenge_core::PROTOCOL_VERSION;
 use game_core::Action;
 use sqlx::postgres::{PgPoolOptions, PgQueryResult};
-use sqlx::{PgPool, Row, query};
+use sqlx::{PgPool, Postgres, Row, Transaction, query};
 use uuid::Uuid;
 
-use crate::room::FactCommitment;
+use crate::room::{FactCommitment, RoomConfig};
 #[cfg(test)]
-use crate::room::{RoomConfig, RoomMode};
+use crate::room::RoomMode;
 
 type DbResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -100,6 +100,59 @@ pub struct NewAction<'a> {
     pub next_rev: u64,
 }
 
+pub struct NewAdmission<'a> {
+    pub id: Uuid,
+    pub room: Uuid,
+    pub seat: usize,
+    pub token_hash: &'a [u8; 32],
+    pub account: &'a str,
+    pub table_id: &'a str,
+    pub entry_id: &'a str,
+    pub amount: u32,
+    pub config: RoomConfig,
+    pub entropy: &'a [u8; 32],
+    pub name: &'a str,
+}
+
+#[derive(Clone)]
+pub struct StoredAdmission {
+    pub id: Uuid,
+    pub room: Uuid,
+    pub seat: i32,
+    pub token_hash: Vec<u8>,
+    pub account: String,
+    pub table_id: String,
+    pub entry_id: String,
+    pub amount: i64,
+    pub players: i32,
+    pub stack: i64,
+    pub small_blind: i64,
+    pub big_blind: i64,
+    pub total_hands: i32,
+    pub entropy: Vec<u8>,
+    pub name: String,
+    pub status: String,
+    pub authorized_tx: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NewSettlement {
+    pub room: Uuid,
+    pub table_id: String,
+    pub recipients: [String; 6],
+    pub payouts: [u32; 6],
+}
+
+#[derive(Clone)]
+pub struct StoredSettlement {
+    pub room: Uuid,
+    pub table_id: String,
+    pub recipients: Vec<String>,
+    pub payouts: Vec<i64>,
+    pub status: String,
+    pub tx_hash: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct StoredRoom {
     pub id: Uuid,
@@ -114,6 +167,7 @@ pub struct StoredRoom {
     pub seats: Vec<StoredSeat>,
     pub hand: Option<StoredHand>,
     pub challenges: Vec<StoredChallenge>,
+    pub settlement: Option<StoredSettlement>,
 }
 
 #[derive(Clone)]
@@ -124,6 +178,9 @@ pub struct StoredSeat {
     pub ready_hand: Option<Uuid>,
     pub proof_points: i64,
     pub challenge_bonus: i64,
+    pub aztec_account: Option<String>,
+    pub aztec_entry: Option<String>,
+    pub aztec_amount: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -244,6 +301,81 @@ impl Db {
         Ok(Self { pool })
     }
 
+    pub async fn reserve_aztec(&self, admission: NewAdmission<'_>) -> DbResult<()> {
+        query(
+            "INSERT INTO aztec_admissions (id, room_id, seat, token_hash, account, table_id, \
+             entry_id, amount, players, stack, small_blind, big_blind, total_hands, entropy, name) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+        )
+        .bind(admission.id)
+        .bind(admission.room)
+        .bind(i32::try_from(admission.seat)?)
+        .bind(admission.token_hash.as_slice())
+        .bind(admission.account)
+        .bind(admission.table_id)
+        .bind(admission.entry_id)
+        .bind(i64::from(admission.amount))
+        .bind(i32::try_from(admission.config.players)?)
+        .bind(i64::from(admission.config.stack))
+        .bind(i64::from(admission.config.small_blind))
+        .bind(i64::from(admission.config.big_blind))
+        .bind(i32::try_from(admission.config.hands)?)
+        .bind(admission.entropy.as_slice())
+        .bind(admission.name)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn has_aztec_state(&self) -> DbResult<bool> {
+        let row = query(
+            "SELECT EXISTS (SELECT 1 FROM rooms WHERE mode = 'aztec') \
+             OR EXISTS (SELECT 1 FROM aztec_admissions WHERE status != 'failed') \
+             OR EXISTS (SELECT 1 FROM aztec_settlements WHERE status != 'confirmed') AS present",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.try_get("present")?)
+    }
+
+    pub async fn aztec_admission(
+        &self,
+        id: Uuid,
+        token_hash: &[u8; 32],
+    ) -> DbResult<Option<StoredAdmission>> {
+        query(
+            "SELECT id, room_id, seat, token_hash, account, table_id, entry_id, amount, \
+             players, stack, small_blind, big_blind, total_hands, entropy, name, status, \
+             authorized_tx FROM aztec_admissions WHERE id = $1 AND token_hash = $2",
+        )
+        .bind(id)
+        .bind(token_hash.as_slice())
+        .fetch_optional(&self.pool)
+        .await?
+        .map(stored_admission)
+        .transpose()
+    }
+
+    pub async fn authorize_aztec(
+        &self,
+        id: Uuid,
+        token_hash: &[u8; 32],
+        tx: &str,
+    ) -> DbResult<()> {
+        let changed = query(
+            "UPDATE aztec_admissions SET status = 'authorized', authorized_tx = $3, \
+             updated_at = now() WHERE id = $1 AND token_hash = $2 AND status = 'reserved'",
+        )
+        .bind(id)
+        .bind(token_hash.as_slice())
+        .bind(tx)
+        .execute(&self.pool)
+        .await?;
+
+        one_row(changed)?;
+        Ok(())
+    }
+
     pub async fn finish_deck(
         &self,
         room: Uuid,
@@ -251,6 +383,19 @@ impl Db {
         transcript: &[u8],
         deck: &[u8; 52],
         facts: &[FactCommitment],
+    ) -> DbResult<()> {
+        self.finish_deck_with_settlement(room, hand_no, transcript, deck, facts, None)
+            .await
+    }
+
+    pub async fn finish_deck_with_settlement(
+        &self,
+        room: Uuid,
+        hand_no: u64,
+        transcript: &[u8],
+        deck: &[u8; 52],
+        facts: &[FactCommitment],
+        settlement: Option<&NewSettlement>,
     ) -> DbResult<()> {
         let mut tx = self.pool.begin().await?;
         let changed = query(
@@ -280,6 +425,10 @@ impl Db {
             .await?;
 
             one_row(changed)?;
+        }
+
+        if let Some(settlement) = settlement {
+            insert_settlement(&mut tx, settlement).await?;
         }
 
         tx.commit().await?;
@@ -716,6 +865,14 @@ impl Db {
     }
 
     pub async fn append_action(&self, action: NewAction<'_>) -> DbResult<()> {
+        self.append_action_with_settlement(action, None).await
+    }
+
+    pub async fn append_action_with_settlement(
+        &self,
+        action: NewAction<'_>,
+        settlement: Option<&NewSettlement>,
+    ) -> DbResult<()> {
         let mut tx = self.pool.begin().await?;
         let (name, raise_to) = action_data(action.action);
 
@@ -760,6 +917,9 @@ impl Db {
             .await?;
 
         one_row(changed)?;
+        if let Some(settlement) = settlement {
+            insert_settlement(&mut tx, settlement).await?;
+        }
         tx.commit().await?;
         Ok(())
     }
@@ -782,6 +942,7 @@ impl Db {
             let seats = self.load_seats(id).await?;
             let hand = self.load_hand(id).await?;
             let challenges = self.load_challenges(id).await?;
+            let settlement = self.load_settlement(id).await?;
 
             rooms.push(StoredRoom {
                 id,
@@ -796,6 +957,7 @@ impl Db {
                 seats,
                 hand,
                 challenges,
+                settlement,
             });
         }
 
@@ -804,7 +966,8 @@ impl Db {
 
     async fn load_seats(&self, room: Uuid) -> DbResult<Vec<StoredSeat>> {
         let rows = query(
-            "SELECT seat, name, token_hash, ready_hand, proof_points, challenge_bonus \
+            "SELECT seat, name, token_hash, ready_hand, proof_points, challenge_bonus, \
+             aztec_account, aztec_entry, aztec_amount \
              FROM seats WHERE room_id = $1 ORDER BY seat",
         )
         .bind(room)
@@ -820,9 +983,33 @@ impl Db {
                     ready_hand: row.try_get("ready_hand")?,
                     proof_points: row.try_get("proof_points")?,
                     challenge_bonus: row.try_get("challenge_bonus")?,
+                    aztec_account: row.try_get("aztec_account")?,
+                    aztec_entry: row.try_get("aztec_entry")?,
+                    aztec_amount: row.try_get("aztec_amount")?,
                 })
             })
             .collect()
+    }
+
+    async fn load_settlement(&self, room: Uuid) -> DbResult<Option<StoredSettlement>> {
+        query(
+            "SELECT room_id, table_id, recipients, payouts, status, tx_hash \
+             FROM aztec_settlements WHERE room_id = $1",
+        )
+        .bind(room)
+        .fetch_optional(&self.pool)
+        .await?
+        .map(|row| {
+            Ok(StoredSettlement {
+                room: row.try_get("room_id")?,
+                table_id: row.try_get("table_id")?,
+                recipients: row.try_get("recipients")?,
+                payouts: row.try_get("payouts")?,
+                status: row.try_get("status")?,
+                tx_hash: row.try_get("tx_hash")?,
+            })
+        })
+        .transpose()
     }
 
     async fn load_hand(&self, room: Uuid) -> DbResult<Option<StoredHand>> {
@@ -1087,9 +1274,104 @@ impl Db {
         .transpose()
     }
 
+    pub async fn pending_aztec_settlements(&self) -> DbResult<Vec<StoredSettlement>> {
+        query(
+            "SELECT room_id, table_id, recipients, payouts, status, tx_hash \
+             FROM aztec_settlements WHERE status != 'confirmed' ORDER BY created_at",
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|row| {
+            Ok(StoredSettlement {
+                room: row.try_get("room_id")?,
+                table_id: row.try_get("table_id")?,
+                recipients: row.try_get("recipients")?,
+                payouts: row.try_get("payouts")?,
+                status: row.try_get("status")?,
+                tx_hash: row.try_get("tx_hash")?,
+            })
+        })
+        .collect()
+    }
+
+    pub async fn fail_aztec_settlement(&self, room: Uuid, error: &str) -> DbResult<()> {
+        let message = error.chars().take(500).collect::<String>();
+        let changed = query(
+            "UPDATE aztec_settlements SET attempts = attempts + 1, last_error = $2, \
+             updated_at = now() WHERE room_id = $1 AND status != 'confirmed'",
+        )
+        .bind(room)
+        .bind(message)
+        .execute(&self.pool)
+        .await?;
+        one_row(changed)?;
+        Ok(())
+    }
+
+    pub async fn confirm_aztec_settlement(&self, room: Uuid, tx: &str) -> DbResult<()> {
+        let changed = query(
+            "UPDATE aztec_settlements SET status = 'confirmed', tx_hash = COALESCE(tx_hash, $2), \
+             last_error = NULL, updated_at = now(), confirmed_at = now() \
+             WHERE room_id = $1 AND status != 'confirmed'",
+        )
+        .bind(room)
+        .bind(tx)
+        .execute(&self.pool)
+        .await?;
+        one_row(changed)?;
+        Ok(())
+    }
+
     pub(super) fn pool(&self) -> &PgPool {
         &self.pool
     }
+}
+
+fn stored_admission(row: sqlx::postgres::PgRow) -> DbResult<StoredAdmission> {
+    Ok(StoredAdmission {
+        id: row.try_get("id")?,
+        room: row.try_get("room_id")?,
+        seat: row.try_get("seat")?,
+        token_hash: row.try_get("token_hash")?,
+        account: row.try_get("account")?,
+        table_id: row.try_get("table_id")?,
+        entry_id: row.try_get("entry_id")?,
+        amount: row.try_get("amount")?,
+        players: row.try_get("players")?,
+        stack: row.try_get("stack")?,
+        small_blind: row.try_get("small_blind")?,
+        big_blind: row.try_get("big_blind")?,
+        total_hands: row.try_get("total_hands")?,
+        entropy: row.try_get("entropy")?,
+        name: row.try_get("name")?,
+        status: row.try_get("status")?,
+        authorized_tx: row.try_get("authorized_tx")?,
+    })
+}
+
+pub async fn insert_settlement(
+    tx: &mut Transaction<'_, Postgres>,
+    settlement: &NewSettlement,
+) -> DbResult<()> {
+    let payouts = settlement
+        .payouts
+        .iter()
+        .copied()
+        .map(i64::from)
+        .collect::<Vec<_>>();
+
+    query(
+        "INSERT INTO aztec_settlements (room_id, table_id, recipients, payouts) \
+         VALUES ($1, $2, $3, $4)",
+    )
+    .bind(settlement.room)
+    .bind(&settlement.table_id)
+    .bind(settlement.recipients.as_slice())
+    .bind(payouts)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 fn action_data(action: Action) -> (&'static str, Option<i64>) {

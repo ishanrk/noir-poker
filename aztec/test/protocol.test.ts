@@ -33,9 +33,13 @@ test("play chips expose no user transfer or redemption path", () => {
 test("play chips are limited to faucet table entry and settlement", () => {
   for (const required of [
     "fn claim_private()",
-    "fn enter_table(table_id: Field, entry_id: Field, amount: u64)",
+    "fn authorize_entry(",
+    "fn enter_table(table_id: Field, entry_id: Field, seat: u32, amount: u64)",
     "fn settle_private(",
+    "fn entry_is_authorized(entry_id: Field)",
     "fn entry_table_of(entry_id: Field)",
+    "fn entry_account_of(entry_id: Field)",
+    "fn entry_seat_of(entry_id: Field)",
     "fn entry_amount_of(entry_id: Field)",
     "fn table_pool_of(table_id: Field)",
     "fn table_is_settled(table_id: Field)",
@@ -45,6 +49,13 @@ test("play chips are limited to faucet table entry and settlement", () => {
 
   assert.match(source, /assert_eq\(total, self\.storage\.table_pool\.at\(table_id\)\.read\(\)/);
   assert.match(source, /assert_eq\(caller, self\.storage\.owner\.read\(\)/);
+  assert.match(source, /assert_eq\(self\.msg_sender\(\), self\.storage\.owner\.read\(\)/);
+  assert.match(source, /assert\(\(seats & seat_bit\) == 0, "Seat already authorized"\)/);
+  assert.match(source, /assert\(self\.storage\.entry_authorized\.at\(entry_id\)\.read\(\)/);
+  assert.match(source, /assert_eq\(table_id, self\.storage\.entry_tables\.at\(entry_id\)\.read\(\)/);
+  assert.match(source, /assert_eq\(account, self\.storage\.entry_accounts\.at\(entry_id\)\.read\(\)/);
+  assert.match(source, /assert_eq\(seat, self\.storage\.entry_seats\.at\(entry_id\)\.read\(\)/);
+  assert.match(source, /assert_eq\(amount, self\.storage\.entry_amounts\.at\(entry_id\)\.read\(\)/);
   assert.match(source, /assert\(!self\.storage\.entries\.at\(entry_id\)\.read\(\)/);
   assert.match(source, /assert\(!self\.storage\.table_settled\.at\(table_id\)\.read\(\)/);
 });

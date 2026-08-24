@@ -22,8 +22,8 @@ const AztecConnectClient = dynamic(
     loading: () => (
       <section className="aztec-connect aztec-connect-compact">
         <div className="aztec-connect-label">
-          <span>Aztec</span>
-          <small>Loading wallet support</small>
+          <span>Aztec Poker</span>
+          <small>Loading wallet</small>
         </div>
       </section>
     ),

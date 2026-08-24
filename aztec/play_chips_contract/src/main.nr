@@ -17,9 +17,13 @@ pub contract PlayChips {
     struct Storage<Context> {
         owner: PublicMutable<AztecAddress, Context>,
         claimed: Map<AztecAddress, PublicMutable<bool, Context>, Context>,
+        entry_authorized: Map<Field, PublicMutable<bool, Context>, Context>,
         entries: Map<Field, PublicMutable<bool, Context>, Context>,
         entry_tables: Map<Field, PublicMutable<Field, Context>, Context>,
+        entry_accounts: Map<Field, PublicMutable<AztecAddress, Context>, Context>,
+        entry_seats: Map<Field, PublicMutable<u32, Context>, Context>,
         entry_amounts: Map<Field, PublicMutable<u64, Context>, Context>,
+        table_seats: Map<Field, PublicMutable<u32, Context>, Context>,
         table_pool: Map<Field, PublicMutable<u64, Context>, Context>,
         table_settled: Map<Field, PublicMutable<bool, Context>, Context>,
         private_balances: Owned<BalanceSet<Context>, Context>,
@@ -48,26 +52,64 @@ pub contract PlayChips {
         self.storage.claimed.at(player).write(true);
     }
 
+    #[external("public")]
+    fn authorize_entry(
+        table_id: Field,
+        entry_id: Field,
+        seat: u32,
+        account: AztecAddress,
+        amount: u64,
+    ) {
+        assert_eq(self.msg_sender(), self.storage.owner.read(), "Only the game server can authorize");
+        assert(!self.storage.table_settled.at(table_id).read(), "Table already settled");
+        assert(!self.storage.entry_authorized.at(entry_id).read(), "Entry already authorized");
+        assert(!self.storage.entries.at(entry_id).read(), "Entry already used");
+        assert(seat < MAX_SEATS, "Invalid seat");
+        assert(amount > 0, "Buy-in must be positive");
+
+        let seats = self.storage.table_seats.at(table_id).read();
+        let seat_bit = 1 << seat;
+        assert((seats & seat_bit) == 0, "Seat already authorized");
+
+        self.storage.entry_authorized.at(entry_id).write(true);
+        self.storage.entry_tables.at(entry_id).write(table_id);
+        self.storage.entry_accounts.at(entry_id).write(account);
+        self.storage.entry_seats.at(entry_id).write(seat);
+        self.storage.entry_amounts.at(entry_id).write(amount);
+        self.storage.table_seats.at(table_id).write(seats | seat_bit);
+    }
+
     #[external("private")]
-    fn enter_table(table_id: Field, entry_id: Field, amount: u64) {
+    fn enter_table(table_id: Field, entry_id: Field, seat: u32, amount: u64) {
         assert(amount > 0, "Buy-in must be positive");
 
         let player = self.msg_sender();
         self.storage.private_balances.at(player).sub(amount as u128).deliver(
             MessageDelivery::onchain_constrained(),
         );
-        self.enqueue_self._record_entry(table_id, entry_id, amount);
+        self.enqueue_self._record_entry(table_id, entry_id, seat, player, amount);
     }
 
     #[external("public")]
     #[only_self]
-    fn _record_entry(table_id: Field, entry_id: Field, amount: u64) {
+    fn _record_entry(
+        table_id: Field,
+        entry_id: Field,
+        seat: u32,
+        account: AztecAddress,
+        amount: u64,
+    ) {
         assert(!self.storage.table_settled.at(table_id).read(), "Table already settled");
+        assert(self.storage.entry_authorized.at(entry_id).read(), "Entry not authorized");
         assert(!self.storage.entries.at(entry_id).read(), "Entry already used");
+        assert_eq(table_id, self.storage.entry_tables.at(entry_id).read(), "Wrong table");
+        assert_eq(account, self.storage.entry_accounts.at(entry_id).read(), "Wrong account");
+        assert_eq(seat, self.storage.entry_seats.at(entry_id).read(), "Wrong seat");
+        assert_eq(amount, self.storage.entry_amounts.at(entry_id).read(), "Wrong buy-in");
 
         self.storage.entries.at(entry_id).write(true);
-        self.storage.entry_tables.at(entry_id).write(table_id);
-        self.storage.entry_amounts.at(entry_id).write(amount);
+        self.storage.entry_accounts.at(entry_id).write(account);
+        self.storage.entry_seats.at(entry_id).write(seat);
 
         let pool = self.storage.table_pool.at(table_id).read();
         self.storage.table_pool.at(table_id).write(pool + amount);
@@ -122,8 +164,23 @@ pub contract PlayChips {
     }
 
     #[external("utility")]
+    unconstrained fn entry_is_authorized(entry_id: Field) -> pub bool {
+        self.storage.entry_authorized.at(entry_id).read()
+    }
+
+    #[external("utility")]
     unconstrained fn entry_table_of(entry_id: Field) -> pub Field {
         self.storage.entry_tables.at(entry_id).read()
+    }
+
+    #[external("utility")]
+    unconstrained fn entry_account_of(entry_id: Field) -> pub AztecAddress {
+        self.storage.entry_accounts.at(entry_id).read()
+    }
+
+    #[external("utility")]
+    unconstrained fn entry_seat_of(entry_id: Field) -> pub u32 {
+        self.storage.entry_seats.at(entry_id).read()
     }
 
     #[external("utility")]

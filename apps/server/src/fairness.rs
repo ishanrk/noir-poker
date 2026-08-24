@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row, Transaction, query};
 use uuid::Uuid;
 
-use crate::db::{Db, NewHand, StoredAction, StoredHand};
+use crate::db::{Db, NewHand, StoredAction, StoredAdmission, StoredHand};
 use crate::room::{Ceremony, RoomConfig, RoomMode};
 
 type FairResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
@@ -141,6 +141,47 @@ pub async fn create_room(
     Ok(())
 }
 
+pub async fn create_aztec(
+    db: &Db,
+    admission: &StoredAdmission,
+    config: RoomConfig,
+    token_hash: &[u8; 32],
+    ceremony: &Ceremony,
+    share: [u8; 32],
+) -> FairResult<()> {
+    let mut tx = db.pool().begin().await?;
+
+    query(
+        "INSERT INTO rooms (id, mode, players, stack, small_blind, big_blind, total_hands, rev) \
+         VALUES ($1, 'aztec', $2, $3, $4, $5, $6, 0)",
+    )
+    .bind(admission.room)
+    .bind(i32::try_from(config.players)?)
+    .bind(i64::from(config.stack))
+    .bind(i64::from(config.small_blind))
+    .bind(i64::from(config.big_blind))
+    .bind(i32::try_from(config.hands)?)
+    .execute(&mut *tx)
+    .await?;
+    query(
+        "INSERT INTO seats (room_id, seat, name, token_hash, aztec_account, aztec_entry, aztec_amount) \
+         VALUES ($1, 0, $2, $3, $4, $5, $6)",
+    )
+    .bind(admission.room)
+    .bind(&admission.name)
+    .bind(token_hash.as_slice())
+    .bind(&admission.account)
+    .bind(&admission.entry_id)
+    .bind(admission.amount)
+    .execute(&mut *tx)
+    .await?;
+    insert_ceremony(&mut tx, admission.room, ceremony).await?;
+    insert_share(&mut tx, admission.room, ceremony.hand_no, 0, share).await?;
+    confirm_admission(&mut tx, admission.id).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn create_pending_room(
     db: &Db,
     id: Uuid,
@@ -257,6 +298,58 @@ pub async fn join_room(
     }
 
     update_rev(&mut tx, room, rev, next_rev).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn join_aztec(
+    db: &Db,
+    admission: &StoredAdmission,
+    token_hash: &[u8; 32],
+    share: [u8; 32],
+    rev: u64,
+    next_rev: u64,
+    ceremony: &Ceremony,
+    hand: Option<NewHand<'_>>,
+    next: Option<&Ceremony>,
+) -> FairResult<()> {
+    let mut tx = db.pool().begin().await?;
+
+    query(
+        "INSERT INTO seats (room_id, seat, name, token_hash, aztec_account, aztec_entry, aztec_amount) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(admission.room)
+    .bind(admission.seat)
+    .bind(&admission.name)
+    .bind(token_hash.as_slice())
+    .bind(&admission.account)
+    .bind(&admission.entry_id)
+    .bind(admission.amount)
+    .execute(&mut *tx)
+    .await?;
+    insert_share(
+        &mut tx,
+        admission.room,
+        ceremony.hand_no,
+        usize::try_from(admission.seat)?,
+        share,
+    )
+    .await?;
+
+    if let Some(hand) = hand {
+        let completed =
+            ceremony_with_share(ceremony, usize::try_from(admission.seat)?, share)?;
+        finalize_ceremony(&mut tx, admission.room, &completed, hand.seed).await?;
+        insert_hand(&mut tx, admission.room, &hand).await?;
+        if let Some(next) = next {
+            insert_ceremony(&mut tx, admission.room, next).await?;
+        }
+    }
+
+    update_rev(&mut tx, admission.room, rev, next_rev).await?;
+    confirm_admission(&mut tx, admission.id).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -591,6 +684,21 @@ async fn update_rev(
         .await?;
 
     one_row(changed.rows_affected(), "room revision mismatch")
+}
+
+async fn confirm_admission(
+    tx: &mut Transaction<'_, Postgres>,
+    admission: Uuid,
+) -> FairResult<()> {
+    let changed = query(
+        "UPDATE aztec_admissions SET status = 'confirmed', confirmed_at = now(), \
+         updated_at = now() WHERE id = $1 AND status = 'authorized'",
+    )
+    .bind(admission)
+    .execute(&mut **tx)
+    .await?;
+
+    one_row(changed.rows_affected(), "aztec admission mismatch")
 }
 
 fn one_row(rows: u64, message: &'static str) -> FairResult<()> {

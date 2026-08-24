@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { AztecConnect } from "@/components/aztec-connect";
 import { Keycap } from "@/components/keycap";
@@ -68,6 +68,7 @@ function Scale({
 
 export function Lobby() {
   const router = useRouter();
+  const wasAztec = useRef(false);
   const [mode, setMode] = useState<RoomMode>("single");
   const [aztec, setAztec] = useState<AztecSession>();
   const [players, setPlayers] = useState(2);
@@ -99,6 +100,28 @@ export function Lobby() {
     aztec?.ready && aztec.balance >= BigInt(AZTEC_TABLE_STACK),
   );
 
+  useEffect(() => {
+    const root = document.documentElement;
+    let timer: number | undefined;
+
+    root.dataset.noirMode = mode;
+
+    if (mode === "aztec" && !wasAztec.current) {
+      root.classList.add("aztec-entering");
+      timer = window.setTimeout(() => root.classList.remove("aztec-entering"), 320);
+    } else {
+      root.classList.remove("aztec-entering");
+    }
+
+    wasAztec.current = mode === "aztec";
+
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      root.classList.remove("aztec-entering");
+      if (root.dataset.noirMode === mode) delete root.dataset.noirMode;
+    };
+  }, [mode]);
+
   function showError(message: string) {
     setError(message);
     playErrorSound();
@@ -121,7 +144,7 @@ export function Lobby() {
     try {
       if (mode !== "aztec" && normalError) throw new Error(normalError);
       if (mode === "aztec" && !aztecValid) {
-        throw new Error("Connect Aztec and claim PLAY first");
+        throw new Error("Connect Aztec and claim Tajaderos first");
       }
 
       const result = await createRoom({
@@ -158,7 +181,7 @@ export function Lobby() {
 
     try {
       if (mode === "aztec" && !aztecValid) {
-        throw new Error("Connect Aztec and claim PLAY first");
+        throw new Error("Connect Aztec and claim Tajaderos first");
       }
 
       const result = await joinRoom(
@@ -226,7 +249,7 @@ export function Lobby() {
             />
             <span>
               <strong>Aztec Poker</strong>
-              <small>Private play</small>
+              <small>Private Tajaderos</small>
             </span>
           </label>
         </div>
@@ -322,12 +345,16 @@ export function Lobby() {
           ) : (
             <dl className="aztec-stakes">
               <div>
-                <dt>Buy-in</dt>
-                <dd>{AZTEC_TABLE_STACK.toLocaleString()} PLAY</dd>
+                <dt>Tajadero buy-in</dt>
+                <dd>{AZTEC_TABLE_STACK.toLocaleString()}</dd>
               </div>
               <div>
                 <dt>Blinds</dt>
                 <dd>{AZTEC_SMALL_BLIND} small blind · {AZTEC_BIG_BLIND} big blind</dd>
+              </div>
+              <div>
+                <dt>Balance</dt>
+                <dd>{aztec?.balance.toLocaleString() ?? "Connect wallet"}</dd>
               </div>
             </dl>
           )}
@@ -335,7 +362,7 @@ export function Lobby() {
           <button className="primary-action key-action key-primary key-create" type="submit" disabled={busy}>
             <Keycap>
               {busy
-                ? "Working"
+                ? mode === "aztec" ? "Locking Tajaderos" : "Working"
                 : mode === "aztec"
                   ? "Create Aztec Game"
                   : "Create Game"}
@@ -367,11 +394,11 @@ export function Lobby() {
             <input name="room" type="text" autoComplete="off" spellCheck="false" required />
           </label>
           <button className="text-action key-action key-join" type="submit" disabled={busy}>
-            <Keycap>{busy ? "Working" : mode === "aztec" ? "Join with PLAY" : "Join Game"}</Keycap>
+            <Keycap>{busy ? mode === "aztec" ? "Locking Tajaderos" : "Working" : mode === "aztec" ? "Join Aztec Game" : "Join Game"}</Keycap>
           </button>
           <p>
             {mode === "aztec"
-              ? `${AZTEC_TABLE_STACK.toLocaleString()} private PLAY is locked before the table opens.`
+              ? `${AZTEC_TABLE_STACK.toLocaleString()} Tajaderos lock before the table opens.`
               : "Your browser adds fresh randomness before the hand starts."}
           </p>
         </form>}

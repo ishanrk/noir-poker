@@ -34,6 +34,14 @@ impl RoomMode {
             _ => None,
         }
     }
+
+    pub(super) const fn challenges(self) -> bool {
+        matches!(self, Self::Multiplayer | Self::Aztec)
+    }
+
+    const fn challenge_bonuses(self) -> bool {
+        matches!(self, Self::Multiplayer)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -97,6 +105,7 @@ pub(super) struct Room {
     pub(super) bot_running: bool,
     pub(super) bot_wake: bool,
     pub(super) challenge_awarded: bool,
+    pub(super) settlement: Option<SettlementState>,
     pub(super) rev: u64,
     pub(super) notify: broadcast::Sender<u64>,
 }
@@ -145,6 +154,7 @@ impl Room {
             bot_running: false,
             bot_wake: false,
             challenge_awarded: false,
+            settlement: None,
             rev: 0,
             notify,
         })
@@ -267,8 +277,7 @@ impl Room {
             return Err("already ready");
         }
 
-        // multiplayer challenge required
-        if self.mode == RoomMode::Multiplayer
+        if self.mode.challenges()
             && self
                 .next_challenges
                 .get(seat)
@@ -326,7 +335,7 @@ impl Room {
         let hand = self.hand.as_ref().ok_or("game not started")?;
         let player = self.seats.get(seat).ok_or("invalid player")?;
 
-        if self.mode != RoomMode::Multiplayer || !self.game_complete() {
+        if !self.mode.challenge_bonuses() || !self.game_complete() {
             return Err("game not complete");
         }
         if self.deck.as_ref().is_some_and(|deck| !deck.complete) {
@@ -453,7 +462,7 @@ impl Room {
         hand_no: u64,
         commitment: [u8; 32],
     ) -> Result<PendingChallenge, &'static str> {
-        if self.mode != RoomMode::Multiplayer {
+        if !self.mode.challenges() {
             return Err("challenge unavailable");
         }
 
@@ -616,7 +625,7 @@ impl Room {
             challenge.points = Some(claim.points);
         }
         self.seats[claim.seat].proof_points = claim.next_points;
-        if self.challenge_awarded {
+        if self.mode.challenge_bonuses() && self.challenge_awarded {
             let bonuses = challenge_bonuses(self.config.stack, &self.seats);
             for (seat, bonus) in self.seats.iter_mut().zip(bonuses) {
                 seat.challenge_bonus = bonus;
@@ -772,6 +781,9 @@ pub(super) struct Seat {
     pub(super) ready_hand: Option<Uuid>,
     pub(super) proof_points: u64,
     pub(super) challenge_bonus: u32,
+    pub(super) aztec_account: Option<String>,
+    pub(super) aztec_entry: Option<String>,
+    pub(super) aztec_amount: Option<u32>,
 }
 
 impl Seat {
@@ -782,8 +794,17 @@ impl Seat {
             ready_hand: None,
             proof_points: 0,
             challenge_bonus: 0,
+            aztec_account: None,
+            aztec_entry: None,
+            aztec_amount: None,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SettlementState {
+    Pending,
+    Returned,
 }
 
 pub(super) struct LiveHand {
@@ -1176,6 +1197,132 @@ mod tests {
         let mut seat = Seat::new([0; 32], "Player".to_owned());
         seat.proof_points = points;
         seat
+    }
+
+    fn settled_room(mode: RoomMode, hands: u32) -> Room {
+        let config = RoomConfig {
+            players: 2,
+            stack: 100,
+            small_blind: 5,
+            big_blind: 10,
+            hands,
+        };
+        let mut room = Room::new_with_mode(config, mode, [0; 32]).unwrap();
+        let mut game = State::new(SEED, 0, &[100, 100], 5, 10);
+
+        room.seats.push(Seat::new([1; 32], "Player 2".to_owned()));
+        game.apply(0, Action::Fold).unwrap();
+        settle(&mut game).unwrap();
+        room.hand = Some(LiveHand {
+            id: Uuid::new_v4(),
+            no: 0,
+            seed: SEED,
+            starting_stacks: vec![100, 100],
+            game,
+            result: None,
+            next_seq: 0,
+            actions: Vec::new(),
+            notices: Vec::new(),
+            last_action: None,
+        });
+        room
+    }
+
+    fn challenge(seat: usize) -> Challenge {
+        Challenge {
+            hand_no: 1,
+            seat,
+            hand_tag: [1; 32],
+            commitment: [2; 32],
+            nonce: [3; 32],
+            catalog_root: [4; 32],
+            draw_verified: false,
+            facts_salt: None,
+            facts_hash: None,
+            facts: None,
+            nullifier: None,
+            points: None,
+        }
+    }
+
+    #[test]
+    fn human_challenge_modes() {
+        assert!(!RoomMode::Single.challenges());
+        assert!(RoomMode::Multiplayer.challenges());
+        assert!(RoomMode::Aztec.challenges());
+    }
+
+    #[test]
+    fn aztec_challenge_gate() {
+        let room_id = Uuid::new_v4();
+        let aztec = settled_room(RoomMode::Aztec, 2);
+        let multiplayer = settled_room(RoomMode::Multiplayer, 2);
+        let single = settled_room(RoomMode::Single, 2);
+
+        assert!(aztec.stage_challenge(room_id, 0, 1, [2; 32]).is_ok());
+        assert!(multiplayer.stage_challenge(room_id, 0, 1, [2; 32]).is_ok());
+        assert_eq!(
+            single.stage_challenge(room_id, 0, 1, [2; 32]).err(),
+            Some("challenge unavailable")
+        );
+    }
+
+    #[test]
+    fn aztec_ready_requires_challenge() {
+        let mut room = settled_room(RoomMode::Aztec, 2);
+
+        assert_eq!(room.stage_ready(0).err(), Some("challenge required"));
+        room.next_challenges[0] = Some(challenge(0));
+        assert!(room.stage_ready(0).is_ok());
+        assert!(settled_room(RoomMode::Single, 2).stage_ready(0).is_ok());
+    }
+
+    #[test]
+    fn aztec_claim_has_no_bonus() {
+        let mut room = settled_room(RoomMode::Aztec, 1);
+        let stacks: Vec<_> = room
+            .hand
+            .as_ref()
+            .unwrap()
+            .game
+            .players
+            .iter()
+            .map(|player| player.stack)
+            .collect();
+        room.challenge_awarded = true;
+        room.seats[0].challenge_bonus = 7;
+
+        room.commit_claim(
+            PendingClaim {
+                hand_no: 0,
+                seat: 0,
+                hand_tag: [1; 32],
+                commitment: [2; 32],
+                nonce: [3; 32],
+                catalog_root: [4; 32],
+                facts_salt: [5; 32],
+                facts_hash: [6; 32],
+                points: 20,
+                prior_points: 0,
+                next_points: 20,
+                rev: 1,
+            },
+            [7; 32],
+        );
+
+        assert_eq!(room.seats[0].challenge_bonus, 7);
+        assert_eq!(
+            room.hand
+                .as_ref()
+                .unwrap()
+                .game
+                .players
+                .iter()
+                .map(|player| player.stack)
+                .collect::<Vec<_>>(),
+            stacks
+        );
+        assert_eq!(room.stage_finish(0).err(), Some("game not complete"));
     }
 
     #[test]

@@ -11,18 +11,28 @@ export default async function TablePage({ params, searchParams }: TablePageProps
   const aztec = query.mode === "aztec";
 
   return (
-    <main className="site-shell table-page">
+    <main className={`site-shell table-page${aztec ? " table-page-aztec" : ""}`}>
       <SiteHeader compact />
       <header className="table-page-header">
-        <div>
-          <p className="eyebrow">
-            {aztec ? "Aztec table" : "Live table"} · {room.slice(0, 8)}
-          </p>
-          <h1>Noir Poker</h1>
-        </div>
-        {aztec && <p>private PLAY buy-in recorded on Aztec testnet</p>}
+        {aztec ? (
+          <>
+            <div>
+              <p className="eyebrow">Aztec table</p>
+              <h1>Room {room.slice(0, 8)}</h1>
+            </div>
+            <p className="aztec-table-credit">
+              <span>Tajaderos locked</span>
+              <strong>1,000</strong>
+            </p>
+          </>
+        ) : (
+          <div>
+            <p className="eyebrow">Live table · {room.slice(0, 8)}</p>
+            <h1>Noir Poker</h1>
+          </div>
+        )}
       </header>
-      <MultiplayerGame key={room} room={room} />
+      <MultiplayerGame key={room} room={room} initialMode={aztec ? "aztec" : undefined} />
     </main>
   );
 }

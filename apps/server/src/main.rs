@@ -1,4 +1,5 @@
 mod bot;
+mod aztec;
 mod db;
 mod deck_proof;
 mod fairness;
@@ -36,8 +37,9 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
 
 use crate::db::{
-    ChallengeEntropy, ClaimUpdate, Db, DrawUpdate, NewAction, NewChallenge, NewHand, ProofReceipt,
-    PublishedProof, StoredAction, StoredChallenge, StoredClaim, StoredDraw, StoredHand, StoredRoom,
+    ChallengeEntropy, ClaimUpdate, Db, DrawUpdate, NewAction, NewAdmission, NewChallenge, NewHand,
+    NewSettlement, ProofReceipt, PublishedProof, StoredAction, StoredAdmission, StoredChallenge,
+    StoredClaim, StoredDraw, StoredHand, StoredRoom,
 };
 use crate::deck_proof::{DeckProofs, ShuffleInput, ShufflePublic};
 use crate::mental::{
@@ -52,12 +54,14 @@ use crate::proof::{
 use crate::room::start_game;
 use crate::room::{
     ActionNotice, Ceremony, Challenge, Challenges, HandResult, HandResultKind, LiveHand,
-    PendingClaim, PendingDraw, PlayedAction, Room, RoomConfig, RoomMode, Seat, TokenHash,
+    PendingClaim, PendingDraw, PlayedAction, Room, RoomConfig, RoomMode, Seat, SettlementState,
+    TokenHash,
     bind_facts, challenge_bonuses, challenge_facts, replay_deck, replay_hand,
 };
 
 type HttpError = (StatusCode, &'static str);
 type Rooms = Arc<Mutex<HashMap<Uuid, Arc<Mutex<Room>>>>>;
+type AdmissionLocks = Arc<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>>;
 
 #[derive(Clone)]
 struct AppState {
@@ -65,6 +69,8 @@ struct AppState {
     rooms: Rooms,
     proof: Option<ProofVerifier>,
     deck_proof: Option<DeckProofs>,
+    aztec: Option<aztec::Aztec>,
+    admission_locks: AdmissionLocks,
 }
 
 impl AppState {
@@ -79,6 +85,8 @@ impl AppState {
             rooms: Arc::new(Mutex::new(rooms)),
             proof: Some(proof),
             deck_proof: Some(deck_proof),
+            aztec: None,
+            admission_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -89,6 +97,8 @@ impl AppState {
             rooms: Arc::new(Mutex::new(rooms)),
             proof: None,
             deck_proof: None,
+            aztec: None,
+            admission_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -135,6 +145,47 @@ impl CreateRoomRequest {
 struct EntropyRequest {
     entropy: String,
     name: Option<String>,
+}
+
+const AZTEC_BUY_IN: u32 = 1_000;
+const AZTEC_SMALL_BLIND: u32 = 5;
+const AZTEC_BIG_BLIND: u32 = 10;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AztecCreateRequest {
+    players: usize,
+    hands: Option<u32>,
+    entropy: String,
+    name: Option<String>,
+    account: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AztecJoinRequest {
+    entropy: String,
+    name: Option<String>,
+    account: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AztecTokenRequest {
+    token: Uuid,
+}
+
+#[derive(Serialize)]
+struct AztecReservation {
+    room: String,
+    room_id: Uuid,
+    seat: usize,
+    admission: Uuid,
+    token: Uuid,
+    table_id: String,
+    entry_id: String,
+    amount: u32,
+    authorized: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -322,6 +373,8 @@ struct SeatView {
     ready: Option<ReadyView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     finish: Option<ReadyView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    settlement: Option<SettlementView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     challenge: Option<ChallengeView>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -549,6 +602,12 @@ struct PlayerView {
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
+struct SettlementView {
+    status: &'static str,
+    final_stack: u32,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
 struct CardView {
     value: String,
 }
@@ -591,11 +650,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let deck_proof = DeckProofs::load(env::var("BB_PATH")?)?;
     let rooms = restore_rooms(db.load_rooms().await?)?;
     attach_fairness(&db, &rooms).await?;
+    let aztec = if aztec_configured() || db.has_aztec_state().await? {
+        let boundary = aztec::Aztec::from_env()?;
+        boundary.check().await?;
+        Some(boundary)
+    } else {
+        None
+    };
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
+    let mut state = AppState::new(db, rooms, proof, deck_proof);
+    state.aztec = aztec;
+    let worker = state.clone();
+    tokio::spawn(async move { settle_aztec(worker).await });
 
     axum::serve(
         listener,
-        app_with_origins(AppState::new(db, rooms, proof, deck_proof), origins),
+        app_with_origins(state, origins),
     )
     .await?;
     Ok(())
@@ -606,6 +676,16 @@ fn app_with_origins(state: AppState, origins: Vec<HeaderValue>) -> Router {
         .route("/health", get(health))
         .route("/rooms", post(create_room))
         .route("/rooms/{room}/join", post(join_room))
+        .route("/aztec/rooms", post(reserve_aztec_room))
+        .route("/aztec/rooms/{room}/join", post(reserve_aztec_join))
+        .route(
+            "/aztec/admissions/{admission}/authorize",
+            post(authorize_aztec_admission),
+        )
+        .route(
+            "/aztec/admissions/{admission}/confirm",
+            post(confirm_aztec_admission),
+        )
         .route("/rooms/{room}/ws", get(room_ws))
         .route("/rooms/{room}/hands", get(hand_history))
         .route("/rooms/{room}/proofs", get(proof_history))
@@ -622,6 +702,16 @@ fn app_with_origins(state: AppState, origins: Vec<HeaderValue>) -> Router {
                 .allow_methods([Method::GET, Method::POST])
                 .allow_headers([CONTENT_TYPE]),
         )
+}
+
+fn aztec_configured() -> bool {
+    [
+        "AZTEC_NODE_URL",
+        "AZTEC_PLAY_CHIPS_ADDRESS",
+        "AZTEC_SERVER_ACCOUNT",
+    ]
+    .into_iter()
+    .any(|name| env::var_os(name).is_some())
 }
 
 fn web_origins() -> Result<Vec<HeaderValue>, Box<dyn std::error::Error + Send + Sync>> {
@@ -1016,6 +1106,9 @@ async fn create_room(
 ) -> Result<(StatusCode, Json<SeatResponse>), HttpError> {
     let config = request.config();
     let mode = request.mode();
+    if mode == RoomMode::Aztec {
+        return Err((StatusCode::BAD_REQUEST, "aztec entry required"));
+    }
     let name = player_name(request.name.as_deref(), mode, 0)?;
     config
         .validate()
@@ -1093,6 +1186,9 @@ async fn join_room(
     let mut room = room.lock().await;
     if room.mode == RoomMode::Single {
         return Err((StatusCode::CONFLICT, "single room full"));
+    }
+    if room.mode == RoomMode::Aztec {
+        return Err((StatusCode::CONFLICT, "aztec entry required"));
     }
     let seat = room
         .next_seat()
@@ -3835,6 +3931,7 @@ fn seat_view(game: &State, seat: usize) -> SeatView {
         result: None,
         ready: None,
         finish: None,
+        settlement: None,
         challenge: None,
         claim: None,
         proofs: Vec::new(),

@@ -301,7 +301,13 @@ function challengeCommit(room: string, seat: number, challenge: ChallengeView): 
   return { type: "challenge_commit", hand_no: challenge.hand_no, commitment: value };
 }
 
-export function MultiplayerGame({ room }: { room: string }) {
+export function MultiplayerGame({
+  room,
+  initialMode,
+}: {
+  room: string;
+  initialMode?: RoomMode;
+}) {
   const router = useRouter();
   const socket = useRef<WebSocket | undefined>(undefined);
   const auth = useRef<RoomSeat | undefined>(undefined);
@@ -354,6 +360,25 @@ export function MultiplayerGame({ room }: { room: string }) {
     (view.deal === undefined || view.deal.audit),
   );
   const finish = gameReady && finishHand === view?.hand_no;
+
+  useEffect(() => {
+    const mode = view?.mode ?? waiting?.mode ?? initialMode;
+    const root = document.documentElement;
+    const page = document.querySelector(".table-page");
+
+    if (mode === "aztec") {
+      root.dataset.noirMode = "aztec";
+      page?.classList.add("table-page-aztec");
+    } else {
+      delete root.dataset.noirMode;
+      page?.classList.remove("table-page-aztec");
+    }
+
+    return () => {
+      if (root.dataset.noirMode === "aztec") delete root.dataset.noirMode;
+      page?.classList.remove("table-page-aztec");
+    };
+  }, [initialMode, view?.mode, waiting?.mode]);
 
   const setPending = useCallback((value: boolean) => {
     actionBusy.current = value;

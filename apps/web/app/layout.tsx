@@ -16,6 +16,7 @@ import "./chips.css";
 import "./repair.css";
 import "./story.css";
 import "./proof-guides.css";
+import "./aztec.css";
 
 export const metadata: Metadata = {
   title: "Noir Poker",

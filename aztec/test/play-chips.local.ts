@@ -50,28 +50,71 @@ await assert.rejects(contract.methods.claim_private().simulate({ from: alice }))
 const tableId = new Fr(7001n);
 const aliceEntry = new Fr(7101n);
 const bobEntry = new Fr(7102n);
+const extraEntry = new Fr(7103n);
+const sameSeatEntry = new Fr(7104n);
 
-await contract.methods.enter_table(tableId, aliceEntry, 1_000n).send({ from: alice });
-await contract.methods.enter_table(tableId, bobEntry, 1_000n).send({ from: bob });
+await assert.rejects(
+  contract.methods.authorize_entry(tableId, aliceEntry, 0, alice, 1_000n).simulate({ from: bob }),
+);
+await contract.methods.authorize_entry(tableId, aliceEntry, 0, alice, 1_000n).send({ from: alice });
+await contract.methods.authorize_entry(tableId, bobEntry, 1, bob, 1_000n).send({ from: alice });
+
+await assert.rejects(
+  contract.methods.authorize_entry(tableId, sameSeatEntry, 0, bob, 1_000n).simulate({ from: alice }),
+);
+await assert.rejects(
+  contract.methods.authorize_entry(tableId, aliceEntry, 0, alice, 1_000n).simulate({ from: alice }),
+);
+await assert.rejects(
+  contract.methods.enter_table(tableId, extraEntry, 2, 1_000n).simulate({ from: alice }),
+);
+await assert.rejects(
+  contract.methods.enter_table(tableId, aliceEntry, 0, 1_000n).simulate({ from: bob }),
+);
+await assert.rejects(
+  contract.methods.enter_table(tableId, aliceEntry, 1, 1_000n).simulate({ from: alice }),
+);
+await assert.rejects(
+  contract.methods.enter_table(tableId, aliceEntry, 0, 900n).simulate({ from: alice }),
+);
+await assert.rejects(
+  contract.methods.enter_table(new Fr(7002n), aliceEntry, 0, 1_000n).simulate({ from: alice }),
+);
+
+await contract.methods.enter_table(tableId, aliceEntry, 0, 1_000n).send({ from: alice });
+await contract.methods.enter_table(tableId, bobEntry, 1, 1_000n).send({ from: bob });
+
+await assert.rejects(
+  contract.methods.enter_table(tableId, aliceEntry, 0, 1_000n).simulate({ from: alice }),
+);
 
 assert.equal(await balanceOf(alice), 9_000n);
 assert.equal(await balanceOf(bob), 9_000n);
 
-for (const [entryId, amount] of [
-  [aliceEntry, 1_000n],
-  [bobEntry, 1_000n],
+for (const [entryId, account, seat] of [
+  [aliceEntry, alice, 0],
+  [bobEntry, bob, 1],
 ] as const) {
   const { result: exists } = await contract.methods.entry_exists(entryId).simulate({ from: alice });
   const { result: entryTable } = await contract.methods.entry_table_of(entryId).simulate({ from: alice });
+  const { result: entryAccount } = await contract.methods.entry_account_of(entryId).simulate({ from: alice });
+  const { result: entrySeat } = await contract.methods.entry_seat_of(entryId).simulate({ from: alice });
   const { result: entryAmount } = await contract.methods.entry_amount_of(entryId).simulate({ from: alice });
 
   assert.equal(exists, true);
   assert.equal(String(entryTable), tableId.toBigInt().toString());
-  assert.equal(entryAmount, amount);
+  assert.equal(entryAccount.toString(), account.toString());
+  assert.equal(entrySeat, seat);
+  assert.equal(entryAmount, 1_000n);
 }
 
 const { result: pool } = await contract.methods.table_pool_of(tableId).simulate({ from: alice });
 assert.equal(pool, 2_000n);
+await assert.rejects(
+  contract.methods.enter_table(tableId, extraEntry, 2, 100n).simulate({ from: alice }),
+);
+const { result: unchangedPool } = await contract.methods.table_pool_of(tableId).simulate({ from: alice });
+assert.equal(unchangedPool, 2_000n);
 
 const recipients = [alice, bob, alice, alice, alice, alice];
 const payouts = [1_500n, 500n, 0n, 0n, 0n, 0n];
@@ -92,7 +135,7 @@ await assert.rejects(
   contract.methods.settle_private(tableId, recipients, payouts).simulate({ from: alice }),
 );
 await assert.rejects(
-  contract.methods.enter_table(tableId, new Fr(7103n), 100n).simulate({ from: alice }),
+  contract.methods.authorize_entry(tableId, extraEntry, 2, alice, 100n).simulate({ from: alice }),
 );
 
 console.log("play chips local integration passed");
