@@ -3,7 +3,7 @@ use std::io;
 
 use challenge_core::PROTOCOL_VERSION;
 use game_core::Action;
-use sqlx::postgres::{PgPoolOptions, PgQueryResult};
+use sqlx::postgres::{PgConnection, PgPoolOptions, PgQueryResult, PgRow};
 use sqlx::{PgPool, Postgres, Row, Transaction, query};
 use uuid::Uuid;
 
@@ -119,6 +119,7 @@ pub struct StoredAdmission {
     pub id: Uuid,
     pub room: Uuid,
     pub seat: i32,
+    pub expired: bool,
     pub token_hash: Vec<u8>,
     pub account: String,
     pub table_id: String,
@@ -132,7 +133,6 @@ pub struct StoredAdmission {
     pub entropy: Vec<u8>,
     pub name: String,
     pub status: String,
-    pub authorized_tx: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -146,6 +146,7 @@ pub struct NewSettlement {
 #[derive(Clone)]
 pub struct StoredSettlement {
     pub room: Uuid,
+    pub kind: String,
     pub table_id: String,
     pub recipients: Vec<String>,
     pub payouts: Vec<i64>,
@@ -329,9 +330,16 @@ impl Db {
 
     pub async fn has_aztec_state(&self) -> DbResult<bool> {
         let row = query(
-            "SELECT EXISTS (SELECT 1 FROM rooms WHERE mode = 'aztec') \
-             OR EXISTS (SELECT 1 FROM aztec_admissions WHERE status != 'failed') \
-             OR EXISTS (SELECT 1 FROM aztec_settlements WHERE status != 'confirmed') AS present",
+            "SELECT EXISTS ( \
+                 SELECT 1 FROM rooms WHERE mode = 'aztec' AND NOT EXISTS ( \
+                     SELECT 1 FROM aztec_settlements \
+                     WHERE aztec_settlements.room_id = rooms.id AND status = 'confirmed' \
+                 ) \
+             ) OR EXISTS ( \
+                 SELECT 1 FROM aztec_admissions WHERE status IN ('reserved', 'authorized') \
+             ) OR EXISTS ( \
+                 SELECT 1 FROM aztec_settlements WHERE status != 'confirmed' \
+             ) AS present",
         )
         .fetch_one(&self.pool)
         .await?;
@@ -344,9 +352,10 @@ impl Db {
         token_hash: &[u8; 32],
     ) -> DbResult<Option<StoredAdmission>> {
         query(
-            "SELECT id, room_id, seat, token_hash, account, table_id, entry_id, amount, \
-             players, stack, small_blind, big_blind, total_hands, entropy, name, status, \
-             authorized_tx FROM aztec_admissions WHERE id = $1 AND token_hash = $2",
+            "SELECT id, room_id, seat, expires_at <= now() AS expired, token_hash, account, table_id, \
+             entry_id, amount, players, stack, small_blind, big_blind, total_hands, \
+             entropy, name, status \
+             FROM aztec_admissions WHERE id = $1 AND token_hash = $2",
         )
         .bind(id)
         .bind(token_hash.as_slice())
@@ -371,16 +380,51 @@ impl Db {
         Ok(())
     }
 
-    pub async fn finish_deck(
+    pub async fn expired_aztec_admission(
         &self,
         room: Uuid,
-        hand_no: u64,
-        transcript: &[u8],
-        deck: &[u8; 52],
-        facts: &[FactCommitment],
-    ) -> DbResult<()> {
-        self.finish_deck_with_settlement(room, hand_no, transcript, deck, facts, None)
-            .await
+        seat: usize,
+    ) -> DbResult<Option<StoredAdmission>> {
+        query(
+            "SELECT id, room_id, seat, expires_at <= now() AS expired, token_hash, account, table_id, \
+             entry_id, amount, players, stack, small_blind, big_blind, total_hands, \
+             entropy, name, status \
+             FROM aztec_admissions WHERE room_id = $1 AND seat = $2 \
+             AND status IN ('reserved', 'authorized') AND expires_at <= now()",
+        )
+        .bind(room)
+        .bind(i32::try_from(seat)?)
+        .fetch_optional(&self.pool)
+        .await?
+        .map(stored_admission)
+            .transpose()
+    }
+
+    pub async fn expired_aztec_admissions(&self) -> DbResult<Vec<StoredAdmission>> {
+        query(
+            "SELECT id, room_id, seat, expires_at <= now() AS expired, token_hash, account, \
+             table_id, entry_id, amount, players, stack, small_blind, big_blind, \
+             total_hands, entropy, name, status FROM aztec_admissions \
+             WHERE status IN ('reserved', 'authorized') AND expires_at <= now() \
+             ORDER BY CASE status WHEN 'authorized' THEN 0 ELSE 1 END, created_at LIMIT 1",
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(stored_admission)
+        .collect()
+    }
+
+    pub async fn fail_aztec_admission(&self, id: Uuid) -> DbResult<()> {
+        let changed = query(
+            "UPDATE aztec_admissions SET status = 'failed', updated_at = now() \
+             WHERE id = $1 AND status IN ('reserved', 'authorized')",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        one_row(changed)?;
+        Ok(())
     }
 
     pub async fn finish_deck_with_settlement(
@@ -444,11 +488,135 @@ impl Db {
     pub async fn incomplete_rooms(&self) -> DbResult<u64> {
         let row = query(
             "SELECT COUNT(DISTINCT room_id) AS count FROM deck_transcripts \
-             WHERE completed_at IS NULL",
+             WHERE completed_at IS NULL AND NOT EXISTS ( \
+                 SELECT 1 FROM aztec_settlements \
+                 WHERE aztec_settlements.room_id = deck_transcripts.room_id \
+             )",
         )
         .fetch_one(&self.pool)
         .await?;
         Ok(u64::try_from(row.try_get::<i64, _>("count")?)?)
+    }
+
+    pub async fn stage_aztec_refunds(&self) -> DbResult<u64> {
+        let mut tx = self.pool.begin().await?;
+        let rooms = query(
+            "SELECT rooms.id, rooms.players FROM rooms \
+             WHERE rooms.mode = 'aztec' \
+             AND EXISTS ( \
+                 SELECT 1 FROM deck_transcripts \
+                 WHERE deck_transcripts.room_id = rooms.id \
+                 AND deck_transcripts.completed_at IS NULL \
+             ) \
+             AND NOT EXISTS ( \
+                 SELECT 1 FROM aztec_settlements \
+                 WHERE aztec_settlements.room_id = rooms.id \
+             ) \
+             AND NOT EXISTS ( \
+                 SELECT 1 FROM aztec_admissions \
+                 WHERE aztec_admissions.room_id = rooms.id \
+                 AND aztec_admissions.status IN ('reserved', 'authorized') \
+             ) ORDER BY rooms.id FOR UPDATE OF rooms",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut count = 0u64;
+
+        for room in rooms {
+            let id: Uuid = room.try_get("id")?;
+            let players = usize::try_from(room.try_get::<i32, _>("players")?)?;
+            if !(2..=6).contains(&players) {
+                return Err(io::Error::other("refund player count invalid").into());
+            }
+
+            let hand = query(
+                "SELECT starting_stacks FROM hands WHERE room_id = $1 \
+                 ORDER BY hand_no DESC LIMIT 1",
+            )
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| io::Error::other("refund hand missing"))?;
+            let stacks: Vec<i64> = hand.try_get("starting_stacks")?;
+            if stacks.len() != players {
+                return Err(io::Error::other("refund stacks mismatch").into());
+            }
+
+            let seats = query(
+                "SELECT seats.seat, seats.aztec_account AS seat_account, \
+                 seats.aztec_entry AS seat_entry, seats.aztec_amount AS seat_amount, \
+                 admission.account, admission.entry_id, admission.amount, admission.table_id \
+                 FROM seats JOIN aztec_admissions admission \
+                 ON admission.room_id = seats.room_id AND admission.seat = seats.seat \
+                 WHERE seats.room_id = $1 AND admission.status = 'confirmed' \
+                 ORDER BY seats.seat",
+            )
+            .bind(id)
+            .fetch_all(&mut *tx)
+            .await?;
+            if seats.len() != players {
+                return Err(io::Error::other("refund seats mismatch").into());
+            }
+
+            let mut recipients: [String; 6] =
+                core::array::from_fn(|_| format!("0x{}", "0".repeat(64)));
+            let mut payouts = [0u32; 6];
+            let mut table_id = None::<String>;
+            let mut locked = 0u64;
+            let mut paid = 0u64;
+
+            for (index, seat) in seats.into_iter().enumerate() {
+                if usize::try_from(seat.try_get::<i32, _>("seat")?)? != index {
+                    return Err(io::Error::other("refund seat order mismatch").into());
+                }
+
+                let account: String = seat.try_get("account")?;
+                let entry: String = seat.try_get("entry_id")?;
+                let amount = u32::try_from(seat.try_get::<i64, _>("amount")?)?;
+                let seat_account: Option<String> = seat.try_get("seat_account")?;
+                let seat_entry: Option<String> = seat.try_get("seat_entry")?;
+                let seat_amount: Option<i64> = seat.try_get("seat_amount")?;
+                if seat_account.as_deref() != Some(account.as_str())
+                    || seat_entry.as_deref() != Some(entry.as_str())
+                    || seat_amount != Some(i64::from(amount))
+                {
+                    return Err(io::Error::other("refund seat binding mismatch").into());
+                }
+
+                let next_table: String = seat.try_get("table_id")?;
+                if table_id.as_ref().is_some_and(|table| table != &next_table) {
+                    return Err(io::Error::other("refund table mismatch").into());
+                }
+                table_id.get_or_insert(next_table);
+
+                let payout = u32::try_from(stacks[index])?;
+                recipients[index] = account;
+                payouts[index] = payout;
+                locked = locked
+                    .checked_add(u64::from(amount))
+                    .ok_or_else(|| io::Error::other("refund pool limit"))?;
+                paid = paid
+                    .checked_add(u64::from(payout))
+                    .ok_or_else(|| io::Error::other("refund pool limit"))?;
+            }
+
+            if locked != paid {
+                return Err(io::Error::other("refund pool mismatch").into());
+            }
+            let settlement = NewSettlement {
+                room: id,
+                table_id: table_id.ok_or_else(|| io::Error::other("refund table missing"))?,
+                recipients,
+                payouts,
+            };
+            insert_settlement_kind(&mut tx, &settlement, "refund").await?;
+            count = count
+                .checked_add(1)
+                .ok_or_else(|| io::Error::other("refund count limit"))?;
+        }
+
+        tx.commit().await?;
+        Ok(count)
     }
 
     #[cfg(test)]
@@ -859,6 +1027,7 @@ impl Db {
         Ok(())
     }
 
+    #[cfg(test)]
     pub async fn append_action(&self, action: NewAction<'_>) -> DbResult<()> {
         self.append_action_with_settlement(action, None).await
     }
@@ -988,7 +1157,7 @@ impl Db {
 
     async fn load_settlement(&self, room: Uuid) -> DbResult<Option<StoredSettlement>> {
         query(
-            "SELECT room_id, table_id, recipients, payouts, status, tx_hash \
+            "SELECT room_id, kind, table_id, recipients, payouts, status, tx_hash \
              FROM aztec_settlements WHERE room_id = $1",
         )
         .bind(room)
@@ -997,6 +1166,7 @@ impl Db {
         .map(|row| {
             Ok(StoredSettlement {
                 room: row.try_get("room_id")?,
+                kind: row.try_get("kind")?,
                 table_id: row.try_get("table_id")?,
                 recipients: row.try_get("recipients")?,
                 payouts: row.try_get("payouts")?,
@@ -1271,51 +1441,72 @@ impl Db {
 
     pub async fn pending_aztec_settlements(&self) -> DbResult<Vec<StoredSettlement>> {
         query(
-            "SELECT room_id, table_id, recipients, payouts, status, tx_hash \
+            "SELECT room_id, kind, table_id, recipients, payouts, status, tx_hash \
              FROM aztec_settlements WHERE status != 'confirmed' ORDER BY created_at",
         )
         .fetch_all(&self.pool)
         .await?
         .into_iter()
-        .map(|row| {
-            Ok(StoredSettlement {
-                room: row.try_get("room_id")?,
-                table_id: row.try_get("table_id")?,
-                recipients: row.try_get("recipients")?,
-                payouts: row.try_get("payouts")?,
-                status: row.try_get("status")?,
-                tx_hash: row.try_get("tx_hash")?,
-            })
-        })
+        .map(stored_settlement)
         .collect()
     }
 
-    pub async fn fail_aztec_settlement(&self, room: Uuid, error: &str) -> DbResult<()> {
-        let message = error.chars().take(500).collect::<String>();
-        let changed = query(
-            "UPDATE aztec_settlements SET attempts = attempts + 1, last_error = $2, \
-             updated_at = now() WHERE room_id = $1 AND status != 'confirmed'",
+    pub async fn lock_aztec_settlement(
+        &self,
+        room: Uuid,
+    ) -> DbResult<Option<(StoredSettlement, Transaction<'static, Postgres>)>> {
+        let mut db = self.pool.begin().await?;
+        let row = query(
+            "SELECT room_id, kind, table_id, recipients, payouts, status, tx_hash \
+             FROM aztec_settlements WHERE room_id = $1 AND status != 'confirmed' \
+             FOR UPDATE SKIP LOCKED",
         )
         .bind(room)
-        .bind(message)
-        .execute(&self.pool)
+        .fetch_optional(&mut *db)
         .await?;
-        one_row(changed)?;
-        Ok(())
+
+        match row {
+            Some(row) => Ok(Some((stored_settlement(row)?, db))),
+            None => {
+                db.rollback().await?;
+                Ok(None)
+            }
+        }
     }
 
-    pub async fn confirm_aztec_settlement(&self, room: Uuid, tx: &str) -> DbResult<()> {
-        let changed = query(
-            "UPDATE aztec_settlements SET status = 'confirmed', tx_hash = COALESCE(tx_hash, $2), \
-             last_error = NULL, updated_at = now(), confirmed_at = now() \
-             WHERE room_id = $1 AND status != 'confirmed'",
-        )
-        .bind(room)
-        .bind(tx)
-        .execute(&self.pool)
-        .await?;
-        one_row(changed)?;
-        Ok(())
+    pub async fn fail_aztec_settlement(
+        &self,
+        db: &mut Transaction<'_, Postgres>,
+        room: Uuid,
+        error: &str,
+    ) -> DbResult<()> {
+        fail_settlement(db, room, error).await
+    }
+
+    pub async fn submit_aztec_settlement(
+        &self,
+        db: &mut Transaction<'_, Postgres>,
+        room: Uuid,
+        tx: &str,
+    ) -> DbResult<()> {
+        submit_settlement(db, room, tx).await
+    }
+
+    #[cfg(test)]
+    pub async fn confirm_aztec_settlement(&self, room: Uuid, tx: &str) -> DbResult<u64> {
+        let mut db = self.pool.begin().await?;
+        let rev = confirm_settlement(&mut db, room, tx).await?;
+        db.commit().await?;
+        Ok(rev)
+    }
+
+    pub async fn confirm_locked_aztec_settlement(
+        &self,
+        db: &mut Transaction<'_, Postgres>,
+        room: Uuid,
+        tx: &str,
+    ) -> DbResult<u64> {
+        confirm_settlement(db, room, tx).await
     }
 
     pub(super) fn pool(&self) -> &PgPool {
@@ -1323,11 +1514,70 @@ impl Db {
     }
 }
 
+fn stored_settlement(row: PgRow) -> DbResult<StoredSettlement> {
+    Ok(StoredSettlement {
+        room: row.try_get("room_id")?,
+        kind: row.try_get("kind")?,
+        table_id: row.try_get("table_id")?,
+        recipients: row.try_get("recipients")?,
+        payouts: row.try_get("payouts")?,
+        status: row.try_get("status")?,
+        tx_hash: row.try_get("tx_hash")?,
+    })
+}
+
+async fn fail_settlement(db: &mut PgConnection, room: Uuid, error: &str) -> DbResult<()> {
+    let message = error.chars().take(500).collect::<String>();
+    let changed = query(
+        "UPDATE aztec_settlements SET attempts = attempts + 1, last_error = $2, \
+         updated_at = now() WHERE room_id = $1 AND status != 'confirmed'",
+    )
+    .bind(room)
+    .bind(message)
+    .execute(db)
+    .await?;
+    one_row(changed)?;
+    Ok(())
+}
+
+async fn submit_settlement(db: &mut PgConnection, room: Uuid, tx: &str) -> DbResult<()> {
+    let changed = query(
+        "UPDATE aztec_settlements SET status = 'submitted', tx_hash = $2, \
+         last_error = NULL, updated_at = now(), submitted_at = now() \
+         WHERE room_id = $1 AND status IN ('pending', 'submitted')",
+    )
+    .bind(room)
+    .bind(tx)
+    .execute(db)
+    .await?;
+    one_row(changed)?;
+    Ok(())
+}
+
+async fn confirm_settlement(db: &mut PgConnection, room: Uuid, tx: &str) -> DbResult<u64> {
+    let changed = query(
+        "UPDATE aztec_settlements SET status = 'confirmed', tx_hash = COALESCE(tx_hash, $2), \
+         last_error = NULL, updated_at = now(), confirmed_at = now() \
+         WHERE room_id = $1 AND status != 'confirmed'",
+    )
+    .bind(room)
+    .bind(tx)
+    .execute(&mut *db)
+    .await?;
+    one_row(changed)?;
+    let row = query("UPDATE rooms SET rev = rev + 1 WHERE id = $1 RETURNING rev")
+        .bind(room)
+        .fetch_one(db)
+        .await?;
+    Ok(u64::try_from(row.try_get::<i64, _>("rev")?)?)
+}
+
 fn stored_admission(row: sqlx::postgres::PgRow) -> DbResult<StoredAdmission> {
     Ok(StoredAdmission {
         id: row.try_get("id")?,
         room: row.try_get("room_id")?,
         seat: row.try_get("seat")?,
+        expired: row.try_get("expired")?,
         token_hash: row.try_get("token_hash")?,
         account: row.try_get("account")?,
         table_id: row.try_get("table_id")?,
@@ -1341,13 +1591,20 @@ fn stored_admission(row: sqlx::postgres::PgRow) -> DbResult<StoredAdmission> {
         entropy: row.try_get("entropy")?,
         name: row.try_get("name")?,
         status: row.try_get("status")?,
-        authorized_tx: row.try_get("authorized_tx")?,
     })
 }
 
 pub async fn insert_settlement(
     tx: &mut Transaction<'_, Postgres>,
     settlement: &NewSettlement,
+) -> DbResult<()> {
+    insert_settlement_kind(tx, settlement, "result").await
+}
+
+async fn insert_settlement_kind(
+    tx: &mut Transaction<'_, Postgres>,
+    settlement: &NewSettlement,
+    kind: &str,
 ) -> DbResult<()> {
     let payouts = settlement
         .payouts
@@ -1357,10 +1614,11 @@ pub async fn insert_settlement(
         .collect::<Vec<_>>();
 
     query(
-        "INSERT INTO aztec_settlements (room_id, table_id, recipients, payouts) \
-         VALUES ($1, $2, $3, $4)",
+        "INSERT INTO aztec_settlements (room_id, kind, table_id, recipients, payouts) \
+         VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(settlement.room)
+    .bind(kind)
     .bind(&settlement.table_id)
     .bind(settlement.recipients.as_slice())
     .bind(payouts)
@@ -1396,5 +1654,109 @@ mod tests {
         assert_eq!(action_data(Action::Check), ("check", None));
         assert_eq!(action_data(Action::Call), ("call", None));
         assert_eq!(action_data(Action::RaiseTo(40)), ("raise_to", Some(40)));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL"]
+    async fn aztec_refund_staging() -> DbResult<()> {
+        let url = std::env::var("TEST_DATABASE_URL")?;
+        let db = Db::connect(&url).await?;
+        let room = Uuid::new_v4();
+        let hand = Uuid::new_v4();
+        let table = field_id();
+        let accounts = [field_id(), field_id()];
+        let entries = [field_id(), field_id()];
+        let tokens = [[0x11u8; 32], [0x22u8; 32]];
+
+        let mut tx = db.pool.begin().await?;
+        query(
+            "INSERT INTO rooms \
+             (id, mode, players, stack, small_blind, big_blind, total_hands, rev) \
+             VALUES ($1, 'aztec', 2, 1000, 5, 10, 5, 0)",
+        )
+        .bind(room)
+        .execute(&mut *tx)
+        .await?;
+
+        for seat in 0..2 {
+            query(
+                "INSERT INTO seats \
+                 (room_id, seat, name, token_hash, aztec_account, aztec_entry, aztec_amount) \
+                 VALUES ($1, $2, $3, $4, $5, $6, 1000)",
+            )
+            .bind(room)
+            .bind(i32::try_from(seat)?)
+            .bind(format!("Player {}", seat + 1))
+            .bind(tokens[seat].as_slice())
+            .bind(&accounts[seat])
+            .bind(&entries[seat])
+            .execute(&mut *tx)
+            .await?;
+            query(
+                "INSERT INTO aztec_admissions \
+                 (id, room_id, seat, token_hash, account, table_id, entry_id, amount, \
+                  players, stack, small_blind, big_blind, total_hands, entropy, name, \
+                  status, authorized_tx, confirmed_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, 1000, 2, 1000, 5, 10, 5, \
+                         $8, $9, 'confirmed', '0xtx', now())",
+            )
+            .bind(Uuid::new_v4())
+            .bind(room)
+            .bind(i32::try_from(seat)?)
+            .bind(tokens[seat].as_slice())
+            .bind(&accounts[seat])
+            .bind(&table)
+            .bind(&entries[seat])
+            .bind([u8::try_from(seat)?; 32].as_slice())
+            .bind(format!("Player {}", seat + 1))
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        query(
+            "INSERT INTO hands (id, room_id, hand_no, seed, dealer, starting_stacks) \
+             VALUES ($1, $2, 0, $3, 0, $4)",
+        )
+        .bind(hand)
+        .bind(room)
+        .bind([0x33u8; 32].as_slice())
+        .bind([1200i64, 800].as_slice())
+        .execute(&mut *tx)
+        .await?;
+        query("INSERT INTO deck_transcripts (room_id, hand_no, hand_id) VALUES ($1, 0, $2)")
+            .bind(room)
+            .bind(hand)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+
+        assert!(db.stage_aztec_refunds().await? >= 1);
+        assert_eq!(db.stage_aztec_refunds().await?, 0);
+        let stored = db.load_settlement(room).await?.expect("refund");
+        assert_eq!(stored.kind, "refund");
+        assert_eq!(stored.table_id, table);
+        assert_eq!(&stored.recipients[..2], accounts.as_slice());
+        assert_eq!(stored.payouts, vec![1200, 800, 0, 0, 0, 0]);
+        assert!(
+            !db.load_rooms()
+                .await?
+                .iter()
+                .any(|stored| stored.id == room)
+        );
+
+        query("DELETE FROM aztec_admissions WHERE room_id = $1")
+            .bind(room)
+            .execute(&db.pool)
+            .await?;
+        query("DELETE FROM rooms WHERE id = $1")
+            .bind(room)
+            .execute(&db.pool)
+            .await?;
+        Ok(())
+    }
+
+    fn field_id() -> String {
+        let value = Uuid::new_v4().simple().to_string();
+        format!("0x{value}{value}")
     }
 }

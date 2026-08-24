@@ -202,7 +202,7 @@ if (process.env.SINGLE_PLAYER_SMOKE !== "1") {
   );
   await visit("/chips", "chips", [
     "Aztec testnet",
-    "Private chips for Aztec tables.",
+    "Private test credits on Aztec",
   ]);
 }
 

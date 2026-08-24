@@ -5,13 +5,18 @@ pub contract PlayChips {
     use aztec::{
         macros::{functions::{external, initializer, only_self}, storage::storage},
         messages::delivery::MessageDelivery,
-        protocol::address::AztecAddress,
+        protocol::{
+            address::AztecAddress,
+            hash::poseidon2_hash_with_separator,
+            traits::ToField,
+        },
         state_vars::{Map, Owned, PublicMutable},
     };
     use balance_set::BalanceSet;
 
     global CLAIM_AMOUNT: u64 = 10_000;
     global MAX_SEATS: u32 = 6;
+    global SETTLEMENT_DOMAIN: u32 = 17_731;
 
     #[storage]
     struct Storage<Context> {
@@ -26,6 +31,7 @@ pub contract PlayChips {
         table_seats: Map<Field, PublicMutable<u32, Context>, Context>,
         table_pool: Map<Field, PublicMutable<u64, Context>, Context>,
         table_settled: Map<Field, PublicMutable<bool, Context>, Context>,
+        table_settlements: Map<Field, PublicMutable<Field, Context>, Context>,
         private_balances: Owned<BalanceSet<Context>, Context>,
     }
 
@@ -67,16 +73,19 @@ pub contract PlayChips {
         assert(seat < MAX_SEATS, "Invalid seat");
         assert(amount > 0, "Buy-in must be positive");
 
-        let seats = self.storage.table_seats.at(table_id).read();
-        let seat_bit = 1 << seat;
-        assert((seats & seat_bit) == 0, "Seat already authorized");
-
         self.storage.entry_authorized.at(entry_id).write(true);
         self.storage.entry_tables.at(entry_id).write(table_id);
         self.storage.entry_accounts.at(entry_id).write(account);
         self.storage.entry_seats.at(entry_id).write(seat);
         self.storage.entry_amounts.at(entry_id).write(amount);
-        self.storage.table_seats.at(table_id).write(seats | seat_bit);
+    }
+
+    #[external("public")]
+    fn cancel_entry(entry_id: Field) {
+        assert_eq(self.msg_sender(), self.storage.owner.read(), "Only the game server can cancel");
+        assert(!self.storage.entries.at(entry_id).read(), "Entry already used");
+
+        self.storage.entry_authorized.at(entry_id).write(false);
     }
 
     #[external("private")]
@@ -107,9 +116,14 @@ pub contract PlayChips {
         assert_eq(seat, self.storage.entry_seats.at(entry_id).read(), "Wrong seat");
         assert_eq(amount, self.storage.entry_amounts.at(entry_id).read(), "Wrong buy-in");
 
+        let seats = self.storage.table_seats.at(table_id).read();
+        let seat_bit = 1 << seat;
+        assert((seats & seat_bit) == 0, "Seat already entered");
+
         self.storage.entries.at(entry_id).write(true);
         self.storage.entry_accounts.at(entry_id).write(account);
         self.storage.entry_seats.at(entry_id).write(seat);
+        self.storage.table_seats.at(table_id).write(seats | seat_bit);
 
         let pool = self.storage.table_pool.at(table_id).read();
         self.storage.table_pool.at(table_id).write(pool + amount);
@@ -123,10 +137,14 @@ pub contract PlayChips {
     ) {
         let caller = self.msg_sender();
         let mut total: u64 = 0;
+        let mut values: [Field; 13] = [0; 13];
+        values[0] = table_id;
 
         for i in 0..MAX_SEATS {
             let payout = payouts[i];
             total += payout;
+            values[1 + i] = recipients[i].to_field();
+            values[7 + i] = payout as Field;
 
             if payout > 0 {
                 self.storage.private_balances.at(recipients[i]).add(payout as u128).deliver(
@@ -135,17 +153,19 @@ pub contract PlayChips {
             }
         }
 
-        self.enqueue_self._record_settlement(table_id, total, caller);
+        let settlement = poseidon2_hash_with_separator(values, SETTLEMENT_DOMAIN);
+        self.enqueue_self._record_settlement(table_id, total, caller, settlement);
     }
 
     #[external("public")]
     #[only_self]
-    fn _record_settlement(table_id: Field, total: u64, caller: AztecAddress) {
+    fn _record_settlement(table_id: Field, total: u64, caller: AztecAddress, settlement: Field) {
         assert_eq(caller, self.storage.owner.read(), "Only the game server can settle");
         assert(!self.storage.table_settled.at(table_id).read(), "Table already settled");
         assert_eq(total, self.storage.table_pool.at(table_id).read(), "Payouts must equal the pool");
 
         self.storage.table_settled.at(table_id).write(true);
+        self.storage.table_settlements.at(table_id).write(settlement);
     }
 
     #[external("utility")]
@@ -196,6 +216,11 @@ pub contract PlayChips {
     #[external("utility")]
     unconstrained fn table_is_settled(table_id: Field) -> pub bool {
         self.storage.table_settled.at(table_id).read()
+    }
+
+    #[external("utility")]
+    unconstrained fn table_settlement_of(table_id: Field) -> pub Field {
+        self.storage.table_settlements.at(table_id).read()
     }
 
     #[external("utility")]

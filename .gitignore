@@ -3,6 +3,7 @@
 /circuits/challenge-v2/target/
 /aztec/target/
 /aztec/artifacts/
+/aztec/codegenCache.json
 /apps/server/zk/*
 !/apps/server/zk/challenge_v2.vk
 /apps/web/zk/*

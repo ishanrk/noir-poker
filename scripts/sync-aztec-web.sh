@@ -15,16 +15,16 @@ case "$mode" in
 esac
 
 if ! command -v aztec >/dev/null 2>&1; then
-  echo "aztec 5.1.0 required" >&2
+  echo "aztec 5.2.0 required" >&2
   exit 1
 fi
 
 version="$(aztec --version 2>&1)"
 
 case "$version" in
-  *5.1.0*) ;;
+  *5.2.0*) ;;
   *)
-    echo "aztec 5.1.0 required found $version" >&2
+    echo "aztec 5.2.0 required found $version" >&2
     exit 1
     ;;
 esac
@@ -34,7 +34,7 @@ esac
   aztec compile --force
   rm -rf artifacts
   mkdir -p artifacts
-  aztec codegen ./target -o ./artifacts
+  aztec codegen --force ./target -o ./artifacts
 )
 
 test -s "$root/aztec/artifacts/PlayChips.ts"

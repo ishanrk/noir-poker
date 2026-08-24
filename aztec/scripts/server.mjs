@@ -1,16 +1,23 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses";
+import { NO_WAIT } from "@aztec/aztec.js/contracts";
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee";
 import { Fr } from "@aztec/aztec.js/fields";
+import { createAztecNodeClient } from "@aztec/aztec.js/node";
+import { TxHash } from "@aztec/aztec.js/tx";
 import { EmbeddedWallet } from "@aztec/wallets/embedded";
+import { poseidon2HashWithSeparator } from "@aztec/foundation/crypto/poseidon";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import {
   PlayChipsContract,
   PlayChipsContractArtifact,
-} from "../artifacts/PlayChips.ts";
+} from "../../apps/web/lib/aztec/artifacts/PlayChips.ts";
 
 const FIELD = /^0x[0-9a-fA-F]{62,64}$/;
 const ADDRESS = /^0x[0-9a-fA-F]{64}$/;
 const U64_MAX = 0xffff_ffff_ffff_ffffn;
+const SETTLEMENT_DOMAIN = 17_731;
 
 function env(name) {
   const value = process.env[name];
@@ -34,8 +41,13 @@ function field(value, name) {
   return Fr.fromString(text(value, name, FIELD));
 }
 
-function address(value, name) {
-  return AztecAddress.fromStringUnsafe(text(value, name, ADDRESS));
+async function address(value, name, zero = false) {
+  const raw = text(value, name, ADDRESS);
+  const result = AztecAddress.fromStringUnsafe(raw);
+  if ((!zero || BigInt(raw) !== 0n) && !(await result.isValid())) {
+    throw new Error(`invalid ${name}`);
+  }
+  return result;
 }
 
 function amount(value, name, zero = false) {
@@ -64,7 +76,7 @@ function fieldText(value) {
   return `0x${raw.toString(16).padStart(64, "0")}`;
 }
 
-function sendOptions(owner) {
+async function sendOptions(owner) {
   const fpc = process.env.AZTEC_SPONSORED_FPC_ADDRESS;
 
   if (!fpc) {
@@ -73,15 +85,15 @@ function sendOptions(owner) {
 
   return {
     from: owner,
-    fee: { paymentMethod: new SponsoredFeePaymentMethod(address(fpc, "fee contract")) },
+    fee: { paymentMethod: new SponsoredFeePaymentMethod(await address(fpc, "fee contract")) },
   };
 }
 
 async function connect() {
   const node = env("AZTEC_NODE_URL");
-  const contractAddress = address(env("AZTEC_PLAY_CHIPS_ADDRESS"), "contract address");
-  const owner = address(env("AZTEC_SERVER_ACCOUNT"), "server account");
-  const dataDirectory = process.env.AZTEC_SERVER_WALLET_DIR ?? "aztec-wallet-data";
+  const contractAddress = await address(env("AZTEC_PLAY_CHIPS_ADDRESS"), "contract address");
+  const owner = await address(env("AZTEC_SERVER_ACCOUNT"), "server account");
+  const dataDirectory = process.env.AZTEC_SERVER_WALLET_DIR ?? join(homedir(), ".aztec", "wallet");
   const wallet = await EmbeddedWallet.create(node, { pxe: { dataDirectory } });
   const accounts = await wallet.getAccounts();
 
@@ -111,11 +123,12 @@ async function connect() {
 async function entry(contract, owner, request) {
   const entryId = field(request.entry_id, "entry id");
   const expectedTable = field(request.table_id, "table id");
-  const expectedAccount = address(request.account, "account");
+  const expectedAccount = await address(request.account, "account");
   const expectedSeat = seat(request.seat);
   const expectedAmount = amount(request.amount, "amount");
-  const [exists, tableId, accountId, seatId, entryAmount] = await Promise.all([
+  const [exists, allowed, tableId, accountId, seatId, entryAmount] = await Promise.all([
     contract.methods.entry_exists(entryId).simulate({ from: owner }),
+    contract.methods.entry_is_authorized(entryId).simulate({ from: owner }),
     contract.methods.entry_table_of(entryId).simulate({ from: owner }),
     contract.methods.entry_account_of(entryId).simulate({ from: owner }),
     contract.methods.entry_seat_of(entryId).simulate({ from: owner }),
@@ -129,21 +142,23 @@ async function entry(contract, owner, request) {
     amount: entryAmount.result.toString(),
   };
 
+  const matches =
+    BigInt(found.table_id) === expectedTable.toBigInt() &&
+    found.account.toLowerCase() === expectedAccount.toString().toLowerCase() &&
+    found.seat === expectedSeat &&
+    BigInt(found.amount) === expectedAmount;
+
   return {
     ...found,
-    matches:
-      found.exists &&
-      BigInt(found.table_id) === expectedTable.toBigInt() &&
-      found.account.toLowerCase() === expectedAccount.toString().toLowerCase() &&
-      found.seat === expectedSeat &&
-      BigInt(found.amount) === expectedAmount,
+    authorized: allowed.result && matches,
+    matches: found.exists && matches,
   };
 }
 
 async function authorized(contract, owner, request) {
   const entryId = field(request.entry_id, "entry id");
   const expectedTable = field(request.table_id, "table id");
-  const expectedAccount = address(request.account, "account");
+  const expectedAccount = await address(request.account, "account");
   const expectedSeat = seat(request.seat);
   const expectedAmount = amount(request.amount, "amount");
   const [allowed, tableId, accountId, seatId, entryAmount] = await Promise.all([
@@ -185,12 +200,20 @@ async function run(request, contract, owner) {
           field(request.table_id, "table id"),
           field(request.entry_id, "entry id"),
           seat(request.seat),
-          address(request.account, "account"),
+          await address(request.account, "account"),
           amount(request.amount, "amount"),
         )
-        .send(sendOptions(owner));
+        .send(await sendOptions(owner));
 
       return { existing: false, tx: result.receipt.txHash.toString() };
+    }
+    case "authorized":
+      return { authorized: await authorized(contract, owner, request) };
+    case "cancel": {
+      const result = await contract.methods
+        .cancel_entry(field(request.entry_id, "entry id"))
+        .send(await sendOptions(owner));
+      return { tx: result.receipt.txHash.toString() };
     }
     case "entry":
       return entry(contract, owner, request);
@@ -202,22 +225,57 @@ async function run(request, contract, owner) {
         throw new Error("invalid payouts");
       }
 
+      const payouts = request.payouts.map((value) => amount(value, "payout", true));
+      const recipients = await Promise.all(
+        request.recipients.map((value, index) =>
+          address(value, "recipient", payouts[index] === 0n),
+        ),
+      );
       const result = await contract.methods
         .settle_private(
           field(request.table_id, "table id"),
-          request.recipients.map((value) => address(value, "recipient")),
-          request.payouts.map((value) => amount(value, "payout", true)),
+          recipients,
+          payouts,
         )
-        .send(sendOptions(owner));
+        .send({ ...(await sendOptions(owner)), wait: NO_WAIT });
 
-      return { tx: result.receipt.txHash.toString() };
+      return { tx: result.toString() };
     }
     case "settlement": {
-      const { result } = await contract.methods
-        .table_is_settled(field(request.table_id, "table id"))
-        .simulate({ from: owner });
+      if (!Array.isArray(request.recipients) || request.recipients.length !== 6) {
+        throw new Error("invalid recipients");
+      }
+      if (!Array.isArray(request.payouts) || request.payouts.length !== 6) {
+        throw new Error("invalid payouts");
+      }
 
-      return { settled: result };
+      const tableId = field(request.table_id, "table id");
+      const payouts = request.payouts.map((value) => amount(value, "payout", true));
+      const recipients = await Promise.all(
+        request.recipients.map((value, index) =>
+          address(value, "recipient", payouts[index] === 0n),
+        ),
+      );
+      const [{ result: settled }, { result: recorded }] = await Promise.all([
+        contract.methods.table_is_settled(tableId).simulate({ from: owner }),
+        contract.methods.table_settlement_of(tableId).simulate({ from: owner }),
+      ]);
+      const expected = await poseidon2HashWithSeparator(
+        [tableId, ...recipients, ...payouts],
+        SETTLEMENT_DOMAIN,
+      );
+      if (settled && BigInt(String(recorded)) !== expected.toBigInt()) {
+        throw new Error("settlement does not match durable payouts");
+      }
+
+      let retry = false;
+      if (!settled && request.tx_hash !== null && request.tx_hash !== undefined) {
+        const txHash = TxHash.fromString(text(request.tx_hash, "transaction hash", FIELD));
+        const receipt = await createAztecNodeClient(env("AZTEC_NODE_URL")).getTxReceipt(txHash);
+        retry = receipt.isDropped() || receipt.hasExecutionReverted();
+      }
+
+      return { settled, commitment: fieldText(recorded), retry };
     }
     default:
       throw new Error("invalid aztec operation");

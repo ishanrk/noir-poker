@@ -1,4 +1,4 @@
-export const AZTEC_VERSION = "5.1.0";
+export const AZTEC_VERSION = "5.2.0";
 export const AZTEC_TESTNET_NODE_URL =
   process.env.NEXT_PUBLIC_AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com";
 export const AZTEC_TESTNET_CHAIN_ID = 11_155_111n;
@@ -13,7 +13,7 @@ export const PLAY_CHIPS_CONTRACT_ADDRESS =
 
 export function requirePlayChipsAddress() {
   if (!/^0x[0-9a-f]{64}$/i.test(PLAY_CHIPS_CONTRACT_ADDRESS)) {
-    throw new Error("play chips contract is not configured");
+    throw new Error("Tajadero contract is not configured");
   }
 
   return PLAY_CHIPS_CONTRACT_ADDRESS;

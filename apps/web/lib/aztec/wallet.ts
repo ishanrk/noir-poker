@@ -64,7 +64,7 @@ export function playChipsCapabilities(): AppCapabilities {
     metadata: {
       name: "Noir Poker",
       version: "0.1.0",
-      description: "Private nontransferable play chips for Noir Poker",
+      description: "Private nontransferable Tajaderos for Noir Poker",
       url: window.location.origin,
     },
     capabilities: [

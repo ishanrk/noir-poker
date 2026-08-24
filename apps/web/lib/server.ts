@@ -33,6 +33,14 @@ export type RoomSeat = {
 
 type SeatResponse = RoomSeat & { room: string; room_id: string };
 
+export type AztecReservation = SeatResponse & {
+  admission: string;
+  table_id: string;
+  entry_id: string;
+  amount: number;
+  authorized: boolean;
+};
+
 export type ProofReceipt = {
   protocol_version: number;
   room: string;
@@ -148,6 +156,68 @@ export async function joinRoom(room: string, name?: string): Promise<SeatRespons
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ entropy: entropy(), name }),
   });
+
+  if (!response.ok) throw new Error(await responseError(response));
+  return response.json();
+}
+
+export async function reserveAztecRoom(input: {
+  players: number;
+  hands: number;
+  name?: string;
+  account: string;
+}): Promise<AztecReservation> {
+  const response = await fetch(`${serverUrl()}/aztec/rooms`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...input, entropy: entropy() }),
+  });
+
+  if (!response.ok) throw new Error(await responseError(response));
+  return response.json();
+}
+
+export async function reserveAztecJoin(
+  room: string,
+  input: { name?: string; account: string },
+): Promise<AztecReservation> {
+  const response = await fetch(`${serverUrl()}/aztec/rooms/${encodeURIComponent(room)}/join`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...input, entropy: entropy() }),
+  });
+
+  if (!response.ok) throw new Error(await responseError(response));
+  return response.json();
+}
+
+export async function authorizeAztec(
+  reservation: AztecReservation,
+): Promise<AztecReservation> {
+  const response = await fetch(
+    `${serverUrl()}/aztec/admissions/${encodeURIComponent(reservation.admission)}/authorize`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: reservation.token }),
+    },
+  );
+
+  if (!response.ok) throw new Error(await responseError(response));
+  return response.json();
+}
+
+export async function confirmAztec(
+  reservation: AztecReservation,
+): Promise<SeatResponse> {
+  const response = await fetch(
+    `${serverUrl()}/aztec/admissions/${encodeURIComponent(reservation.admission)}/confirm`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: reservation.token }),
+    },
+  );
 
   if (!response.ok) throw new Error(await responseError(response));
   return response.json();

@@ -357,6 +357,7 @@ export function MultiplayerGame({
     view?.game_over &&
     !notice &&
     !deckStage &&
+    (view.mode !== "aztec" || view.settlement?.status === "returned") &&
     (view.deal === undefined || view.deal.audit),
   );
   const finish = gameReady && finishHand === view?.hand_no;
@@ -927,7 +928,7 @@ export function MultiplayerGame({
 
   const commitChallenge = useCallback(() => {
     const challenge = view?.challenge;
-    if (view?.mode !== "multiplayer" || !challenge || challenge.assigned || typeof seat !== "number") return;
+    if (view?.mode === "single" || !challenge || challenge.assigned || typeof seat !== "number") return;
 
     try {
       send(challengeCommit(room, seat, challenge));
@@ -1081,7 +1082,7 @@ export function MultiplayerGame({
   useEffect(() => {
     const challenge = view?.challenge;
     if (
-      view?.mode !== "multiplayer" ||
+      view?.mode === "single" ||
       !challenge ||
       challenge.assigned ||
       typeof seat !== "number" ||
@@ -1102,7 +1103,7 @@ export function MultiplayerGame({
   }, [actionPending, autoAttempts, commitChallenge, connected, seat, view?.challenge, view?.mode]);
 
   useEffect(() => {
-    if (view?.mode !== "multiplayer" || typeof seat !== "number" || !connected) return;
+    if (view?.mode === "single" || typeof seat !== "number" || !connected) return;
     if (drawing.current !== undefined || claiming.current !== undefined) return;
 
     const claim = Object.values(claimJobs)
@@ -1209,7 +1210,7 @@ export function MultiplayerGame({
     !connected;
 
   const contract: ContractView = {
-    assignment: view.mode !== "multiplayer" || !view.challenge
+    assignment: view.mode === "single" || !view.challenge
       ? { kind: "available" }
       : !view.challenge.assigned
         ? { kind: "draw", handNo: view.challenge.hand_no }
@@ -1264,7 +1265,7 @@ export function MultiplayerGame({
 
   return (
     <div className={`game-view${error || challengeError ? " ui-shake" : ""}`}>
-      {view.mode === "multiplayer" && (
+      {view.mode !== "single" && (
         <ProofTour room={room} seat={seat} handNo={view.hand_no} />
       )}
       {!connected && <div className="connection-bar"><span>{connecting ? "Connecting" : "Disconnected"}</span>{!connecting && <button type="button" onClick={connect}>Reconnect</button>}</div>}
@@ -1291,12 +1292,12 @@ export function MultiplayerGame({
         onGenerateProof={() => void claimChallenge(view.claim)}
         onVerifyProof={(owner, hand, kind) => void verifyProof(owner, hand, kind)}
       />
-      {view.mode === "multiplayer" && (
+      {view.mode !== "single" && (
         <PrivateChallengeBar
           view={contract}
         />
       )}
-      {view.mode === "multiplayer" && (
+      {view.mode !== "single" && (
         <PlayProofs
           room={room}
           rev={roomRev}

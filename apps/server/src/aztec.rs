@@ -1,13 +1,17 @@
 use std::env;
 use std::error::Error;
 use std::io;
-use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::process::Stdio;
+use std::sync::Arc;
+use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
+use tokio::sync::Mutex;
+use tokio::time::timeout;
 
 type AztecResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -24,6 +28,19 @@ pub struct Entry {
 pub struct Authorization {
     pub existing: bool,
     pub tx: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChainSettlement {
+    Settled,
+    Pending,
+    Retry,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EntryState {
+    pub paid: bool,
+    pub authorized: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -51,6 +68,16 @@ enum Request {
         account: String,
         amount: String,
     },
+    Authorized {
+        table_id: String,
+        entry_id: String,
+        seat: usize,
+        account: String,
+        amount: String,
+    },
+    Cancel {
+        entry_id: String,
+    },
     Entry {
         table_id: String,
         entry_id: String,
@@ -60,11 +87,14 @@ enum Request {
     },
     Settle {
         table_id: String,
-        recipients: [String; 6],
-        payouts: [String; 6],
+        recipients: Box<[String; 6]>,
+        payouts: Box<[String; 6]>,
     },
     Settlement {
         table_id: String,
+        recipients: Box<[String; 6]>,
+        payouts: Box<[String; 6]>,
+        tx_hash: Option<String>,
     },
 }
 
@@ -85,8 +115,14 @@ struct AuthorizationResult {
 }
 
 #[derive(Deserialize)]
+struct AuthorizedResult {
+    authorized: bool,
+}
+
+#[derive(Deserialize)]
 struct EntryResult {
     exists: bool,
+    authorized: bool,
     table_id: String,
     account: String,
     seat: usize,
@@ -96,6 +132,8 @@ struct EntryResult {
 #[derive(Deserialize)]
 struct SettlementResult {
     settled: bool,
+    commitment: String,
+    retry: bool,
 }
 
 impl Aztec {
@@ -139,9 +177,30 @@ impl Aztec {
         }
     }
 
+    pub async fn authorized(&self, entry: &Entry) -> AztecResult<bool> {
+        let result: AuthorizedResult = self.call(authorized_request(entry)).await?;
+        Ok(result.authorized)
+    }
+
     pub async fn confirms(&self, entry: &Entry) -> AztecResult<bool> {
+        Ok(self.entry_state(entry).await?.paid)
+    }
+
+    pub async fn entry_state(&self, entry: &Entry) -> AztecResult<EntryState> {
         let result: EntryResult = self.call(entry_request(entry, false)).await?;
-        Ok(result.matches(entry))
+        Ok(EntryState {
+            paid: result.matches(entry),
+            authorized: result.authorized,
+        })
+    }
+
+    pub async fn cancel(&self, entry: &Entry) -> AztecResult<String> {
+        let result: TxResult = self
+            .call(Request::Cancel {
+                entry_id: entry.entry_id.clone(),
+            })
+            .await?;
+        Ok(result.tx)
     }
 
     pub async fn settle(&self, settlement: &Settlement) -> AztecResult<String> {
@@ -149,20 +208,37 @@ impl Aztec {
         let result: TxResult = self
             .call(Request::Settle {
                 table_id: settlement.table_id.clone(),
-                recipients: settlement.recipients.clone(),
-                payouts,
+                recipients: Box::new(settlement.recipients.clone()),
+                payouts: Box::new(payouts),
             })
             .await?;
         Ok(result.tx)
     }
 
-    pub async fn settled(&self, table_id: &str) -> AztecResult<bool> {
+    pub async fn settled(
+        &self,
+        settlement: &Settlement,
+        tx_hash: Option<&str>,
+    ) -> AztecResult<ChainSettlement> {
+        let payouts = settlement.payouts.map(|value| value.to_string());
         let result: SettlementResult = self
             .call(Request::Settlement {
-                table_id: table_id.to_owned(),
+                table_id: settlement.table_id.clone(),
+                recipients: Box::new(settlement.recipients.clone()),
+                payouts: Box::new(payouts),
+                tx_hash: tx_hash.map(str::to_owned),
             })
             .await?;
-        Ok(result.settled)
+        if result.settled && !valid_field(&result.commitment) {
+            return Err(io::Error::other("invalid aztec settlement response").into());
+        }
+        Ok(if result.settled {
+            ChainSettlement::Settled
+        } else if result.retry {
+            ChainSettlement::Retry
+        } else {
+            ChainSettlement::Pending
+        })
     }
 
     async fn call<T>(&self, request: Request) -> AztecResult<T>
@@ -170,41 +246,36 @@ impl Aztec {
         T: DeserializeOwned + Send + 'static,
     {
         let input = serde_json::to_vec(&request)?;
-        let node = self.node.clone();
-        let helper = self.helper.clone();
-        let gate = Arc::clone(&self.gate);
+        let _guard = self.gate.lock().await;
+        let mut child = Command::new(&self.node);
+        child
+            .arg(&self.helper)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        let mut child = child.spawn()?;
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::other("aztec helper input missing"))?
+            .write_all(&input)
+            .await?;
 
-        tokio::task::spawn_blocking(move || {
-            let _guard = gate
-                .lock()
-                .map_err(|_| io::Error::other("aztec helper stopped"))?;
-            let mut child = Command::new(node)
-                .arg(helper)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()?;
+        let output = timeout(Duration::from_secs(45), child.wait_with_output())
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "aztec helper timed out"))??;
+        if !output.status.success() {
+            let error = String::from_utf8_lossy(&output.stderr);
+            return Err(io::Error::other(error.trim().to_owned()).into());
+        }
 
-            child
-                .stdin
-                .take()
-                .ok_or_else(|| io::Error::other("aztec helper input missing"))?
-                .write_all(&input)?;
-
-            let output = child.wait_with_output()?;
-            if !output.status.success() {
-                let error = String::from_utf8_lossy(&output.stderr);
-                return Err(io::Error::other(error.trim().to_owned()).into());
-            }
-
-            let stdout = String::from_utf8(output.stdout)?;
-            stdout
-                .lines()
-                .rev()
-                .find_map(|line| serde_json::from_str(line).ok())
-                .ok_or_else(|| io::Error::other("invalid aztec helper response").into())
-        })
-        .await?
+        let stdout = String::from_utf8(output.stdout)?;
+        stdout
+            .lines()
+            .rev()
+            .find_map(|line| serde_json::from_str(line).ok())
+            .ok_or_else(|| io::Error::other("invalid aztec helper response").into())
     }
 }
 
@@ -246,6 +317,16 @@ fn entry_request(entry: &Entry, authorize: bool) -> Request {
     }
 }
 
+fn authorized_request(entry: &Entry) -> Request {
+    Request::Authorized {
+        table_id: entry.table_id.clone(),
+        entry_id: entry.entry_id.clone(),
+        seat: entry.seat,
+        account: entry.account.clone(),
+        amount: entry.amount.to_string(),
+    }
+}
+
 fn same_hex(left: &str, right: &str) -> bool {
     fn digits(value: &str) -> Option<&str> {
         let value = value.strip_prefix("0x")?;
@@ -259,6 +340,12 @@ fn same_hex(left: &str, right: &str) -> bool {
         (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
         _ => false,
     }
+}
+
+fn valid_field(value: &str) -> bool {
+    value.len() == 66
+        && value.starts_with("0x")
+        && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 #[cfg(test)]
@@ -280,6 +367,7 @@ mod tests {
         let entry = expected();
         let result = EntryResult {
             exists: true,
+            authorized: false,
             table_id: "0x1".to_owned(),
             account: format!("0x{}", "AB".repeat(32)),
             seat: 2,
@@ -294,6 +382,7 @@ mod tests {
         let entry = expected();
         let mut result = EntryResult {
             exists: true,
+            authorized: false,
             table_id: "0x1".to_owned(),
             account: entry.account.clone(),
             seat: 2,

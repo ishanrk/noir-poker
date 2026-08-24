@@ -95,7 +95,7 @@ export class PlayChipsContract extends ContractBase {
   }
 
 
-  public static get storage(): ContractStorageLayout<'owner' | 'claimed' | 'entries' | 'entry_tables' | 'entry_amounts' | 'table_pool' | 'table_settled' | 'private_balances'> {
+  public static get storage(): ContractStorageLayout<'owner' | 'claimed' | 'entry_authorized' | 'entries' | 'entry_tables' | 'entry_accounts' | 'entry_seats' | 'entry_amounts' | 'table_seats' | 'table_pool' | 'table_settled' | 'table_settlements' | 'private_balances'> {
       return {
         owner: {
       slot: new Fr(1n),
@@ -103,30 +103,51 @@ export class PlayChipsContract extends ContractBase {
 claimed: {
       slot: new Fr(2n),
     },
-entries: {
+entry_authorized: {
       slot: new Fr(3n),
     },
-entry_tables: {
+entries: {
       slot: new Fr(4n),
     },
-entry_amounts: {
+entry_tables: {
       slot: new Fr(5n),
     },
-table_pool: {
+entry_accounts: {
       slot: new Fr(6n),
     },
-table_settled: {
+entry_seats: {
       slot: new Fr(7n),
     },
-private_balances: {
+entry_amounts: {
       slot: new Fr(8n),
+    },
+table_seats: {
+      slot: new Fr(9n),
+    },
+table_pool: {
+      slot: new Fr(10n),
+    },
+table_settled: {
+      slot: new Fr(11n),
+    },
+table_settlements: {
+      slot: new Fr(12n),
+    },
+private_balances: {
+      slot: new Fr(13n),
     }
-      } as ContractStorageLayout<'owner' | 'claimed' | 'entries' | 'entry_tables' | 'entry_amounts' | 'table_pool' | 'table_settled' | 'private_balances'>;
+      } as ContractStorageLayout<'owner' | 'claimed' | 'entry_authorized' | 'entries' | 'entry_tables' | 'entry_accounts' | 'entry_seats' | 'entry_amounts' | 'table_seats' | 'table_pool' | 'table_settled' | 'table_settlements' | 'private_balances'>;
     }
 
 
   /** Type-safe wrappers for the public methods exposed by the contract. */
   public declare methods: {
+
+    /** authorize_entry(table_id: field, entry_id: field, seat: integer, account: struct, amount: integer) */
+    authorize_entry: ((table_id: FieldLike, entry_id: FieldLike, seat: (bigint | number), account: AztecAddressLike, amount: (bigint | number)) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** cancel_entry(entry_id: field) */
+    cancel_entry: ((entry_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** claim_private() */
     claim_private: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
@@ -134,14 +155,23 @@ private_balances: {
     /** contract_owner() */
     contract_owner: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** enter_table(table_id: field, entry_id: field, amount: integer) */
-    enter_table: ((table_id: FieldLike, entry_id: FieldLike, amount: (bigint | number)) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** enter_table(table_id: field, entry_id: field, seat: integer, amount: integer) */
+    enter_table: ((table_id: FieldLike, entry_id: FieldLike, seat: (bigint | number), amount: (bigint | number)) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** entry_account_of(entry_id: field) */
+    entry_account_of: ((entry_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** entry_amount_of(entry_id: field) */
     entry_amount_of: ((entry_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** entry_exists(entry_id: field) */
     entry_exists: ((entry_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** entry_is_authorized(entry_id: field) */
+    entry_is_authorized: ((entry_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** entry_seat_of(entry_id: field) */
+    entry_seat_of: ((entry_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** entry_table_of(entry_id: field) */
     entry_table_of: ((entry_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
@@ -175,6 +205,9 @@ private_balances: {
 
     /** table_pool_of(table_id: field) */
     table_pool_of: ((table_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** table_settlement_of(table_id: field) */
+    table_settlement_of: ((table_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
   };
 
 

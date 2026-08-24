@@ -317,6 +317,15 @@ html[data-noir-mode="aztec"] .aztec-connect-status {
   color: var(--aztec-bronze);
 }
 
+html[data-noir-mode="aztec"] .aztec-account > div:first-child .aztec-connected {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--aztec-ember-hot);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
 html[data-noir-mode="aztec"] .aztec-connect-action p,
 html[data-noir-mode="aztec"] .aztec-account > div:first-child span {
   color: var(--aztec-muted);
@@ -432,6 +441,23 @@ html[data-noir-mode="aztec"] .aztec-stakes dt {
 
 html[data-noir-mode="aztec"] .aztec-stakes dd {
   color: var(--aztec-bronze);
+}
+
+.table-page .table-header-aztec,
+.table-page .aztec-table-credit {
+  display: none;
+}
+
+.table-page.table-page-aztec .table-header-normal {
+  display: none;
+}
+
+.table-page.table-page-aztec .table-header-aztec {
+  display: block;
+}
+
+.table-page.table-page-aztec .aztec-table-credit {
+  display: grid;
 }
 
 html[data-noir-mode="aztec"] .table-page-header {
@@ -561,6 +587,23 @@ html[data-noir-mode="aztec"] .table-page .action-bar {
   box-shadow: 7px 7px 0 rgb(237 100 46 / 36%);
 }
 
+html[data-noir-mode="aztec"] .aztec-settlement {
+  width: min(540px, calc(100% - 32px));
+  margin: 16px auto 0;
+  padding: 12px 18px;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  border-top: 1px solid var(--aztec-copper);
+  border-bottom: 1px solid var(--aztec-line);
+  color: var(--aztec-bronze);
+  background: rgb(28 18 12 / 92%);
+}
+
+html[data-noir-mode="aztec"] .aztec-settlement strong {
+  color: var(--aztec-ivory);
+}
+
 html[data-noir-mode="aztec"] .table-page .action-copy strong {
   color: var(--aztec-muted);
 }
@@ -631,6 +674,51 @@ html[data-noir-mode="aztec"] .challenge-leaderboard li {
 html[data-noir-mode="aztec"] .challenge-leaderboard li b,
 html[data-noir-mode="aztec"] .challenge-leaderboard li small {
   color: var(--aztec-bronze);
+}
+
+html[data-noir-mode="aztec"] .private-challenge-surface {
+  color: var(--aztec-ivory);
+  background:
+    linear-gradient(var(--aztec-bronze), var(--aztec-bronze)) 22px 0 / 3px 100% no-repeat,
+    var(--aztec-surface-raised);
+}
+
+html[data-noir-mode="aztec"] .private-challenge-surface::after {
+  background: var(--aztec-ember);
+}
+
+html[data-noir-mode="aztec"] .private-challenge-surface :where(p, strong, small) {
+  color: var(--aztec-ivory);
+}
+
+html[data-noir-mode="aztec"] .private-challenge-surface p:first-child {
+  color: var(--aztec-bronze);
+}
+
+html[data-noir-mode="aztec"] .proof-tour-note {
+  border-left-color: var(--aztec-ember);
+  border-bottom-color: var(--aztec-copper);
+  color: var(--aztec-ivory);
+  background: linear-gradient(
+    90deg,
+    rgb(183 102 60 / 30%),
+    rgb(28 18 12 / 96%) 62%
+  );
+}
+
+html[data-noir-mode="aztec"] .proof-tour-note > span,
+html[data-noir-mode="aztec"] .proof-tour-note h2 {
+  color: var(--aztec-bronze);
+}
+
+html[data-noir-mode="aztec"] .proof-tour-note p {
+  color: var(--aztec-ivory);
+}
+
+html[data-noir-mode="aztec"] .proof-tour-note button {
+  border-bottom-color: var(--aztec-bronze);
+  color: var(--aztec-bg-deep);
+  background: var(--aztec-ember-hot);
 }
 
 html[data-noir-mode="aztec"] .card {

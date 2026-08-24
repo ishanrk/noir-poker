@@ -254,7 +254,7 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
       contract,
       balance,
       claimed,
-      ready: claimed && balance > 0n,
+      ready: claimed,
       refresh: () => refresh(connection, contract),
     };
   }, [balance, claimed, connection, contract, refresh]);
@@ -315,9 +315,9 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
 
       {phase === "verifying" && pending && (
         <div className="aztec-verify">
-          <p>Verify connection with {pending.provider.name}</p>
+          <p>Verify connection</p>
           <strong>{pending.emojis}</strong>
-          <small>Match this fingerprint in your wallet</small>
+          <small>Match this fingerprint with your wallet</small>
           <div>
             <button className="primary-action" type="button" onClick={() => void approve()}>
               Approve connection
@@ -336,6 +336,7 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
       {connection && balance !== undefined && (
         <div className="aztec-account">
           <div>
+            <span className="aztec-connected">CONNECTED</span>
             <small>Tajadero balance</small>
             <strong>{balance.toLocaleString()} Tajaderos</strong>
             <span>{shortAddress(address ?? "")}</span>

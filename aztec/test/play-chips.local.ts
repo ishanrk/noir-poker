@@ -4,8 +4,9 @@ import { getInitialTestAccountsData } from "@aztec/accounts/testing";
 import { Fr } from "@aztec/aztec.js/fields";
 import { createAztecNodeClient, waitForNode } from "@aztec/aztec.js/node";
 import { EmbeddedWallet } from "@aztec/wallets/embedded";
+import { poseidon2HashWithSeparator } from "@aztec/foundation/crypto/poseidon";
 
-import { PlayChipsContract } from "../artifacts/PlayChips.js";
+import { PlayChipsContract } from "../artifacts/PlayChips.ts";
 
 const nodeUrl = process.env.AZTEC_NODE_URL ?? "http://127.0.0.1:8080";
 const node = createAztecNodeClient(nodeUrl);
@@ -56,12 +57,14 @@ const sameSeatEntry = new Fr(7104n);
 await assert.rejects(
   contract.methods.authorize_entry(tableId, aliceEntry, 0, alice, 1_000n).simulate({ from: bob }),
 );
+await contract.methods.authorize_entry(tableId, sameSeatEntry, 0, bob, 1_000n).send({ from: alice });
+await contract.methods.cancel_entry(sameSeatEntry).send({ from: alice });
+await contract.methods.cancel_entry(sameSeatEntry).send({ from: alice });
+const { result: canceled } = await contract.methods.entry_is_authorized(sameSeatEntry).simulate({ from: alice });
+assert.equal(canceled, false);
 await contract.methods.authorize_entry(tableId, aliceEntry, 0, alice, 1_000n).send({ from: alice });
 await contract.methods.authorize_entry(tableId, bobEntry, 1, bob, 1_000n).send({ from: alice });
 
-await assert.rejects(
-  contract.methods.authorize_entry(tableId, sameSeatEntry, 0, bob, 1_000n).simulate({ from: alice }),
-);
 await assert.rejects(
   contract.methods.authorize_entry(tableId, aliceEntry, 0, alice, 1_000n).simulate({ from: alice }),
 );
@@ -83,6 +86,11 @@ await assert.rejects(
 
 await contract.methods.enter_table(tableId, aliceEntry, 0, 1_000n).send({ from: alice });
 await contract.methods.enter_table(tableId, bobEntry, 1, 1_000n).send({ from: bob });
+await contract.methods.authorize_entry(tableId, sameSeatEntry, 0, bob, 1_000n).send({ from: alice });
+await assert.rejects(
+  contract.methods.enter_table(tableId, sameSeatEntry, 0, 1_000n).simulate({ from: bob }),
+);
+await contract.methods.cancel_entry(sameSeatEntry).send({ from: alice });
 
 await assert.rejects(
   contract.methods.enter_table(tableId, aliceEntry, 0, 1_000n).simulate({ from: alice }),
@@ -104,7 +112,7 @@ for (const [entryId, account, seat] of [
   assert.equal(exists, true);
   assert.equal(String(entryTable), tableId.toBigInt().toString());
   assert.equal(entryAccount.toString(), account.toString());
-  assert.equal(entrySeat, seat);
+  assert.equal(entrySeat, BigInt(seat));
   assert.equal(entryAmount, 1_000n);
 }
 
@@ -130,6 +138,12 @@ assert.equal(await balanceOf(bob), 9_500n);
 
 const { result: settled } = await contract.methods.table_is_settled(tableId).simulate({ from: alice });
 assert.equal(settled, true);
+const { result: settlement } = await contract.methods.table_settlement_of(tableId).simulate({ from: alice });
+const expectedSettlement = await poseidon2HashWithSeparator(
+  [tableId, ...recipients, ...payouts],
+  17_731,
+);
+assert.equal(BigInt(String(settlement)), expectedSettlement.toBigInt());
 
 await assert.rejects(
   contract.methods.settle_private(tableId, recipients, payouts).simulate({ from: alice }),

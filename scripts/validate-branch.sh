@@ -43,7 +43,7 @@ check_fn() {
 install_aztec() {
   local aztec_bin
 
-  printf 'Y\n' | VERSION=5.1.0 bash -i <(curl -fsSL https://install.aztec.network/5.1.0)
+  printf 'Y\n' | VERSION=5.2.0 bash -i <(curl -fsSL https://install.aztec.network/5.2.0)
   aztec_bin="$(find -L "$HOME/.aztec" -type f -name aztec -perm -111 2>/dev/null | head -n 1)"
   test -n "$aztec_bin"
   export PATH="$(dirname "$aztec_bin"):$PATH"
@@ -201,10 +201,10 @@ export AZTEC_NODE_URL="http://127.0.0.1:8080"
 export TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgres://postgres:postgres@127.0.0.1:5432/noir_poker}"
 
 check tool-versions 'node --version && npm --version && rustc --version && cargo --version && aztec --version && nargo --version && "$BB_PATH" --version'
-check contract-install 'npm --prefix aztec install'
+check contract-install 'npm --prefix aztec ci'
 check contract-policy 'npm --prefix aztec run test:protocol'
-check aztec-bindings 'bash scripts/sync-aztec-web.sh --force'
-check web-install 'npm --prefix apps/web install'
+check aztec-bindings 'bash scripts/sync-aztec-web.sh generate'
+check web-install 'npm --prefix apps/web ci'
 check playwright-install 'cd apps/web && npx playwright install --with-deps chromium'
 check challenge-test 'npm --prefix apps/web run challenge:test'
 check deal-test 'npm --prefix apps/web run deal:test'

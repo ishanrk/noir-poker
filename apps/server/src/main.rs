@@ -10,7 +10,7 @@ mod room;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -60,7 +60,7 @@ use crate::room::{
 
 type HttpError = (StatusCode, &'static str);
 type Rooms = Arc<Mutex<HashMap<Uuid, Arc<Mutex<Room>>>>>;
-type AdmissionLocks = Arc<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>>;
+type AdmissionLocks = Arc<Mutex<HashMap<Uuid, Weak<Mutex<()>>>>>;
 
 #[derive(Clone)]
 struct AppState {
@@ -639,6 +639,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let vk = env::var("CHALLENGE_VK_PATH")
         .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/zk/challenge_v2.vk").to_owned());
     let db = Db::connect(&database_url).await?;
+    let refunds = db.stage_aztec_refunds().await?;
+    if refunds != 0 {
+        eprintln!("staged {refunds} aztec restart refunds");
+    }
     let incomplete = db.incomplete_rooms().await?;
     if incomplete != 0 {
         eprintln!("warning skipping {incomplete} rooms with unfinished encrypted decks");
@@ -659,7 +663,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
     let mut state = AppState::new(db, rooms, proof, deck_proof);
     state.aztec = aztec;
-    settle_aztec_once(&state).await;
     let worker = state.clone();
     tokio::spawn(async move { settle_aztec(worker).await });
 
@@ -1161,22 +1164,25 @@ async fn reserve_aztec_join(
     let (id, room) = resolve_room(&state, &code)
         .await
         .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
-    let room = room.lock().await;
-    if room.mode != RoomMode::Aztec {
-        return Err((StatusCode::CONFLICT, "not an aztec room"));
-    }
-    let seat = room
-        .next_seat()
-        .map_err(|_| (StatusCode::CONFLICT, "room full"))?;
-    let name = player_name(request.name.as_deref(), room.mode, seat)?;
-    if room
-        .seats
-        .iter()
-        .any(|stored| stored.name.eq_ignore_ascii_case(&name))
-    {
-        return Err((StatusCode::CONFLICT, "player name already used"));
-    }
-    let config = room.config;
+    let (seat, name, config) = {
+        let room = room.lock().await;
+        if room.mode != RoomMode::Aztec {
+            return Err((StatusCode::CONFLICT, "not an aztec room"));
+        }
+        let seat = room
+            .next_seat()
+            .map_err(|_| (StatusCode::CONFLICT, "room full"))?;
+        let name = player_name(request.name.as_deref(), room.mode, seat)?;
+        if room
+            .seats
+            .iter()
+            .any(|stored| stored.name.eq_ignore_ascii_case(&name))
+        {
+            return Err((StatusCode::CONFLICT, "player name already used"));
+        }
+        (seat, name, room.config)
+    };
+    reclaim_aztec_admission(&state, id, seat).await?;
     let admission = Uuid::new_v4();
     let token = Uuid::new_v4();
     let token_hash = hash_token(token);
@@ -1207,6 +1213,80 @@ async fn reserve_aztec_join(
     )))
 }
 
+async fn reclaim_aztec_admission(
+    state: &AppState,
+    room: Uuid,
+    seat: usize,
+) -> Result<(), HttpError> {
+    let Some(candidate) = state
+        .db
+        .expired_aztec_admission(room, seat)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "cannot load pending entry",
+            )
+        })?
+    else {
+        return Ok(());
+    };
+
+    let lock = admission_lock(state, candidate.id).await;
+    let _guard = lock.lock().await;
+    let Some(stored) = state
+        .db
+        .expired_aztec_admission(room, seat)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "cannot load pending entry",
+            )
+        })?
+    else {
+        return Ok(());
+    };
+
+    let boundary = require_aztec(state)?;
+    let entry = aztec_entry(&stored)?;
+    if boundary
+        .confirms(&entry)
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "aztec network unavailable"))?
+    {
+        return Err((StatusCode::CONFLICT, "paid entry awaiting confirmation"));
+    }
+    if stored.status == "reserved" {
+        if boundary
+            .authorized(&entry)
+            .await
+            .map_err(|_| (StatusCode::BAD_GATEWAY, "aztec network unavailable"))?
+        {
+            boundary
+                .cancel(&entry)
+                .await
+                .map_err(|_| (StatusCode::BAD_GATEWAY, "cannot release expired entry"))?;
+        }
+    } else if stored.status == "authorized" {
+        boundary
+            .cancel(&entry)
+            .await
+            .map_err(|_| (StatusCode::BAD_GATEWAY, "cannot release expired entry"))?;
+    }
+    state
+        .db
+        .fail_aztec_admission(stored.id)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "cannot release expired entry",
+            )
+        })?;
+    Ok(())
+}
+
 async fn authorize_aztec_admission(
     AxumState(state): AxumState<AppState>,
     Path(admission): Path<Uuid>,
@@ -1219,14 +1299,31 @@ async fn authorize_aztec_admission(
     let mut stored = load_admission(&state, admission, &token_hash).await?;
 
     if stored.status == "reserved" {
-        let authorization = boundary
-            .authorize(&aztec_entry(&stored)?)
-            .await
-            .map_err(|_| (StatusCode::BAD_GATEWAY, "aztec network unavailable"))?;
-        let tx = authorization.tx.as_deref().unwrap_or("reconciled");
+        let entry = aztec_entry(&stored)?;
+        let tx = if stored.expired {
+            if !boundary
+                .authorized(&entry)
+                .await
+                .map_err(|_| (StatusCode::BAD_GATEWAY, "aztec network unavailable"))?
+            {
+                state
+                    .db
+                    .fail_aztec_admission(admission)
+                    .await
+                    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot expire entry"))?;
+                return Err((StatusCode::CONFLICT, "entry unavailable"));
+            }
+            "reconciled".to_owned()
+        } else {
+            let authorization = boundary
+                .authorize(&entry)
+                .await
+                .map_err(|_| (StatusCode::BAD_GATEWAY, "aztec network unavailable"))?;
+            authorization.tx.unwrap_or_else(|| "reconciled".to_owned())
+        };
         state
             .db
-            .authorize_aztec(admission, &token_hash, tx)
+            .authorize_aztec(admission, &token_hash, &tx)
             .await
             .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot authorize entry"))?;
         stored.status = "authorized".to_owned();
@@ -1357,13 +1454,15 @@ fn require_aztec(state: &AppState) -> Result<&aztec::Aztec, HttpError> {
 }
 
 async fn admission_lock(state: &AppState, id: Uuid) -> Arc<Mutex<()>> {
-    state
-        .admission_locks
-        .lock()
-        .await
-        .entry(id)
-        .or_insert_with(|| Arc::new(Mutex::new(())))
-        .clone()
+    let mut locks = state.admission_locks.lock().await;
+    locks.retain(|_, lock| lock.strong_count() != 0);
+    if let Some(lock) = locks.get(&id).and_then(Weak::upgrade) {
+        return lock;
+    }
+
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(id, Arc::downgrade(&lock));
+    lock
 }
 
 async fn load_admission(
@@ -1646,6 +1745,7 @@ async fn join_room(
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn join_fair(
     db: &Db,
     id: Uuid,
@@ -2664,6 +2764,79 @@ async fn settle_aztec(state: AppState) {
     loop {
         sleep(Duration::from_secs(3)).await;
         settle_aztec_once(&state).await;
+        expire_aztec_admissions(&state).await;
+    }
+}
+
+async fn expire_aztec_admissions(state: &AppState) {
+    let Some(boundary) = state.aztec.as_ref() else {
+        return;
+    };
+    let admissions = match state.db.expired_aztec_admissions().await {
+        Ok(admissions) => admissions,
+        Err(error) => {
+            eprintln!("cannot load expired aztec entries: {error}");
+            return;
+        }
+    };
+
+    for mut stored in admissions {
+        let lock = admission_lock(state, stored.id).await;
+        let _guard = lock.lock().await;
+        let token_hash: TokenHash = match stored.token_hash.clone().try_into() {
+            Ok(token_hash) => token_hash,
+            Err(_) => {
+                eprintln!("invalid aztec entry token hash");
+                continue;
+            }
+        };
+        let Ok(Some(current)) = state.db.aztec_admission(stored.id, &token_hash).await else {
+            continue;
+        };
+        if !current.expired || (current.status != "reserved" && current.status != "authorized") {
+            continue;
+        }
+        stored = current;
+        let entry = match aztec_entry(&stored) {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        let chain = match boundary.entry_state(&entry).await {
+            Ok(chain) => chain,
+            Err(error) => {
+                eprintln!("cannot check expired aztec entry: {error}");
+                continue;
+            }
+        };
+
+        if stored.status == "reserved" {
+            if !chain.authorized && !chain.paid {
+                let _ = state.db.fail_aztec_admission(stored.id).await;
+                continue;
+            }
+            if state
+                .db
+                .authorize_aztec(stored.id, &token_hash, "reconciled")
+                .await
+                .is_err()
+            {
+                continue;
+            }
+            stored.status = "authorized".to_owned();
+        }
+
+        if chain.paid {
+            let result = if stored.seat == 0 {
+                confirm_aztec_creator(state, &stored, token_hash).await
+            } else {
+                confirm_aztec_join(state, &stored, token_hash).await
+            };
+            if let Err((_, error)) = result {
+                eprintln!("cannot recover paid aztec entry: {error}");
+            }
+        } else if boundary.cancel(&entry).await.is_ok() {
+            let _ = state.db.fail_aztec_admission(stored.id).await;
+        }
     }
 }
 
@@ -2679,42 +2852,83 @@ async fn settle_aztec_once(state: &AppState) {
         }
     };
 
-    for stored in settlements {
+    for pending in settlements {
+        let (stored, mut db) = match state.db.lock_aztec_settlement(pending.room).await {
+            Ok(Some(locked)) => locked,
+            Ok(None) => continue,
+            Err(error) => {
+                eprintln!("cannot lock aztec settlement: {error}");
+                continue;
+            }
+        };
         let settlement = match chain_settlement(&stored) {
             Ok(settlement) => settlement,
             Err(error) => {
-                let _ = state.db.fail_aztec_settlement(stored.room, error).await;
+                if state
+                    .db
+                    .fail_aztec_settlement(&mut db, stored.room, error)
+                    .await
+                    .is_ok()
+                {
+                    let _ = db.commit().await;
+                }
                 continue;
             }
         };
         let result = async {
-            let settled = boundary.settled(&stored.table_id).await?;
-            let tx = if settled {
+            let chain = boundary
+                .settled(&settlement, stored.tx_hash.as_deref())
+                .await?;
+            let tx = if chain == aztec::ChainSettlement::Settled {
                 stored
                     .tx_hash
                     .clone()
                     .unwrap_or_else(|| "reconciled".to_owned())
+            } else if chain == aztec::ChainSettlement::Pending && stored.status == "submitted" {
+                return Ok(None);
             } else {
-                boundary.settle(&settlement).await?
+                let tx = boundary.settle(&settlement).await?;
+                state
+                    .db
+                    .submit_aztec_settlement(&mut db, stored.room, &tx)
+                    .await?;
+                tx
             };
-            state.db.confirm_aztec_settlement(stored.room, &tx).await?;
-            Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+            let rev = state
+                .db
+                .confirm_locked_aztec_settlement(&mut db, stored.room, &tx)
+                .await?;
+            Ok::<Option<u64>, Box<dyn std::error::Error + Send + Sync>>(Some(rev))
         }
         .await;
 
         match result {
-            Ok(()) => mark_aztec_returned(state, stored.room).await,
+            Ok(Some(rev)) => match db.commit().await {
+                Ok(()) => mark_aztec_returned(state, stored.room, rev).await,
+                Err(error) => eprintln!("cannot commit aztec settlement: {error}"),
+            },
+            Ok(None) => {
+                if let Err(error) = db.commit().await {
+                    eprintln!("cannot release aztec settlement: {error}");
+                }
+            }
             Err(error) => {
-                let _ = state
+                let failed = state
                     .db
-                    .fail_aztec_settlement(stored.room, &error.to_string())
+                    .fail_aztec_settlement(&mut db, stored.room, &error.to_string())
                     .await;
+                if failed.is_ok() {
+                    let _ = db.commit().await;
+                }
             }
         }
     }
 }
 
 fn chain_settlement(stored: &db::StoredSettlement) -> Result<aztec::Settlement, &'static str> {
+    if stored.kind != "result" && stored.kind != "refund" {
+        return Err("invalid aztec settlement kind");
+    }
     if stored.status != "pending" && stored.status != "submitted" {
         return Err("invalid aztec settlement status");
     }
@@ -2737,13 +2951,14 @@ fn chain_settlement(stored: &db::StoredSettlement) -> Result<aztec::Settlement, 
     })
 }
 
-async fn mark_aztec_returned(state: &AppState, id: Uuid) {
+async fn mark_aztec_returned(state: &AppState, id: Uuid, rev: u64) {
     let Some(room) = find_room(state, id).await else {
         return;
     };
     let mut room = room.lock().await;
     room.settlement = Some(SettlementState::Returned);
-    let _ = room.notify.send(room.rev);
+    room.rev = rev;
+    let _ = room.notify.send(rev);
 }
 
 async fn drive_bots(state: &AppState, id: Uuid, mut pause: bool) -> Result<(), &'static str> {
@@ -4868,6 +5083,9 @@ mod tests {
                     ready_hand: None,
                     proof_points: 0,
                     challenge_bonus: 0,
+                    aztec_account: None,
+                    aztec_entry: None,
+                    aztec_amount: None,
                 },
                 StoredSeat {
                     seat: 1,
@@ -4876,6 +5094,9 @@ mod tests {
                     ready_hand: None,
                     proof_points: 0,
                     challenge_bonus: 0,
+                    aztec_account: None,
+                    aztec_entry: None,
+                    aztec_amount: None,
                 },
             ],
             hand: Some(StoredHand {
@@ -4888,6 +5109,7 @@ mod tests {
                 final_deck: None,
             }),
             challenges: Vec::new(),
+            settlement: None,
         }
     }
 
@@ -6477,7 +6699,7 @@ mod tests {
         let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();
@@ -6627,7 +6849,7 @@ mod tests {
         let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();
@@ -6666,11 +6888,218 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires TEST_DATABASE_URL"]
+    async fn aztec_persistence() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
+        let db = Db::connect(&url).await.unwrap();
+
+        sqlx::query("TRUNCATE aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+            .execute(db.pool())
+            .await
+            .unwrap();
+
+        let mut config = config(2);
+        config.hands = 1;
+        let id = Uuid::new_v4();
+        let table_id = aztec_table_id(id);
+        let first_id = Uuid::new_v4();
+        let second_id = Uuid::new_v4();
+        let first_token = Uuid::new_v4();
+        let second_token = Uuid::new_v4();
+        let first_hash = hash_token(first_token);
+        let second_hash = hash_token(second_token);
+        let first_account = format!("0x{:064x}", 1);
+        let second_account = format!("0x{:064x}", 2);
+        let first_entry = format!("0x{:064x}", 11);
+        let second_entry = format!("0x{:064x}", 12);
+        let first_share = [0x71; 32];
+        let second_share = [0x72; 32];
+
+        for admission in [
+            NewAdmission {
+                id: first_id,
+                room: id,
+                seat: 0,
+                token_hash: &first_hash,
+                account: &first_account,
+                table_id: &table_id,
+                entry_id: &first_entry,
+                amount: AZTEC_BUY_IN,
+                config,
+                entropy: &first_share,
+                name: "Alice",
+            },
+            NewAdmission {
+                id: second_id,
+                room: id,
+                seat: 1,
+                token_hash: &second_hash,
+                account: &second_account,
+                table_id: &table_id,
+                entry_id: &second_entry,
+                amount: AZTEC_BUY_IN,
+                config,
+                entropy: &second_share,
+                name: "Bob",
+            },
+        ] {
+            db.reserve_aztec(admission).await.unwrap();
+        }
+
+        assert!(
+            db.aztec_admission(first_id, &hash_token(Uuid::new_v4()))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let row = sqlx::query("SELECT token_hash FROM aztec_admissions WHERE id = $1")
+            .bind(first_id)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+        let stored_hash = row.get::<Vec<u8>, _>("token_hash");
+
+        assert_eq!(stored_hash, first_hash);
+        assert_ne!(stored_hash, first_token.as_bytes());
+
+        db.authorize_aztec(first_id, &first_hash, "0xauth1")
+            .await
+            .unwrap();
+        db.authorize_aztec(second_id, &second_hash, "0xauth2")
+            .await
+            .unwrap();
+        let first = db
+            .aztec_admission(first_id, &first_hash)
+            .await
+            .unwrap()
+            .unwrap();
+        let second = db
+            .aztec_admission(second_id, &second_hash)
+            .await
+            .unwrap()
+            .unwrap();
+        let ceremony = fairness::random_ceremony(id, 0, config.players).unwrap();
+        let mut live = Room::new_fair(
+            config,
+            RoomMode::Aztec,
+            first_hash,
+            ceremony.clone(),
+            first_share,
+        )
+        .unwrap();
+        live.set_creator_name(first.name.clone());
+        bind_aztec_seat(&mut live.seats[0], &first).unwrap();
+        let ceremony = live.ceremony.as_ref().unwrap().clone();
+
+        fairness::create_aztec(&db, &first, config, &first_hash, &ceremony, first_share)
+            .await
+            .unwrap();
+        let seed = ceremony.seed_with(id, 1, second_share).unwrap();
+        let hand_id = Uuid::new_v4();
+        let stacks = vec![AZTEC_BUY_IN; config.players];
+
+        fairness::join_aztec(
+            &db,
+            &second,
+            &second_hash,
+            second_share,
+            0,
+            1,
+            &ceremony,
+            Some(NewHand {
+                id: hand_id,
+                no: 0,
+                seed: &seed,
+                dealer: 0,
+                stacks: &stacks,
+                encrypted: false,
+            }),
+            None,
+        )
+        .await
+        .unwrap();
+        live.commit_fair_join(
+            second_hash,
+            second.name.clone(),
+            1,
+            second_share,
+            Some(live_hand(hand_id, 0, seed, 0, stacks, config)),
+            None,
+            1,
+        );
+        bind_aztec_seat(&mut live.seats[1], &second).unwrap();
+
+        let next = live.stage_action(0, Action::Fold).unwrap();
+        let settlement = stage_aztec_settlement(id, &live, &next.game)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(settlement.table_id, table_id);
+        assert_eq!(settlement.recipients[0], first_account);
+        assert_eq!(settlement.recipients[1], second_account);
+        assert_eq!(
+            settlement
+                .payouts
+                .iter()
+                .map(|value| u64::from(*value))
+                .sum::<u64>(),
+            u64::from(AZTEC_BUY_IN) * 2
+        );
+        db.append_action_with_settlement(
+            NewAction {
+                room: id,
+                hand: next.hand,
+                hand_no: 0,
+                seq: next.seq,
+                player: next.player,
+                action: next.action,
+                facts: next.fact_commitments.as_deref(),
+                rev: live.rev,
+                next_rev: next.rev,
+            },
+            Some(&settlement),
+        )
+        .await
+        .unwrap();
+        live.commit_action(next);
+        live.settlement = Some(SettlementState::Pending);
+
+        let restored = reload(&db, id).await;
+
+        assert_eq!(restored.mode, RoomMode::Aztec);
+        assert_eq!(restored.settlement, Some(SettlementState::Pending));
+        assert_eq!(
+            restored.seats[0].aztec_account.as_deref(),
+            Some(first_account.as_str())
+        );
+        assert_eq!(
+            restored.seats[1].aztec_entry.as_deref(),
+            Some(second_entry.as_str())
+        );
+        assert_eq!(seat_for_token(&restored, first_token), Some(0));
+        assert_eq!(seat_for_token(&restored, second_token), Some(1));
+        assert_eq!(db.pending_aztec_settlements().await.unwrap().len(), 1);
+
+        let (_, lock) = db.lock_aztec_settlement(id).await.unwrap().unwrap();
+        assert!(db.lock_aztec_settlement(id).await.unwrap().is_none());
+        lock.rollback().await.unwrap();
+
+        let rev = db.confirm_aztec_settlement(id, "0xsettled").await.unwrap();
+        let restored = reload(&db, id).await;
+
+        assert_eq!(restored.rev, rev);
+        assert_eq!(restored.settlement, Some(SettlementState::Returned));
+        assert!(db.pending_aztec_settlements().await.unwrap().is_empty());
+        assert!(db.confirm_aztec_settlement(id, "0xagain").await.is_err());
+        assert_eq!(reload(&db, id).await.rev, rev);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL"]
     async fn persistence() {
         let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();
@@ -6764,7 +7193,7 @@ mod tests {
         let first = Uuid::new_v4();
         let first_hash = hash_token(first);
 
-        db.create_room(id, config, RoomMode::Aztec, &first_hash)
+        db.create_room(id, config, RoomMode::Multiplayer, &first_hash)
             .await
             .unwrap();
 
@@ -7965,7 +8394,7 @@ mod tests {
         let bb = std::env::var("BB_PATH").expect("BB_PATH");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();

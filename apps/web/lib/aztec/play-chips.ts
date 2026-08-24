@@ -16,7 +16,7 @@ export async function attachPlayChips(wallet: Wallet) {
   const metadata = await wallet.getContractMetadata(address);
 
   if (!metadata.instance) {
-    throw new Error("play chips contract is not deployed on the configured Aztec network");
+    throw new Error("Tajadero contract is not deployed on the configured Aztec network");
   }
 
   await wallet.registerContract(metadata.instance, PlayChipsContractArtifact);
@@ -62,16 +62,20 @@ export async function enterPlayChipTable(
   account: AztecAddress,
   tableId: bigint,
   entryId: bigint,
+  seat: number,
   amount: bigint,
 ) {
+  if (!Number.isInteger(seat) || seat < 0 || seat > 5) {
+    throw new Error("invalid table seat");
+  }
   if (amount <= 0n || amount > 0xffff_ffff_ffff_ffffn) {
-    throw new Error("invalid play chip buy-in");
+    throw new Error("invalid Tajadero buy-in");
   }
 
   const paymentMethod = await sponsoredFeePayment();
 
   return contract.methods
-    .enter_table(new Fr(tableId), new Fr(entryId), amount)
+    .enter_table(new Fr(tableId), new Fr(entryId), seat, amount)
     .send({ from: account, fee: { paymentMethod } });
 }
 
@@ -81,10 +85,18 @@ export async function playChipEntry(
   entryId: bigint,
 ) {
   const field = new Fr(entryId);
-  const [{ result: exists }, { result: tableId }, { result: amount }] =
+  const [
+    { result: exists },
+    { result: tableId },
+    { result: owner },
+    { result: seat },
+    { result: amount },
+  ] =
     await Promise.all([
       contract.methods.entry_exists(field).simulate({ from: account }),
       contract.methods.entry_table_of(field).simulate({ from: account }),
+      contract.methods.entry_account_of(field).simulate({ from: account }),
+      contract.methods.entry_seat_of(field).simulate({ from: account }),
       contract.methods.entry_amount_of(field).simulate({ from: account }),
     ]);
 
@@ -92,6 +104,8 @@ export async function playChipEntry(
   return {
     exists,
     tableId: BigInt(String(tableId)),
+    account: owner.toString(),
+    seat: Number(seat),
     amount,
   };
 }

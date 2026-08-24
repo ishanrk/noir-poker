@@ -12,7 +12,10 @@ export function PrivateChallengeBar({ view }: { view: ContractView }) {
         : "CHECKING RESULT";
 
     return (
-      <section className={`${styles.strip} ${styles.private}`} aria-label="Private challenge">
+      <section
+        className={`${styles.strip} ${styles.private} private-challenge-surface`}
+        aria-label="Private challenge"
+      >
         <div className={styles.privateIntro}>
           <p className={styles.label}>PRIVATE CHALLENGE · HAND {claim.handNo + 1}</p>
           <strong>{claim.objective ?? "PRIVATE OBJECTIVE"}</strong>
@@ -25,7 +28,10 @@ export function PrivateChallengeBar({ view }: { view: ContractView }) {
 
   if (view.assignment.kind === "assigned") {
     return (
-      <section className={`${styles.strip} ${styles.private}`} aria-label="Private challenge">
+      <section
+        className={`${styles.strip} ${styles.private} private-challenge-surface`}
+        aria-label="Private challenge"
+      >
         <div className={styles.privateIntro}>
           <p className={styles.label}>PRIVATE CHALLENGE · HAND {view.assignment.handNo + 1}</p>
           <strong>{view.assignment.objective}</strong>
@@ -38,7 +44,10 @@ export function PrivateChallengeBar({ view }: { view: ContractView }) {
 
   if (view.assignment.kind === "draw") {
     return (
-      <section className={`${styles.strip} ${styles.private}`} aria-label="Private challenge">
+      <section
+        className={`${styles.strip} ${styles.private} private-challenge-surface`}
+        aria-label="Private challenge"
+      >
         <div className={styles.privateIntro}>
           <p className={styles.label}>PRIVATE CHALLENGE · HAND {view.assignment.handNo + 1}</p>
           <strong>DRAWING YOUR NEXT CHALLENGE</strong>

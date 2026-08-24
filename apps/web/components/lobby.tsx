@@ -12,8 +12,17 @@ import {
   AZTEC_SMALL_BLIND,
   AZTEC_TABLE_STACK,
 } from "@/lib/aztec/config";
+import type { AztecEntryIntent } from "@/lib/aztec/entry";
 import type { AztecSession } from "@/lib/aztec/session";
-import { createRoom, joinRoom, saveSeat, type RoomMode } from "@/lib/server";
+import {
+  createRoom,
+  joinRoom,
+  reserveAztecJoin,
+  reserveAztecRoom,
+  saveSeat,
+  type AztecReservation,
+  type RoomMode,
+} from "@/lib/server";
 
 const STACKS = [100, 250, 500, 1000, 2000, 5000] as const;
 const SMALL_BLINDS = [1, 2, 5, 10, 25, 50] as const;
@@ -78,6 +87,7 @@ export function Lobby() {
   const [handsIndex, setHandsIndex] = useState(2);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [aztecStep, setAztecStep] = useState<string>();
   const busyRef = useRef(false);
   const [error, setError] = useState<string>();
   const [shake, setShake] = useState(false);
@@ -96,9 +106,7 @@ export function Lobby() {
         : undefined,
     [normalBigBlind, normalSmallBlind, normalStack],
   );
-  const aztecValid = Boolean(
-    aztec?.ready && aztec.balance >= BigInt(AZTEC_TABLE_STACK),
-  );
+  const aztecValid = Boolean(aztec?.claimed);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -147,19 +155,32 @@ export function Lobby() {
         throw new Error("Connect Aztec and claim Tajaderos first");
       }
 
-      const result = await createRoom({
-        players,
-        stack,
-        small_blind: smallBlind,
-        big_blind: bigBlind,
-        hands: HANDS[handsIndex],
-        mode,
-        name: mode === "multiplayer" ? name.trim() || undefined : undefined,
-      });
-
-      if (mode === "aztec" && aztec) {
-        await enterAztec(aztec, result.room_id, result.seat, AZTEC_TABLE_STACK);
-      }
+      const result = mode === "aztec" && aztec
+          ? (await enterAztec(
+            aztec,
+            {
+              kind: "create",
+              players,
+              hands: HANDS[handsIndex],
+              name: name.trim(),
+            },
+            () => reserveAztecRoom({
+                players,
+                hands: HANDS[handsIndex],
+                name: name.trim() || undefined,
+                account: aztec.connection.account.item.toString(),
+              }),
+            setAztecStep,
+          )).seat
+        : await createRoom({
+            players,
+            stack,
+            small_blind: smallBlind,
+            big_blind: bigBlind,
+            hands: HANDS[handsIndex],
+            mode,
+            name: mode === "multiplayer" ? name.trim() || undefined : undefined,
+          });
 
       saveSeat(result.room, result);
       router.push(`/table/${result.room}${mode === "aztec" ? "?mode=aztec" : ""}`);
@@ -167,6 +188,7 @@ export function Lobby() {
       showError(cause instanceof Error ? cause.message : "server unavailable");
       busyRef.current = false;
       setBusy(false);
+      setAztecStep(undefined);
     }
   }
 
@@ -184,14 +206,17 @@ export function Lobby() {
         throw new Error("Connect Aztec and claim Tajaderos first");
       }
 
-      const result = await joinRoom(
-        room,
-        mode === "multiplayer" ? name.trim() || undefined : undefined,
-      );
-
-      if (mode === "aztec" && aztec) {
-        await enterAztec(aztec, result.room_id, result.seat, AZTEC_TABLE_STACK);
-      }
+      const result = mode === "aztec" && aztec
+          ? (await enterAztec(
+            aztec,
+            { kind: "join", room, name: name.trim() },
+            () => reserveAztecJoin(room, {
+                name: name.trim() || undefined,
+                account: aztec.connection.account.item.toString(),
+              }),
+            setAztecStep,
+          )).seat
+        : await joinRoom(room, name.trim() || undefined);
 
       saveSeat(result.room, result);
       router.push(`/table/${result.room}${mode === "aztec" ? "?mode=aztec" : ""}`);
@@ -199,6 +224,7 @@ export function Lobby() {
       showError(cause instanceof Error ? cause.message : "server unavailable");
       busyRef.current = false;
       setBusy(false);
+      setAztecStep(undefined);
     }
   }
 
@@ -276,7 +302,7 @@ export function Lobby() {
             </span>
           </div>
 
-          {mode === "multiplayer" && (
+          {mode !== "single" && (
             <label className="line-input lobby-name">
               Player Name
               <input
@@ -362,7 +388,7 @@ export function Lobby() {
           <button className="primary-action key-action key-primary key-create" type="submit" disabled={busy}>
             <Keycap>
               {busy
-                ? mode === "aztec" ? "Locking Tajaderos" : "Working"
+                ? mode === "aztec" ? aztecStep ?? "Reserving Entry" : "Working"
                 : mode === "aztec"
                   ? "Create Aztec Game"
                   : "Create Game"}
@@ -374,27 +400,25 @@ export function Lobby() {
           <div className="form-heading">
             <h3>Join Game</h3>
           </div>
-          {mode === "multiplayer" && (
-            <label className="line-input">
-              Player Name
-              <input
-                name="player_name"
-                type="text"
-                value={name}
-                maxLength={20}
-                autoComplete="nickname"
-                spellCheck="false"
-                placeholder="Player 2"
-                onChange={(event) => setName(event.target.value)}
-              />
-            </label>
-          )}
+          <label className="line-input">
+            Player Name
+            <input
+              name="player_name"
+              type="text"
+              value={name}
+              maxLength={20}
+              autoComplete="nickname"
+              spellCheck="false"
+              placeholder="Player 2"
+              onChange={(event) => setName(event.target.value)}
+            />
+          </label>
           <label className="line-input">
             Room ID
             <input name="room" type="text" autoComplete="off" spellCheck="false" required />
           </label>
           <button className="text-action key-action key-join" type="submit" disabled={busy}>
-            <Keycap>{busy ? mode === "aztec" ? "Locking Tajaderos" : "Working" : mode === "aztec" ? "Join Aztec Game" : "Join Game"}</Keycap>
+            <Keycap>{busy ? mode === "aztec" ? aztecStep ?? "Reserving Entry" : "Working" : mode === "aztec" ? "Join Aztec Game" : "Join Game"}</Keycap>
           </button>
           <p>
             {mode === "aztec"
@@ -415,11 +439,22 @@ export function Lobby() {
 
 async function enterAztec(
   session: AztecSession,
-  room: string,
-  seat: number,
-  amount: number,
+  intent: AztecEntryIntent,
+  reserve: () => Promise<AztecReservation>,
+  setState: (state: string) => void,
 ) {
-  const { enterAztecRoom } = await import("@/lib/aztec/entry");
+  const { enterAztecRoom, pendingAztecEntry } = await import("@/lib/aztec/entry");
+  const pending = pendingAztecEntry(session, intent);
+  if (!pending && session.balance < BigInt(AZTEC_TABLE_STACK)) {
+    throw new Error("Not enough Tajaderos");
+  }
+  const reservation = pending ?? await reserve();
 
-  return enterAztecRoom(session, room, seat, amount);
+  return enterAztecRoom(session, reservation, intent, (state) => {
+    setState({
+      authorizing: "Authorizing Entry",
+      locking: "Locking Tajaderos",
+      checking: "Checking Entry",
+    }[state]);
+  });
 }

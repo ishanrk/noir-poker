@@ -87,6 +87,7 @@ export type View = {
   result?: HandResultView;
   ready?: ReadyView;
   finish?: ReadyView;
+  settlement?: { status: "pending" | "returned"; final_stack: number };
   challenge?: ChallengeView;
   claim?: ClaimView;
   proofs: PlayerProofView[];
@@ -298,7 +299,7 @@ export function Table({
       aria-label="Six-max poker table"
     >
       <div className="table-hand-count">Hand {view.hand_no + 1} of {view.total_hands}</div>
-      {view.mode === "multiplayer" && (
+      {view.mode !== "single" && (
         <aside className="challenge-leaderboard" aria-label="Challenge leaderboard">
           <strong>Challenge Leaderboard</strong>
           <ol>
@@ -424,6 +425,17 @@ export function Table({
         )}
       </div>
 
+      {view.mode === "aztec" && view.settlement && (
+        <div className="aztec-settlement" role="status" aria-live="polite">
+          <span>
+            {view.settlement.status === "returned"
+              ? "Tajaderos Returned"
+              : "Settling Tajaderos"}
+          </span>
+          <strong>Final Stack {view.settlement.final_stack.toLocaleString("en-US")}</strong>
+        </div>
+      )}
+
       <div className="action-bar" aria-label="Player actions" aria-busy={disabled}>
         <div className="action-copy" aria-live="polite">
           <span>{status}</span>
@@ -481,7 +493,7 @@ export function Table({
                 disabled ||
                 view.ready.mine ||
                 view.ready.complete ||
-                (view.mode === "multiplayer" && !view.challenge?.assigned)
+                (view.mode !== "single" && !view.challenge?.assigned)
               }
             >
               <Keycap wide>
