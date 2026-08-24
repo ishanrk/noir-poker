@@ -181,8 +181,8 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
     const message = JSON.parse(frame.payload);
     return message.type === "error" && message.message === "invalid deck key";
   }), false, "next hand deck key rejected");
-  await page.getByText("Hand 1 deck proof ready", { exact: true }).waitFor({ state: "visible", timeout: 120_000 });
-  assert.equal(await page.getByText("Deck Randomness Proof", { exact: true }).count(), 1);
+  await page.getByText("Deck Randomness Proof — Hand 1", { exact: true }).waitFor({ state: "visible", timeout: 120_000 });
+  assert.equal(await page.getByText("Deck Randomness Proof — Hand 1", { exact: true }).count(), 1);
   await visit("/", "home-after-single", ["Create a game"]);
 }
 

@@ -282,14 +282,14 @@
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
-  font-size: 11px;
+  font-size: 13px;
   text-align: left;
 }
 
 .proofTable caption {
   padding: 0 0 10px;
   color: var(--blue);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-align: left;
@@ -299,7 +299,7 @@
   display: block;
   margin-top: 5px;
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0;
 }
 
@@ -333,7 +333,7 @@
   grid-template-columns: 1fr;
   gap: 2px;
   margin-top: 4px;
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.35;
 }
 
@@ -341,7 +341,7 @@
   position: relative;
   padding-left: 24px;
   color: var(--blue);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .proofTable tbody th::before {
@@ -371,14 +371,14 @@
 
 .proofCellLine i {
   color: var(--ink-soft);
-  font-size: 8px;
+  font-size: 10px;
   font-style: normal;
   font-weight: 800;
 }
 
 .proofCellLine b {
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .proofCell a {

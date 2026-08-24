@@ -1,5 +1,6 @@
 html[data-noir-mode="aztec"] {
   color-scheme: dark;
+  --retro-font: "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
   --aztec-bg: #130d09;
   --aztec-bg-deep: #0d0907;
   --aztec-surface: #1c120c;
@@ -27,6 +28,33 @@ html[data-noir-mode="aztec"] {
   --felt-dark: var(--aztec-felt-dark);
   --danger: var(--aztec-ember-hot);
   --success: var(--aztec-bronze);
+}
+
+html[data-noir-mode="aztec"] body,
+html[data-noir-mode="aztec"] body :where(
+  h1,
+  h2,
+  h3,
+  h4,
+  p,
+  a,
+  button,
+  input,
+  select,
+  textarea,
+  label,
+  legend,
+  span,
+  strong,
+  small,
+  summary,
+  li,
+  dt,
+  dd,
+  output,
+  code
+) {
+  font-family: var(--retro-font) !important;
 }
 
 html[data-noir-mode="aztec"] body {
@@ -338,7 +366,6 @@ html[data-noir-mode="aztec"] .aztec-verify {
 
 html[data-noir-mode="aztec"] .aztec-verify > strong {
   color: var(--aztec-bronze);
-  font-family: ui-sans-serif, system-ui, sans-serif;
   letter-spacing: .08em;
 }
 
@@ -579,6 +606,17 @@ html[data-noir-mode="aztec"] .table-action-notice {
 
 html[data-noir-mode="aztec"] .table-action-notice span {
   color: var(--aztec-bronze);
+}
+
+html[data-noir-mode="aztec"] .table-challenge-notice {
+  border-color: var(--aztec-bronze);
+  border-bottom-color: var(--aztec-ember);
+  color: var(--aztec-bg-deep);
+  background: var(--aztec-bronze);
+}
+
+html[data-noir-mode="aztec"] .table-challenge-notice span {
+  color: var(--aztec-bg-deep);
 }
 
 html[data-noir-mode="aztec"] .table-page .action-bar {

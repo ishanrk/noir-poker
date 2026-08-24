@@ -100,15 +100,25 @@ export type ActionNoticeView = {
   amount?: number;
 };
 
+export type TableNoticeView =
+  | ({ kind: "action"; hand_no: number } & ActionNoticeView)
+  | {
+      kind: "challenge";
+      hand_no: number;
+      player: number;
+      completed: boolean;
+    };
+
 type TableProps = {
   view: View;
   viewer: number;
   room: string;
   error?: string;
   disabled?: boolean;
-  notice?: ActionNoticeView;
+  notice?: TableNoticeView;
   stage?: string;
   finish?: boolean;
+  bonusFocus?: boolean;
   raiseTo: number;
   setRaiseTo: (to: number) => void;
   onFold: () => void;
@@ -233,6 +243,7 @@ export function Table({
   notice,
   stage,
   finish = false,
+  bonusFocus = false,
   raiseTo,
   setRaiseTo,
   onFold,
@@ -279,29 +290,40 @@ export function Table({
 
   if (view.settled) [status, message] = ["Hand complete", "Pot settled"];
   if (result?.kind === "showdown") status = "Showdown";
-  if (stage) [status, message] = ["Dealing", stage];
+  if (stage) [status, message] = ["Securing deck", stage];
   if (notice) {
     const mine = notice.player === viewer;
-    noticeName = playerName(notice.player, viewer, view.mode, view.players);
-    noticeAction = notice.action === "raise_to"
-      ? `${mine ? "raise" : "raises"} to ${notice.amount?.toLocaleString("en-US")}`
-      : notice.action === "call"
-        ? `${mine ? "call" : "calls"} ${notice.amount?.toLocaleString("en-US")}`
-        : `${notice.action}${mine ? "" : "s"}`;
+    const name = playerName(notice.player, viewer, view.mode, view.players);
+    if (notice.kind === "challenge") {
+      noticeName = mine ? "Your challenge" : `${name}'s challenge`;
+      noticeAction = notice.completed ? "completed" : "missed";
+    } else {
+      noticeName = name;
+      noticeAction = notice.action === "raise_to"
+        ? `${mine ? "raise" : "raises"} to ${notice.amount?.toLocaleString("en-US")}`
+        : notice.action === "call"
+          ? `${mine ? "call" : "calls"} ${notice.amount?.toLocaleString("en-US")}`
+          : `${notice.action}${mine ? "" : "s"}`;
+    }
 
     [status, message] = [noticeName, noticeAction];
   }
 
   return (
     <section
-      className={`table-shell${finish ? " table-game-over" : ""}`}
+      className={`table-shell${finish ? " table-game-over" : ""}${bonusFocus ? " table-bonus-focus" : ""}`}
       data-room-mode={view.mode}
       aria-label="Six-max poker table"
     >
       <div className="table-hand-count">Hand {view.hand_no + 1} of {view.total_hands}</div>
       {view.mode !== "single" && (
-        <aside className="challenge-leaderboard" aria-label="Challenge leaderboard">
+        <aside
+          className="challenge-leaderboard"
+          aria-label="Challenge leaderboard"
+          data-proof-tour="leaderboard"
+        >
           <strong>Challenge Leaderboard</strong>
+          {bonusFocus && <em>Bonus chips added</em>}
           <ol>
             {leaders.map((player) => (
               <li key={player.seat}>
@@ -327,12 +349,14 @@ export function Table({
       )}
 
       <div className="table-stage">
-        {noticeName && noticeAction && (
+        {notice && noticeName && noticeAction && (
           <div
-            key={`${view.hand_no}:${notice?.seq}`}
-            className="table-action-notice"
-            data-hand={view.hand_no}
-            data-seq={notice?.seq}
+            key={notice.kind === "action"
+              ? `${notice.hand_no}:${notice.seq}`
+              : `challenge:${notice.hand_no}:${notice.player}`}
+            className={`table-action-notice${notice.kind === "challenge" ? " table-challenge-notice" : ""}`}
+            data-hand={notice.hand_no}
+            data-seq={notice.kind === "action" ? notice.seq : undefined}
             role="status"
             aria-live="polite"
           >
@@ -437,7 +461,7 @@ export function Table({
       )}
 
       <div className="action-bar" aria-label="Player actions" aria-busy={disabled}>
-        <div className="action-copy" aria-live="polite">
+        <div className="action-copy" data-stage={stage ? "crypto" : undefined} aria-live="polite">
           <span>{status}</span>
           <strong>{message}</strong>
         </div>

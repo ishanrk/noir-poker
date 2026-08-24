@@ -265,8 +265,11 @@ async function nextSingle(trace, hand) {
   await until(() => sent(trace, "ready").length === before + 1, `single hand ${hand + 1} ready not sent`);
   await waitHand(trace, hand + 1);
   await trace.page.getByText(`Hand ${hand + 2} of 3`, { exact: true }).waitFor({ timeout: 240_000 });
-  await trace.page.getByText(`Hand ${hand + 1} deck proof ready`, { exact: true }).waitFor();
-  assert.equal(await trace.page.getByText("Deck Randomness Proof", { exact: true }).count(), 1);
+  await trace.page.getByText(`Deck Randomness Proof — Hand ${hand + 1}`, { exact: true }).waitFor();
+  assert.equal(
+    await trace.page.getByText(`Deck Randomness Proof — Hand ${hand + 1}`, { exact: true }).count(),
+    1,
+  );
   const cards = await hole(trace.page);
   assert.equal(cards.length, 2, `single hand ${hand + 2} cards missing`);
   assert.equal(
@@ -525,12 +528,14 @@ async function verifyPublic(viewer, owner, kind) {
 async function dismissTour(trace) {
   const guide = trace.page.locator(".proof-tour-note");
   await guide.waitFor({ timeout: 30_000 });
-  await guide.getByText("Open the previous hand deck proof", { exact: true }).waitFor();
+  await guide.getByText("The last hand has a deck proof", { exact: true }).waitFor();
   await guide.getByRole("button", { name: "Next", exact: true }).click();
-  await guide.getByText("Open a challenge draw proof", { exact: true }).waitFor();
+  await guide.getByText("Each hand has a new challenge", { exact: true }).waitFor();
   await guide.getByRole("button", { name: "Next", exact: true }).click();
-  await guide.getByText("Open a completion proof", { exact: true }).waitFor();
-  await guide.getByRole("button", { name: "Close", exact: true }).click();
+  await guide.getByText("Challenge proofs publish here", { exact: true }).waitFor();
+  await guide.getByRole("button", { name: "Next", exact: true }).click();
+  await guide.getByText("Challenge wins set the final bonus", { exact: true }).waitFor();
+  await guide.getByRole("button", { name: "Okay", exact: true }).click();
   await guide.waitFor({ state: "hidden" });
 }
 
@@ -719,9 +724,9 @@ async function noticeLog(trace) {
     const observer = new MutationObserver((records) => {
       const notices = (node) => {
         if (!(node instanceof Element)) return [];
-        return node.matches(".table-action-notice")
+        return node.matches(".table-action-notice:not(.table-challenge-notice)")
           ? [node]
-          : [...node.querySelectorAll(".table-action-notice")];
+          : [...node.querySelectorAll(".table-action-notice:not(.table-challenge-notice)")];
       };
       for (const record of records) {
         if (record.type === "attributes") {

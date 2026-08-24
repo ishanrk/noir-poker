@@ -10,7 +10,13 @@ import { Keycap } from "@/components/keycap";
 import { PlayProofs } from "@/components/play-proofs";
 import { PrivateChallengeBar } from "@/components/private-challenge";
 import { ProofTour } from "@/components/proof-tour";
-import { Table, type ActionNoticeView, type ChallengeView, type ClaimView, type View } from "@/components/table";
+import {
+  Table,
+  type ChallengeView,
+  type ClaimView,
+  type TableNoticeView,
+  type View,
+} from "@/components/table";
 import {
   CHALLENGE_VERSION,
   catalogRoot,
@@ -112,7 +118,14 @@ const deckHoleKey = (room: string, hand: number, seat: number) =>
   `noir-poker-hole-${room}-${hand}-${seat}`;
 const MAX_AUTO_PROOF_DELAY_MS = 10_000;
 const GAME_OVER_DELAY_MS = 3000;
+const BONUS_DELAY_MS = 4000;
 const GAME_OVER_DISPLAY_MS = 2000;
+
+function noticeKey(notice: TableNoticeView) {
+  return notice.kind === "action"
+    ? `action:${notice.hand_no}:${notice.seq}`
+    : `challenge:${notice.hand_no}:${notice.player}`;
+}
 
 function withoutHand<T>(current: Record<number, T>, hand: number) {
   if (!current[hand]) return current;
@@ -322,6 +335,7 @@ export function MultiplayerGame({
   const deckRequests = useRef(new Set<string>());
   const localHole = useRef<{ hand: number; cards: [string, string] } | undefined>(undefined);
   const seenAction = useRef<{ hand: number; seq: number } | undefined>(undefined);
+  const seenChallenge = useRef(new Set<string>());
   const viewRef = useRef<View | undefined>(undefined);
   const actionWait = useRef<{ hand: number; seq: number } | undefined>(undefined);
   const readyWait = useRef<number | undefined>(undefined);
@@ -348,8 +362,8 @@ export function MultiplayerGame({
   const [claimJobs, setClaimJobs] = useState<Record<number, ClaimView>>({});
   const [autoAttempts, setAutoAttempts] = useState<Record<string, number>>({});
   const [localProofs, setLocalProofs] = useState<Record<string, LocalProofState>>({});
-  const [notices, setNotices] = useState<ActionNoticeView[]>([]);
-  const noticeQueue = useRef<ActionNoticeView[]>([]);
+  const [notices, setNotices] = useState<TableNoticeView[]>([]);
+  const noticeQueue = useRef<TableNoticeView[]>([]);
   const [deckStage, setDeckStage] = useState<string>();
   const [finishHand, setFinishHand] = useState<number>();
   const notice = notices[0];
@@ -361,6 +375,7 @@ export function MultiplayerGame({
     (view.deal === undefined || view.deal.audit),
   );
   const finish = gameReady && finishHand === view?.hand_no;
+  const bonusFocus = gameReady && view?.mode === "multiplayer" && !finish;
 
   useEffect(() => {
     const mode = view?.mode ?? waiting?.mode ?? initialMode;
@@ -395,7 +410,7 @@ export function MultiplayerGame({
   }, []);
 
   const setNoticeQueue = useCallback(
-    (update: ActionNoticeView[] | ((current: ActionNoticeView[]) => ActionNoticeView[])) => {
+    (update: TableNoticeView[] | ((current: TableNoticeView[]) => TableNoticeView[])) => {
       const next = typeof update === "function" ? update(noticeQueue.current) : update;
       noticeQueue.current = next;
       setNotices(next);
@@ -407,10 +422,29 @@ export function MultiplayerGame({
     if (!gameReady) return;
 
     const hand = view?.hand_no;
-    const timer = setTimeout(() => setFinishHand(hand), GAME_OVER_DELAY_MS);
+    const delay = view?.mode === "multiplayer" ? BONUS_DELAY_MS : GAME_OVER_DELAY_MS;
+    const top = window.scrollY;
+    const target = view?.mode === "multiplayer"
+      ? document.querySelector<HTMLElement>(".challenge-leaderboard")
+      : null;
+    let frame: number | undefined;
+    let back: number | undefined;
+    if (target) {
+      frame = window.requestAnimationFrame(() => {
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+      back = window.setTimeout(() => {
+        window.scrollTo({ top, behavior: "smooth" });
+      }, delay / 2);
+    }
+    const timer = window.setTimeout(() => setFinishHand(hand), delay);
 
-    return () => clearTimeout(timer);
-  }, [gameReady, view?.hand_no]);
+    return () => {
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+      if (back !== undefined) window.clearTimeout(back);
+      window.clearTimeout(timer);
+    };
+  }, [gameReady, view?.hand_no, view?.mode]);
 
   useEffect(() => {
     if (!finish) return;
@@ -423,13 +457,12 @@ export function MultiplayerGame({
   useEffect(() => {
     if (!notice) return;
 
-    const hand = view?.hand_no;
     let timer: number | undefined;
     let frame: number | undefined;
     const start = () => {
       timer = window.setTimeout(() => {
         setNoticeQueue((current) => {
-          if (viewRef.current?.hand_no !== hand || current[0]?.seq !== notice.seq) return current;
+          if (current[0] && noticeKey(current[0]) !== noticeKey(notice)) return current;
           return current.slice(1);
         });
       }, 2000);
@@ -443,7 +476,7 @@ export function MultiplayerGame({
       if (frame !== undefined) window.cancelAnimationFrame(frame);
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [notice, setNoticeQueue, view?.hand_no]);
+  }, [notice, setNoticeQueue]);
 
   const connect = useCallback(() => {
     const current = auth.current;
@@ -667,6 +700,7 @@ export function MultiplayerGame({
         dealing.current = false;
         if (message.rev < rev.current) return;
         deckActive.current = false;
+        const wasSyncing = syncing.current;
         let local = localHole.current;
         if (local?.hand !== message.view.hand_no) {
           local = loadDeckHole(room, message.view.hand_no, current.seat);
@@ -679,17 +713,20 @@ export function MultiplayerGame({
         const log = message.view.action_notices ?? (message.view.last_action ? [message.view.last_action] : []);
         const last = log.at(-1)?.seq ?? -1;
         const seen = seenAction.current;
-        if (!syncing.current && rev.current >= 0) {
-          if (seen?.hand !== message.view.hand_no) {
-            setNoticeQueue(log);
-          } else {
-            const next = log.filter((entry) => entry.seq > seen.seq);
-            if (next.length) {
-              setNoticeQueue((currentNotices) => {
-                const queued = new Set(currentNotices.map((entry) => entry.seq));
-                return [...currentNotices, ...next.filter((entry) => !queued.has(entry.seq))];
-              });
-            }
+        if (!wasSyncing && rev.current >= 0) {
+          const next = (seen?.hand !== message.view.hand_no
+            ? log
+            : log.filter((entry) => entry.seq > seen.seq))
+            .map((entry): TableNoticeView => ({
+              kind: "action",
+              hand_no: message.view.hand_no,
+              ...entry,
+            }));
+          if (next.length) {
+            setNoticeQueue((currentNotices) => {
+              const queued = new Set(currentNotices.map(noticeKey));
+              return [...currentNotices, ...next.filter((entry) => !queued.has(noticeKey(entry)))];
+            });
           }
         }
         syncing.current = false;
@@ -700,6 +737,24 @@ export function MultiplayerGame({
         const claimed = message.view.claim?.status === "claimed";
         const currentClaim = privateObjective(room, current.seat, claimAssignment(message.view.claim));
         const completion = contractCompletion(message.view.claim, current.seat, currentClaim.index);
+        if (message.view.settled && completion.completed !== undefined) {
+          const key = `${message.view.hand_no}:${current.seat}`;
+          if (!wasSyncing && !seenChallenge.current.has(key)) {
+            const challengeNotice: TableNoticeView = {
+              kind: "challenge",
+              hand_no: message.view.hand_no,
+              player: current.seat,
+              completed: completion.completed,
+            };
+            setNoticeQueue((currentNotices) => {
+              const queued = new Set(currentNotices.map(noticeKey));
+              return queued.has(noticeKey(challengeNotice))
+                ? currentNotices
+                : [...currentNotices, challengeNotice];
+            });
+          }
+          seenChallenge.current.add(key);
+        }
         const assignments = [
           challengeAssignment(message.view.challenge),
           claimAssignment(message.view.claim),
@@ -1103,7 +1158,14 @@ export function MultiplayerGame({
   }, [actionPending, autoAttempts, commitChallenge, connected, seat, view?.challenge, view?.mode]);
 
   useEffect(() => {
-    if (view?.mode === "single" || typeof seat !== "number" || !connected) return;
+    if (
+      view?.mode === "single" ||
+      view?.settled ||
+      actionPending ||
+      deckStage ||
+      typeof seat !== "number" ||
+      !connected
+    ) return;
     if (drawing.current !== undefined || claiming.current !== undefined) return;
 
     const claim = Object.values(claimJobs)
@@ -1147,6 +1209,7 @@ export function MultiplayerGame({
     return () => window.clearTimeout(timer);
   }, [
     autoAttempts,
+    actionPending,
     claimChallenge,
     claimJobs,
     claimStates,
@@ -1154,8 +1217,10 @@ export function MultiplayerGame({
     drawChallenge,
     drawJobs,
     drawStates,
+    deckStage,
     seat,
     view?.mode,
+    view?.settled,
   ]);
 
   async function verifyProof(owner: number, hand: number, kind: ProofKind) {
@@ -1278,6 +1343,7 @@ export function MultiplayerGame({
         notice={notice}
         stage={deckStage}
         finish={finish}
+        bonusFocus={bonusFocus}
         raiseTo={raiseTo}
         setRaiseTo={setRaiseTo}
         onFold={() => send({ type: "fold" })}

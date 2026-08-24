@@ -88,7 +88,11 @@ export function PlayProofs({
   );
 
   return (
-    <section className={`${styles.strip} ${styles.proofTableStrip}`} aria-label="Challenge proofs">
+    <section
+      className={`${styles.strip} ${styles.proofTableStrip}`}
+      aria-label="Challenge proofs"
+      data-proof-tour="challenge-proofs"
+    >
       <div className={styles.proofTableWrap}>
         <table className={styles.proofTable}>
           <caption>
@@ -102,8 +106,8 @@ export function PlayProofs({
                 <th scope="col" key={hand}>
                   <strong>HAND {hand + 1}</strong>
                   <small>
-                    <span data-proof-tour={hand === handNo ? "challenge-draw" : undefined}>DRAW</span>
-                    <span data-proof-tour={hand === handNo ? "challenge-completion" : undefined}>COMPLETION</span>
+                    <span>DRAW</span>
+                    <span>COMPLETION</span>
                   </small>
                 </th>
               ))}

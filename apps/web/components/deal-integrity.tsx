@@ -23,9 +23,7 @@ export function PreviousDealIntegrity({ room, hand }: {
         <span>✓</span>
       </div>
       <div className="deal-copy">
-        <p className="protocol-label">Deck Randomness Proof</p>
-        <strong>Hand {hand + 1} deck proof ready</strong>
-        <code>This replaces the prior hand proof</code>
+        <strong>Deck Randomness Proof — Hand {hand + 1}</strong>
       </div>
       <div className="deal-actions">
         <Link href={`/audit/${room}/${hand}`} target="_blank">

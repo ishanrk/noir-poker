@@ -325,16 +325,34 @@
 }
 
 .proof-tour-note {
+  position: fixed;
+  z-index: 90;
+  right: 20px;
+  bottom: 20px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 22px;
-  width: min(940px, calc(100% - 32px));
-  margin: 18px auto 4px;
+  width: min(760px, calc(100% - 40px));
+  margin: 0;
   padding: 17px 22px 17px 26px;
   border-left: 5px solid var(--blue);
   border-bottom: 1px solid var(--blue);
   background: linear-gradient(90deg, rgb(199 255 50 / 38%), rgb(255 255 255 / 86%) 60%);
+  box-shadow: 8px 8px 0 rgb(39 21 223 / 18%);
+}
+
+[data-proof-focus="true"] {
+  z-index: 65;
+  scroll-margin-block: 180px;
+  outline: 4px solid var(--lime);
+  outline-offset: 5px;
+  animation: proof-focus 500ms ease-out both;
+}
+
+@keyframes proof-focus {
+  from { outline-offset: 16px; }
+  to { outline-offset: 5px; }
 }
 
 .proof-tour-note > span {
@@ -427,6 +445,8 @@
   }
 
   .proof-tour-note {
+    right: 12px;
+    bottom: 12px;
     grid-template-columns: 1fr auto;
     gap: 10px 16px;
     padding: 16px 18px;

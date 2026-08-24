@@ -2,20 +2,28 @@
 
 import { useEffect, useState } from "react";
 
-const TOUR_VERSION = 2;
+const TOUR_VERSION = 3;
 
 const STEPS = [
   {
-    title: "Open the previous hand deck proof",
-    text: "The deck proof above the table checks the encrypted shuffles and the final card order for the previous hand",
+    target: "deck",
+    title: "The last hand has a deck proof",
+    text: "Open it to check every encrypted shuffle and the cards dealt in that hand",
   },
   {
-    title: "Open a challenge draw proof",
-    text: "A published draw entry below the table checks that the player received one challenge from the fixed list",
+    target: "challenge",
+    title: "Each hand has a new challenge",
+    text: "Your challenge stays private while the hand plays",
   },
   {
-    title: "Open a completion proof",
-    text: "A published completion entry checks that the hidden challenge matched the recorded hand actions",
+    target: "challenge-proofs",
+    title: "Challenge proofs publish here",
+    text: "The draw proof checks the challenge choice and the completion proof checks the finished hand",
+  },
+  {
+    target: "leaderboard",
+    title: "Challenge wins set the final bonus",
+    text: "Each completed challenge adds one win. First place gets the full buy in then each lower rank gets sixteen percent less",
   },
 ] as const;
 
@@ -42,6 +50,24 @@ export function ProofTour({ room, seat, handNo }: {
     return () => window.clearTimeout(timer);
   }, [handNo, room, seat]);
 
+  useEffect(() => {
+    if (!open || handNo !== 1) return;
+    const target = document.querySelector<HTMLElement>(
+      `[data-proof-tour="${STEPS[step].target}"]`,
+    );
+    if (!target) return;
+
+    target.dataset.proofFocus = "true";
+    const frame = window.requestAnimationFrame(() => {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      delete target.dataset.proofFocus;
+    };
+  }, [handNo, open, step]);
+
   function advance() {
     if (step < STEPS.length - 1) {
       setStep((value) => value + 1);
@@ -65,7 +91,7 @@ export function ProofTour({ room, seat, handNo }: {
         <p>{current.text}</p>
       </div>
       <button type="button" onClick={advance}>
-        {step === STEPS.length - 1 ? "Close" : "Next"}
+        {step === STEPS.length - 1 ? "Okay" : "Next"}
       </button>
     </section>
   );

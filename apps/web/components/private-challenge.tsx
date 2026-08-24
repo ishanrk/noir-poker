@@ -15,6 +15,7 @@ export function PrivateChallengeBar({ view }: { view: ContractView }) {
       <section
         className={`${styles.strip} ${styles.private} private-challenge-surface`}
         aria-label="Private challenge"
+        data-proof-tour="challenge"
       >
         <div className={styles.privateIntro}>
           <p className={styles.label}>PRIVATE CHALLENGE · HAND {claim.handNo + 1}</p>
@@ -31,6 +32,7 @@ export function PrivateChallengeBar({ view }: { view: ContractView }) {
       <section
         className={`${styles.strip} ${styles.private} private-challenge-surface`}
         aria-label="Private challenge"
+        data-proof-tour="challenge"
       >
         <div className={styles.privateIntro}>
           <p className={styles.label}>PRIVATE CHALLENGE · HAND {view.assignment.handNo + 1}</p>
@@ -47,6 +49,7 @@ export function PrivateChallengeBar({ view }: { view: ContractView }) {
       <section
         className={`${styles.strip} ${styles.private} private-challenge-surface`}
         aria-label="Private challenge"
+        data-proof-tour="challenge"
       >
         <div className={styles.privateIntro}>
           <p className={styles.label}>PRIVATE CHALLENGE · HAND {view.assignment.handNo + 1}</p>

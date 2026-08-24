@@ -1398,49 +1398,104 @@ button.key-space { width: min(420px, 100%); height: 68px; justify-self: center; 
   z-index: 12;
   top: 0;
   right: 0;
-  width: 188px;
-  padding: 11px 13px;
-  border: 1px solid var(--blue);
-  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
-  background: rgb(255 255 255 / 94%);
-  box-shadow: 4px 4px 0 var(--lime);
-  color: var(--blue);
+  width: 210px;
+  padding: 15px 17px 16px 24px;
+  border: 0;
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  background:
+    linear-gradient(var(--lime), var(--lime)) 10px 0 / 3px 100% no-repeat,
+    var(--blue);
+  box-shadow: 5px 5px 0 var(--lime);
+  color: var(--lime);
 }
 
 .challenge-leaderboard > strong {
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.challenge-leaderboard > em {
+  display: block;
+  margin-top: 5px;
+  color: white;
   font-size: 10px;
+  font-style: normal;
 }
 
 .challenge-leaderboard ol {
   display: grid;
-  gap: 4px;
-  margin: 8px 0 0;
+  gap: 0;
+  margin: 10px 0 0;
   padding: 0;
   list-style: none;
 }
 
 .challenge-leaderboard li {
   display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 7px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
   align-items: baseline;
-  color: var(--ink);
-  font-size: 10px;
+  padding: 6px 0;
+  border-top: 1px solid rgb(199 255 50 / 32%);
+  color: white;
+  font-size: 11px;
 }
 
 .challenge-leaderboard li b {
-  color: var(--blue);
+  color: var(--lime);
+  font-size: 13px;
 }
 
 .challenge-leaderboard li small {
-  color: #228c62;
-  font-size: 8px;
+  color: var(--lime);
+  font-size: 10px;
+}
+
+.table-bonus-focus .challenge-leaderboard {
+  animation: challenge-bonus-focus 4000ms ease-in-out both;
+}
+
+@keyframes challenge-bonus-focus {
+  0%, 100% { box-shadow: 5px 5px 0 var(--lime); transform: scale(1); }
+  28%, 62% { box-shadow: 10px 10px 0 var(--lime); transform: scale(1.06); }
 }
 
 .table-shell > .deal-integrity-compact {
   width: min(820px, calc(100% - 220px));
   margin-right: auto;
   margin-left: 0;
+  padding: 17px 22px;
+  border: 0;
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  color: var(--lime);
+  background:
+    linear-gradient(var(--lime), var(--lime)) 10px 0 / 3px 100% no-repeat,
+    var(--blue);
+  box-shadow: 5px 5px 0 var(--lime);
+}
+
+.table-shell > .deal-integrity-compact .deal-copy strong {
+  color: var(--lime);
+  font-family: var(--retro-font);
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.table-shell > .deal-integrity-compact .deal-actions a {
+  color: var(--lime);
+  font-size: 12px;
+}
+
+.table-shell > .deal-integrity-compact .deal-stack i {
+  border-color: var(--lime);
+}
+
+.table-shell > .deal-integrity-compact .deal-stack i:nth-child(2) {
+  background: var(--blue-dark);
+}
+
+.table-shell > .deal-integrity-compact .deal-stack span {
+  color: var(--blue);
 }
 
 @media (max-width: 700px) {
@@ -1463,6 +1518,29 @@ button.key-space { width: min(420px, 100%); height: 68px; justify-self: center; 
 
 .action-copy strong {
   animation: action-notice-in 180ms ease-out both;
+}
+
+.action-copy[data-stage="crypto"] span {
+  width: fit-content;
+  padding: 5px 8px;
+  color: var(--blue);
+  background: var(--lime);
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+
+.action-copy[data-stage="crypto"] strong {
+  color: var(--blue);
+}
+
+.table-challenge-notice {
+  border-color: var(--blue-dark);
+  border-bottom-color: var(--blue);
+  color: var(--blue);
+  background: var(--lime);
+}
+
+.table-challenge-notice span {
+  color: var(--blue);
 }
 
 @keyframes action-notice-in {
@@ -1523,6 +1601,7 @@ button.key-space { width: min(420px, 100%); height: 68px; justify-self: center; 
 
 @media (prefers-reduced-motion: reduce) {
   .action-copy strong,
+  .table-bonus-focus .challenge-leaderboard,
   .table-game-over::before,
   .game-finish {
     animation: none;
