@@ -37,7 +37,7 @@ export default function MotivationPage() {
       <header className="story-hero story-hero-motivation">
         <div>
           <p className="story-kicker">Motivation</p>
-          <h1>The server should not be the only witness.</h1>
+          <h1>A poker server controls hidden game data.</h1>
           <p>
             An online table can look fair while the code choosing the cards stays hidden Noir Poker
             publishes evidence for the deck and private challenges
@@ -139,7 +139,7 @@ export default function MotivationPage() {
         <div className="privacy-split">
           <article>
             <span>Player browser</span>
-            <strong>Objective secret catalog path and private hand witness</strong>
+            <strong>Objective secret catalog path and private hand values</strong>
           </article>
           <article>
             <span>Public proof</span>
@@ -155,7 +155,7 @@ export default function MotivationPage() {
         </p>
 
         <p className="story-note">
-          Noir separates private witness values from public verifier inputs Read the{" "}
+          Noir separates private values from public verifier inputs Read the{" "}
           <a href={NOIR} target="_blank" rel="noreferrer">
             Noir zero knowledge reference
           </a>

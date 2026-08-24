@@ -35,7 +35,7 @@ export function ProofHistory({ room, seat }: { room: string; seat?: number }) {
         <header className={styles.hero}>
           <p className={styles.label}>ROOM {room}</p>
           <h1>{seat === undefined ? "PROOF HISTORY" : `PLAYER ${seat + 1} PROOFS`}</h1>
-          <p>Published challenge evidence without private objectives or witnesses</p>
+          <p>Published challenge evidence without private objectives or hidden inputs</p>
         </header>
         {!proofs && !error && <p className={styles.proofNote}>LOADING PROOF HISTORY</p>}
         {error && (

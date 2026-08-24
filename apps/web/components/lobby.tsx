@@ -327,7 +327,7 @@ export function Lobby() {
               </div>
               <div>
                 <dt>Blinds</dt>
-                <dd>{AZTEC_SMALL_BLIND} / {AZTEC_BIG_BLIND}</dd>
+                <dd>{AZTEC_SMALL_BLIND} small blind · {AZTEC_BIG_BLIND} big blind</dd>
               </div>
             </dl>
           )}

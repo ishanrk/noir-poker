@@ -87,17 +87,38 @@
 }
 
 .private {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 20px;
-  background: var(--lime);
+  width: min(860px, calc(100% - 32px));
+  margin-block: 30px;
+  padding: 22px 40px 23px 52px;
+  border: 0;
+  background:
+    linear-gradient(var(--blue), var(--blue)) 22px 0 / 3px 100% no-repeat,
+    var(--lime);
+  clip-path: polygon(18px 0, calc(100% - 26px) 0, 100% 26px, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 18px);
   color: var(--blue);
+}
+
+.private::after {
+  position: absolute;
+  top: 50%;
+  left: 15px;
+  width: 17px;
+  height: 17px;
+  background: var(--blue);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  content: "";
+  transform: translateY(-50%);
 }
 
 .private strong {
   display: block;
-  font-size: 19px;
+  font-size: 22px;
+  line-height: 1.25;
 }
 
 .private small {
@@ -219,7 +240,35 @@
 }
 
 .proofTableStrip {
-  padding-block: 10px 14px;
+  position: relative;
+  width: min(1180px, calc(100% - 32px));
+  margin: 34px auto 28px;
+  padding: 28px 28px 22px;
+  border: 0;
+  background: transparent;
+}
+
+.proofTableStrip::before,
+.proofTableStrip::after {
+  position: absolute;
+  width: 52px;
+  height: 28px;
+  content: "";
+  pointer-events: none;
+}
+
+.proofTableStrip::before {
+  top: 0;
+  left: 0;
+  border-top: 3px solid var(--blue);
+  border-left: 3px solid var(--blue);
+}
+
+.proofTableStrip::after {
+  right: 0;
+  bottom: 0;
+  border-right: 5px solid var(--lime);
+  border-bottom: 5px solid var(--lime);
 }
 
 .proofTableWrap {
@@ -230,7 +279,8 @@
 .proofTable {
   width: 100%;
   min-width: 620px;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: fixed;
   font-size: 11px;
   text-align: left;
@@ -245,11 +295,19 @@
   text-align: left;
 }
 
+.proofTable caption span {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink-soft);
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
 .proofTable th,
 .proofTable td {
   min-width: 128px;
   padding: 10px 12px;
-  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
   vertical-align: top;
 }
 
@@ -261,6 +319,8 @@
 .proofTable thead th {
   color: var(--blue);
   font-weight: 900;
+  border-top: 2px solid var(--blue);
+  border-bottom-color: var(--blue);
 }
 
 .proofTable thead strong,
@@ -269,26 +329,64 @@
 }
 
 .proofTable thead small {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
   margin-top: 4px;
   font-size: 8px;
   line-height: 1.35;
 }
 
 .proofTable tbody th {
+  position: relative;
+  padding-left: 24px;
   color: var(--blue);
   font-size: 12px;
 }
 
+.proofTable tbody th::before {
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  width: 9px;
+  height: 9px;
+  background: var(--lime);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  content: "";
+  transform: translateY(-50%);
+}
+
 .proofCell {
   display: grid;
-  gap: 6px;
+  gap: 7px;
   line-height: 1.25;
+}
+
+.proofCellLine {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 7px;
+}
+
+.proofCellLine i {
+  color: var(--ink-soft);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.proofCellLine b {
+  color: var(--ink-soft);
+  font-size: 9px;
 }
 
 .proofCell a {
   width: fit-content;
   color: var(--blue);
   font-weight: 900;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
 }
 
 .proofCell > span,
@@ -590,6 +688,15 @@
 
   .privateProofs {
     grid-template-columns: 1fr;
+  }
+
+  .private {
+    padding: 20px 24px 21px 42px;
+  }
+
+  .proofTableStrip {
+    width: calc(100% - 16px);
+    padding-inline: 16px;
   }
 
   .private > .privateProofs {

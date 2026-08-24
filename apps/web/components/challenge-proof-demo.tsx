@@ -18,8 +18,8 @@ const STEPS = [
   {
     label: "Prove",
     title: "The browser generates every available proof.",
-    copy: "Mode 0 starts after assignment. Mode 1 starts after settlement when the objective was completed. There is no generate proof control.",
-    code: "UltraHonkBackend.generateProof(witness)",
+    copy: "The draw proof starts after assignment. The completion proof starts after settlement when the objective was completed. There is no generate proof control.",
+    code: "UltraHonkBackend.generateProof(privateInputs)",
   },
   {
     label: "Verify",

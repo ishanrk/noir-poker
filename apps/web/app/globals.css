@@ -673,6 +673,9 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .deck-card-position { color: var(--blue); font-size: 9px; font-weight: 700; line-height: 1; }
 .deck-opening-stream .card { width: 58px; }
 .deck-opening-stream .card[data-filled="true"] { animation: none; }
+.deck-opening-stream .card-empty { border-color: rgb(31 11 209 / 22%); background: rgb(255 255 255 / 34%); }
+.deck-opening-stream[data-ready="false"] .card { opacity: 0.32; }
+.deck-opening-stream[data-ready="true"] .card { opacity: 1; transition: opacity 220ms ease; }
 .deck-protocol { width: min(100% - 40px, 1040px); margin: 70px auto 0; }
 .deck-protocol > header { display: grid; gap: 7px; max-width: 620px; }
 .deck-protocol > header h2 { margin: 0; font-size: 34px; line-height: 1; }
@@ -681,7 +684,7 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .deck-protocol-path::before { position: absolute; z-index: 0; top: 24px; right: 20px; left: 20px; height: 2px; background: var(--blue); content: ""; }
 .deck-protocol-path button { position: relative; z-index: 1; width: 52px; height: 50px; padding: 0; border: 0; color: var(--blue); background: var(--paper); clip-path: polygon(10px 0, 42px 0, 52px 10px, 52px 40px, 42px 50px, 10px 50px, 0 40px, 0 10px); box-shadow: inset 0 0 0 2px var(--blue); cursor: pointer; font-size: 13px; font-weight: 800; }
 .deck-protocol-path button[data-current="true"] { color: white; background: var(--blue); box-shadow: inset 0 -6px 0 var(--lime); }
-.deck-protocol-step { position: relative; min-height: 330px; padding: 24px 8% 34px 52px; border-left: 5px solid var(--blue); background: linear-gradient(90deg, rgb(42 22 216 / 5%), transparent 62%); animation: protocol-step-in 110ms ease-out both; }
+.deck-protocol-step { position: relative; min-height: 330px; padding: 24px 8% 34px 52px; border-left: 5px solid var(--blue); background: linear-gradient(90deg, rgb(42 22 216 / 5%), transparent 62%); }
 .deck-protocol-step::before { position: absolute; top: 0; left: -11px; width: 17px; height: 17px; background: var(--lime); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); content: ""; }
 .deck-protocol-step > span { color: var(--blue); font-size: 12px; font-weight: 800; }
 .deck-protocol-step h2 { max-width: 760px; margin: 20px 0 16px; font-size: clamp(29px, 4vw, 44px); line-height: 1; }
@@ -700,8 +703,6 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .deck-limit { width: min(100% - 40px, 1040px); margin: 0 auto 80px; padding: 26px 28px; color: white; background: var(--blue); box-shadow: 8px 8px 0 var(--lime); }
 .deck-limit strong { color: var(--lime); font: 800 15px/1 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif; }
 .deck-limit p { max-width: 780px; margin: 10px 0 0; line-height: 1.6; }
-@keyframes protocol-step-in { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: translateX(0); } }
-
 @media (max-width: 700px) {
   .deck-proof-seal { justify-self: start; }
   .deck-opening { width: calc(100% - 32px); }
@@ -715,6 +716,6 @@ code { font-family: "Courier New", ui-monospace, monospace; }
   .deck-protocol-step p { font-size: 15px; }
   .deck-protocol-data { grid-template-columns: 1fr; }
   .deck-protocol-data > div + div { padding-left: 0; border-top: 1px solid var(--line); border-left: 0; }
-  .deck-protocol-controls { grid-template-columns: 1fr 62px 1fr; margin-left: 0; }
+  .deck-protocol-controls { grid-template-columns: 1fr 92px 1fr; margin-left: 0; }
   .deck-limit { width: calc(100% - 32px); }
 }

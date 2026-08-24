@@ -74,8 +74,8 @@ export default function ProtocolPage() {
         <header className="story-section-head">
           <p className="story-index">01</p>
           <div>
-            <h2 id="runbooks-title">Verification runbooks</h2>
-            <p>Start with the artifact you have.</p>
+            <h2 id="runbooks-title">Run verification</h2>
+            <p>Use the proof link shown by the table</p>
           </div>
         </header>
 
@@ -86,10 +86,10 @@ export default function ProtocolPage() {
               <h3>Deal audit</h3>
             </header>
             <div className="artifact-runbook-steps">
-              <p><span>01</span>Finish the hand and open <code>/audit/&lt;room&gt;/&lt;hand&gt;</code></p>
+              <p><span>01</span>Finish the hand and select <strong>Verify Deck</strong> above the table</p>
               <p><span>02</span>The page checks every key proof encrypted shuffle reveal and opening</p>
               <p><span>03</span>Select <strong>Download Proof Transcript</strong> and save the accepted audit</p>
-              <p><span>04</span>Run <code>npm --prefix apps/web run deal:verify -- path/to/downloaded.json</code></p>
+              <p><span>04</span>From the web application folder run <code>npm run deal:verify -- downloaded.json</code></p>
             </div>
           </article>
 
@@ -99,10 +99,10 @@ export default function ProtocolPage() {
               <h3>Fair draw proof</h3>
             </header>
             <div className="artifact-runbook-steps">
-              <p><span>01</span>The browser generates Mode 0 after assignment</p>
+              <p><span>01</span>The browser generates the draw proof after assignment</p>
               <p><span>02</span>The server verifies the proof before publication</p>
               <p><span>03</span>Any player can open the accepted proof and verify it locally</p>
-              <p><span>04</span>Open <code>/room/&lt;room&gt;/proofs/&lt;hand&gt;/&lt;seat&gt;/draw</code></p>
+              <p><span>04</span>Select the published draw entry in the challenge table</p>
             </div>
           </article>
 
@@ -112,10 +112,10 @@ export default function ProtocolPage() {
               <h3>Completion receipt</h3>
             </header>
             <div className="artifact-runbook-steps">
-              <p><span>01</span>The browser generates Mode 1 after a completed objective</p>
+              <p><span>01</span>The browser generates the completion proof after a completed objective</p>
               <p><span>02</span>The server verifies it and records one completion</p>
-              <p><span>03</span>Open <code>/proof/&lt;nullifier&gt;</code> to run browser verification</p>
-              <p><span>04</span>Download JSON then run <code>npm --prefix apps/web run proof:verify -- path/to/downloaded.json</code></p>
+              <p><span>03</span>Select the published completion entry to run browser verification</p>
+              <p><span>04</span>Download JSON then run <code>npm run proof:verify -- downloaded.json</code> from the web application folder</p>
             </div>
           </article>
         </div>
@@ -162,13 +162,13 @@ export default function ProtocolPage() {
           <p className="story-index">04</p>
           <div>
             <h2 id="proof-statements-title">Proof statements</h2>
-            <p>The circuit has two modes with the same assignment checks.</p>
+            <p>Both proofs repeat the same challenge assignment checks</p>
           </div>
         </header>
 
         <div className="statement-grid-story">
           <article>
-            <span>Mode 0</span>
+            <span>Draw proof</span>
             <h3>Fair draw</h3>
             <p>
               The prover knows a secret bound to the public commitment. That secret and the public
@@ -176,7 +176,7 @@ export default function ProtocolPage() {
             </p>
             <div>
               <strong>Public</strong>
-              <p>mode hand tag seat commitment nonce and catalog root</p>
+              <p>hand fingerprint seat commitment nonce and catalog root</p>
             </div>
             <div>
               <strong>Private</strong>
@@ -185,7 +185,7 @@ export default function ProtocolPage() {
           </article>
 
           <article>
-            <span>Mode 1</span>
+            <span>Completion proof</span>
             <h3>Completion</h3>
             <p>
               The circuit repeats every assignment check and binds six private facts to a public

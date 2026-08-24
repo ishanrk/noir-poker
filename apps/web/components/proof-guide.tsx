@@ -72,7 +72,7 @@ export function ProofGuide({
         >
           Previous
         </button>
-        <output>{currentStep + 1} / {steps.length}</output>
+        <output>Step {currentStep + 1} of {steps.length}</output>
         <button
           type="button"
           disabled={currentStep === steps.length - 1}

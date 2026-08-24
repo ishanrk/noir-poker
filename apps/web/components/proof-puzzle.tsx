@@ -8,12 +8,12 @@ const PIECES = [
   },
   {
     title: "Player browser",
-    detail: "Keeps the challenge secret and builds the private witness.",
+    detail: "Keeps the challenge secret and prepares the hidden inputs.",
     meta: "private input",
   },
   {
     title: "NoirJS",
-    detail: "Executes challenge_v2 and produces the witness data.",
+    detail: "Checks the hidden inputs against the public values.",
     meta: "circuit",
   },
   {

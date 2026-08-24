@@ -115,7 +115,6 @@
   padding: 24px 8% 34px 52px;
   border-left: 5px solid var(--blue);
   background: linear-gradient(90deg, rgb(42 22 216 / 5%), transparent 62%);
-  animation: protocol-step-in 110ms ease-out both;
 }
 
 .proof-guide-step::before {
@@ -325,70 +324,50 @@
   font-weight: 800;
 }
 
-.proof-tour-layer {
-  position: fixed;
-  z-index: 1000;
-  inset: 0;
-  background: transparent;
+.proof-tour-note {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 22px;
+  width: min(940px, calc(100% - 32px));
+  margin: 18px auto 4px;
+  padding: 17px 22px 17px 26px;
+  border-left: 5px solid var(--blue);
+  border-bottom: 1px solid var(--blue);
+  background: linear-gradient(90deg, rgb(199 255 50 / 38%), rgb(255 255 255 / 86%) 60%);
 }
 
-.proof-tour-focus {
-  position: fixed;
-  z-index: 1001;
-  top: var(--proof-tour-top);
-  left: var(--proof-tour-left);
-  width: var(--proof-tour-width);
-  height: var(--proof-tour-height);
-  border: 4px solid var(--lime);
-  box-shadow: 0 0 0 3px var(--blue), 0 0 0 9999px rgb(7 9 14 / 62%);
-  pointer-events: none;
-  transition: inset 180ms ease, width 180ms ease, height 180ms ease;
-}
-
-.proof-tour-dialog {
-  position: fixed;
-  z-index: 1002;
-  right: max(20px, calc((100vw - 1120px) / 2));
-  bottom: 24px;
-  width: min(430px, calc(100% - 40px));
-  padding: 24px;
-  border: 2px solid var(--ink);
-  border-radius: 0;
-  background: var(--paper);
-  box-shadow: 8px 8px 0 var(--lime);
-}
-
-.proof-tour-dialog > span {
+.proof-tour-note > span {
   color: var(--blue);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
+  white-space: nowrap;
 }
 
-.proof-tour-dialog h2 {
-  margin: 9px 0 11px;
+.proof-tour-note h2 {
+  margin: 0 0 5px;
   font-family: inherit;
-  font-size: 25px;
+  font-size: 18px;
 }
 
-.proof-tour-dialog p {
+.proof-tour-note p {
   margin: 0;
   color: #454c55;
-  font-size: 14px;
-  line-height: 1.65;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
-.proof-tour-dialog button {
-  width: 100%;
-  min-height: 44px;
-  margin-top: 19px;
+.proof-tour-note button {
+  min-width: 86px;
+  min-height: 38px;
   border: 0;
-  border-bottom: 4px solid var(--lime);
+  border-bottom: 4px solid var(--blue-dark);
   border-radius: 0;
-  color: white;
-  background: var(--blue);
+  color: var(--blue);
+  background: var(--lime);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
 }
 
@@ -443,18 +422,17 @@
   }
 
   .proof-guide-controls {
-    grid-template-columns: 1fr 62px 1fr;
+    grid-template-columns: 1fr 92px 1fr;
     margin-left: 0;
   }
 
-  .proof-tour-dialog {
-    right: 20px;
-    bottom: 20px;
+  .proof-tour-note {
+    grid-template-columns: 1fr auto;
+    gap: 10px 16px;
+    padding: 16px 18px;
   }
-}
 
-@media (prefers-reduced-motion: reduce) {
-  .proof-tour-focus {
-    transition: none;
+  .proof-tour-note > span {
+    grid-column: 1 / -1;
   }
 }

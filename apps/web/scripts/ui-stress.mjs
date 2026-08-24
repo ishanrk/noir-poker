@@ -264,7 +264,9 @@ async function nextSingle(trace, hand) {
   await ready.click();
   await until(() => sent(trace, "ready").length === before + 1, `single hand ${hand + 1} ready not sent`);
   await waitHand(trace, hand + 1);
-  await trace.page.getByText(`Hand ${hand + 2} / 3`, { exact: true }).waitFor({ timeout: 240_000 });
+  await trace.page.getByText(`Hand ${hand + 2} of 3`, { exact: true }).waitFor({ timeout: 240_000 });
+  await trace.page.getByText(`Hand ${hand + 1} deck proof ready`, { exact: true }).waitFor();
+  assert.equal(await trace.page.getByText("Deck Randomness Proof", { exact: true }).count(), 1);
   const cards = await hole(trace.page);
   assert.equal(cards.length, 2, `single hand ${hand + 2} cards missing`);
   assert.equal(
@@ -489,7 +491,9 @@ async function playObjective(target, objective, a, b, hand) {
 
 async function verifyPublic(viewer, owner, kind) {
   const row = viewer.page.getByRole("row").filter({ hasText: owner.toUpperCase() });
-  const verify = row.getByRole("link", { name: `${kind} PROOF`, exact: true });
+  const label = kind === "DRAW" ? "DRAW" : "COMPLETE";
+  const line = row.locator("i").filter({ hasText: new RegExp(`^${label}$`) }).locator("..");
+  const verify = line.getByRole("link", { name: "PUBLISHED", exact: true });
   await verify.waitFor({ timeout: 30_000 });
   const tableUrl = viewer.page.url();
   const opened = viewer.page.waitForEvent("popup");
@@ -505,7 +509,11 @@ async function verifyPublic(viewer, owner, kind) {
     new RegExp(`^noir-poker-${kind.toLowerCase()}-\\d+-\\d+\\.json$`),
     `${kind} proof download name`,
   );
-  await page.getByRole("link", { name: "Local Verifier", exact: true }).waitFor();
+  await page.getByRole("navigation", { name: "Read and verify this proof steps" })
+    .getByRole("button")
+    .last()
+    .click();
+  await page.getByRole("link", { name: "Verifier Source", exact: true }).waitFor();
   const body = await page.locator("body").innerText();
   for (const objective of objectives) {
     assert.equal(body.includes(objective), false, `${kind} proof exposed the private objective`);
@@ -515,14 +523,15 @@ async function verifyPublic(viewer, owner, kind) {
 }
 
 async function dismissTour(trace) {
-  await trace.page.getByRole("dialog").waitFor({ timeout: 30_000 });
-  await trace.page.getByText("Deck proof", { exact: true }).waitFor();
-  await trace.page.getByRole("button", { name: "Okay", exact: true }).click();
-  await trace.page.getByText("Challenge draw proof", { exact: true }).waitFor();
-  await trace.page.getByRole("button", { name: "Okay", exact: true }).click();
-  await trace.page.getByText("Completion proof", { exact: true }).waitFor();
-  await trace.page.getByRole("button", { name: "Okay Start Hand 2", exact: true }).click();
-  await trace.page.getByRole("dialog").waitFor({ state: "hidden" });
+  const guide = trace.page.locator(".proof-tour-note");
+  await guide.waitFor({ timeout: 30_000 });
+  await guide.getByText("Open the previous hand deck proof", { exact: true }).waitFor();
+  await guide.getByRole("button", { name: "Next", exact: true }).click();
+  await guide.getByText("Open a challenge draw proof", { exact: true }).waitFor();
+  await guide.getByRole("button", { name: "Next", exact: true }).click();
+  await guide.getByText("Open a completion proof", { exact: true }).waitFor();
+  await guide.getByRole("button", { name: "Close", exact: true }).click();
+  await guide.waitFor({ state: "hidden" });
 }
 
 async function multiplayerStress() {

@@ -91,7 +91,10 @@ export function PlayProofs({
     <section className={`${styles.strip} ${styles.proofTableStrip}`} aria-label="Challenge proofs">
       <div className={styles.proofTableWrap}>
         <table className={styles.proofTable}>
-          <caption>CHALLENGE PROOF HISTORY · LAST FIVE HANDS</caption>
+          <caption>
+            CHALLENGE PROOFS
+            <span>Last five hands</span>
+          </caption>
           <thead>
             <tr>
               <th scope="col">PLAYER</th>
@@ -99,8 +102,7 @@ export function PlayProofs({
                 <th scope="col" key={hand}>
                   <strong>HAND {hand + 1}</strong>
                   <small>
-                    <span data-proof-tour={hand === handNo ? "challenge-draw" : undefined}>DRAW PROOF</span>
-                    <span aria-hidden="true"> / </span>
+                    <span data-proof-tour={hand === handNo ? "challenge-draw" : undefined}>DRAW</span>
                     <span data-proof-tour={hand === handNo ? "challenge-completion" : undefined}>COMPLETION</span>
                   </small>
                 </th>
@@ -133,11 +135,11 @@ export function PlayProofs({
   );
 }
 
-function unpublishedStatus(kind: "DRAW" | "COMPLETION", state: ProofState | undefined) {
-  if (state === "preparing" || state === "proving") return `${kind} GENERATING`;
-  if (state === "verifying") return `${kind} VERIFYING`;
-  if (state === "failed") return `${kind} RETRYING`;
-  if (state === "verified") return `${kind} PUBLISHED`;
+function unpublishedStatus(state: ProofState | undefined) {
+  if (state === "preparing" || state === "proving") return "GENERATING";
+  if (state === "verifying") return "VERIFYING";
+  if (state === "failed") return "RETRYING";
+  if (state === "verified") return "PUBLISHED";
   return undefined;
 }
 
@@ -158,8 +160,8 @@ function ProofCell({
   drawState?: ProofState;
   completionState?: ProofState;
 }) {
-  const drawStatus = unpublishedStatus("DRAW", drawState);
-  const completionStatus = unpublishedStatus("COMPLETION", completionState);
+  const drawStatus = unpublishedStatus(drawState);
+  const completionStatus = unpublishedStatus(completionState);
 
   if (!proof && !drawStatus && !completionStatus) {
     return <td><span className={styles.proofEmpty}>{hand === 0 ? "NO CHALLENGE" : "WAITING"}</span></td>;
@@ -168,32 +170,36 @@ function ProofCell({
   return (
     <td>
       <span className={styles.proofCell}>
-        {proof?.draw_published ? (
-          <Link
-            href={`/room/${room}/proofs/${hand}/${seat}/draw`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            DRAW PROOF
-          </Link>
-        ) : drawStatus ? (
-          <span>{drawStatus}</span>
-        ) : proof ? (
-          <span>DRAW PENDING</span>
-        ) : null}
-        {proof?.completion_published ? (
-          <Link
-            href={`/room/${room}/proofs/${hand}/${seat}/completion`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            COMPLETION PROOF
-          </Link>
-        ) : completionStatus ? (
-          <strong>{completionStatus}</strong>
-        ) : proof ? (
-          <strong>{proof.finished ? checking ? "CHECKING" : "MISSED" : "IN PLAY"}</strong>
-        ) : null}
+        <span className={styles.proofCellLine}>
+          <i>DRAW</i>
+          {proof?.draw_published ? (
+            <Link
+              href={`/room/${room}/proofs/${hand}/${seat}/draw`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              PUBLISHED
+            </Link>
+          ) : <b>{drawStatus ?? (proof ? "PENDING" : "WAITING")}</b>}
+        </span>
+        <span className={styles.proofCellLine}>
+          <i>COMPLETE</i>
+          {proof?.completion_published ? (
+            <Link
+              href={`/room/${room}/proofs/${hand}/${seat}/completion`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              PUBLISHED
+            </Link>
+          ) : (
+            <b>{completionStatus ?? (proof
+              ? proof.finished
+                ? checking ? "CHECKING" : "MISSED"
+                : "IN PLAY"
+              : "WAITING")}</b>
+          )}
+        </span>
       </span>
     </td>
   );

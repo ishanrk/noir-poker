@@ -16,7 +16,7 @@ export default async function TablePage({ params, searchParams }: TablePageProps
       <header className="table-page-header">
         <div>
           <p className="eyebrow">
-            {aztec ? "Aztec table" : "Live table"} / {room.slice(0, 8)}
+            {aztec ? "Aztec table" : "Live table"} · {room.slice(0, 8)}
           </p>
           <h1>Noir Poker</h1>
         </div>

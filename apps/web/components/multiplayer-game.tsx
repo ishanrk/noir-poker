@@ -346,7 +346,6 @@ export function MultiplayerGame({ room }: { room: string }) {
   const noticeQueue = useRef<ActionNoticeView[]>([]);
   const [deckStage, setDeckStage] = useState<string>();
   const [finishHand, setFinishHand] = useState<number>();
-  const [tourState, setTourState] = useState<{ handNo: number; open: boolean }>();
   const notice = notices[0];
   const gameReady = Boolean(
     view?.game_over &&
@@ -1169,7 +1168,7 @@ export function MultiplayerGame({ room }: { room: string }) {
       <div className={`waiting-room${error ? " ui-shake" : ""}`}>
         <p className="protocol-label">Room {room}</p>
         <h2>Waiting for the table.</h2>
-        <strong>{waiting.joined} / {waiting.players} seats</strong>
+        <strong>{waiting.joined} of {waiting.players} seats</strong>
         <p>Waiting for every player to join.</p>
         {error && <p className="form-error">{error}</p>}
         {!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><Keycap>Reconnect</Keycap></button>}
@@ -1178,17 +1177,11 @@ export function MultiplayerGame({ room }: { room: string }) {
   }
   if (!view) return <div className={`room-status${error ? " ui-shake" : ""}`}><strong>{error ?? deckStage ?? "Connecting to table"}</strong>{!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><Keycap>Reconnect</Keycap></button>}</div>;
 
-  const tourBlocking = Boolean(
-    view.mode === "multiplayer" &&
-    view.hand_no === 1 &&
-    (tourState?.handNo !== view.hand_no || tourState.open),
-  );
   const interactionDisabled =
     actionPending ||
     notices.length > 0 ||
     Boolean(deckStage) ||
-    !connected ||
-    tourBlocking;
+    !connected;
 
   const contract: ContractView = {
     assignment: view.mode !== "multiplayer" || !view.challenge
@@ -1247,7 +1240,7 @@ export function MultiplayerGame({ room }: { room: string }) {
   return (
     <div className={`game-view${error || challengeError ? " ui-shake" : ""}`}>
       {view.mode === "multiplayer" && (
-        <ProofTour room={room} seat={seat} handNo={view.hand_no} onOpenChange={setTourState} />
+        <ProofTour room={room} seat={seat} handNo={view.hand_no} />
       )}
       {!connected && <div className="connection-bar"><span>{connecting ? "Connecting" : "Disconnected"}</span>{!connecting && <button type="button" onClick={connect}>Reconnect</button>}</div>}
       <Table

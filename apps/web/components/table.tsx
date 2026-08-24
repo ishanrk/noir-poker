@@ -7,7 +7,6 @@ import {
   type ContractView,
 } from "@/components/contract";
 import {
-  DealIntegrity,
   PreviousDealIntegrity,
   type DealView,
 } from "@/components/deal-integrity";
@@ -294,7 +293,7 @@ export function Table({
 
   return (
     <section className={`table-shell${finish ? " table-game-over" : ""}`} aria-label="Six-max poker table">
-      <div className="table-hand-count">Hand {view.hand_no + 1} / {view.total_hands}</div>
+      <div className="table-hand-count">Hand {view.hand_no + 1} of {view.total_hands}</div>
       {view.mode === "multiplayer" && (
         <aside className="challenge-leaderboard" aria-label="Challenge leaderboard">
           <strong>Challenge Leaderboard</strong>
@@ -310,7 +309,6 @@ export function Table({
         </aside>
       )}
       {view.hand_no > 0 && <PreviousDealIntegrity room={room} hand={view.hand_no - 1} />}
-      {view.deal?.audit && <DealIntegrity deal={view.deal} room={room} compact />}
 
       {PROOF_UI && (
         <PrivateChallenge

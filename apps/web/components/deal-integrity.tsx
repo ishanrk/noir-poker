@@ -10,42 +10,6 @@ export type DealView = {
   audit: boolean;
 };
 
-export function DealIntegrity({
-  deal,
-  room,
-  compact = false,
-}: {
-  deal: DealView;
-  room: string;
-  compact?: boolean;
-}) {
-  return (
-    <section
-      className={`deal-integrity${compact ? " deal-integrity-compact" : ""}`}
-      data-proof-tour="deck"
-    >
-      <div className="deal-stack" data-state={deal.state} aria-hidden="true">
-        <i />
-        <i />
-        <i />
-        <span>{deal.state === "revealed" ? "✓" : "◆"}</span>
-      </div>
-      <div className="deal-copy">
-        <p className="protocol-label">Deck Randomness Proof</p>
-        <strong>Short proof showing server didn&apos;t cheat the deck</strong>
-        <code title={deal.commitment}>SHA-256 {deal.commitment}</code>
-      </div>
-      <div className="deal-actions">
-        {deal.audit ? (
-          <Link href={`/audit/${room}/${deal.hand_no}`} target="_blank">Verify Deck →</Link>
-        ) : (
-          <span>Available after hand</span>
-        )}
-      </div>
-    </section>
-  );
-}
-
 export function PreviousDealIntegrity({ room, hand }: {
   room: string;
   hand: number;
@@ -60,12 +24,12 @@ export function PreviousDealIntegrity({ room, hand }: {
       </div>
       <div className="deal-copy">
         <p className="protocol-label">Deck Randomness Proof</p>
-        <strong>Hand {hand + 1} has a public encrypted deck transcript</strong>
-        <code>Keys shuffles reveals openings and all 52 cards</code>
+        <strong>Hand {hand + 1} deck proof ready</strong>
+        <code>This replaces the prior hand proof</code>
       </div>
       <div className="deal-actions">
         <Link href={`/audit/${room}/${hand}`} target="_blank">
-          Verify Hand {hand + 1} Deck
+          Verify Deck →
         </Link>
       </div>
     </section>
