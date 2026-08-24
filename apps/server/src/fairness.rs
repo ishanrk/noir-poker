@@ -339,8 +339,7 @@ pub async fn join_aztec(
     .await?;
 
     if let Some(hand) = hand {
-        let completed =
-            ceremony_with_share(ceremony, usize::try_from(admission.seat)?, share)?;
+        let completed = ceremony_with_share(ceremony, usize::try_from(admission.seat)?, share)?;
         finalize_ceremony(&mut tx, admission.room, &completed, hand.seed).await?;
         insert_hand(&mut tx, admission.room, &hand).await?;
         if let Some(next) = next {
@@ -686,10 +685,7 @@ async fn update_rev(
     one_row(changed.rows_affected(), "room revision mismatch")
 }
 
-async fn confirm_admission(
-    tx: &mut Transaction<'_, Postgres>,
-    admission: Uuid,
-) -> FairResult<()> {
+async fn confirm_admission(tx: &mut Transaction<'_, Postgres>, admission: Uuid) -> FairResult<()> {
     let changed = query(
         "UPDATE aztec_admissions SET status = 'confirmed', confirmed_at = now(), \
          updated_at = now() WHERE id = $1 AND status = 'authorized'",

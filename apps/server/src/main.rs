@@ -1,5 +1,5 @@
-mod bot;
 mod aztec;
+mod bot;
 mod db;
 mod deck_proof;
 mod fairness;
@@ -55,8 +55,7 @@ use crate::room::start_game;
 use crate::room::{
     ActionNotice, Ceremony, Challenge, Challenges, HandResult, HandResultKind, LiveHand,
     PendingClaim, PendingDraw, PlayedAction, Room, RoomConfig, RoomMode, Seat, SettlementState,
-    TokenHash,
-    bind_facts, challenge_bonuses, challenge_facts, replay_deck, replay_hand,
+    TokenHash, bind_facts, challenge_bonuses, challenge_facts, replay_deck, replay_hand,
 };
 
 type HttpError = (StatusCode, &'static str);
@@ -660,14 +659,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
     let mut state = AppState::new(db, rooms, proof, deck_proof);
     state.aztec = aztec;
+    settle_aztec_once(&state).await;
     let worker = state.clone();
     tokio::spawn(async move { settle_aztec(worker).await });
 
-    axum::serve(
-        listener,
-        app_with_origins(state, origins),
-    )
-    .await?;
+    axum::serve(listener, app_with_origins(state, origins)).await?;
     Ok(())
 }
 
@@ -1100,6 +1096,430 @@ fn valid_player_name(name: &str) -> bool {
             .all(|ch| ch.is_alphanumeric() || matches!(ch, ' ' | '_' | '-'))
 }
 
+async fn reserve_aztec_room(
+    AxumState(state): AxumState<AppState>,
+    Json(request): Json<AztecCreateRequest>,
+) -> Result<(StatusCode, Json<AztecReservation>), HttpError> {
+    require_aztec(&state)?;
+    let account = aztec_account(&request.account)?;
+    let entropy =
+        decode_hex(&request.entropy).ok_or((StatusCode::BAD_REQUEST, "invalid deal entropy"))?;
+    let config = RoomConfig {
+        players: request.players,
+        stack: AZTEC_BUY_IN,
+        small_blind: AZTEC_SMALL_BLIND,
+        big_blind: AZTEC_BIG_BLIND,
+        hands: request.hands.unwrap_or(5),
+    };
+    config
+        .validate()
+        .map_err(|error| (StatusCode::BAD_REQUEST, error))?;
+    let name = player_name(request.name.as_deref(), RoomMode::Aztec, 0)?;
+    let room = new_room_id(&state).await;
+    let admission = Uuid::new_v4();
+    let token = Uuid::new_v4();
+    let token_hash = hash_token(token);
+    let table_id = aztec_table_id(room);
+    let entry_id = aztec_entry_id()
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot reserve entry"))?;
+
+    state
+        .db
+        .reserve_aztec(NewAdmission {
+            id: admission,
+            room,
+            seat: 0,
+            token_hash: &token_hash,
+            account: &account,
+            table_id: &table_id,
+            entry_id: &entry_id,
+            amount: AZTEC_BUY_IN,
+            config,
+            entropy: &entropy,
+            name: &name,
+        })
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot reserve entry"))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(aztec_reservation(
+            room, 0, admission, token, table_id, entry_id, false,
+        )),
+    ))
+}
+
+async fn reserve_aztec_join(
+    AxumState(state): AxumState<AppState>,
+    Path(code): Path<String>,
+    Json(request): Json<AztecJoinRequest>,
+) -> Result<Json<AztecReservation>, HttpError> {
+    require_aztec(&state)?;
+    let account = aztec_account(&request.account)?;
+    let entropy =
+        decode_hex(&request.entropy).ok_or((StatusCode::BAD_REQUEST, "invalid deal entropy"))?;
+    let (id, room) = resolve_room(&state, &code)
+        .await
+        .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
+    let room = room.lock().await;
+    if room.mode != RoomMode::Aztec {
+        return Err((StatusCode::CONFLICT, "not an aztec room"));
+    }
+    let seat = room
+        .next_seat()
+        .map_err(|_| (StatusCode::CONFLICT, "room full"))?;
+    let name = player_name(request.name.as_deref(), room.mode, seat)?;
+    if room
+        .seats
+        .iter()
+        .any(|stored| stored.name.eq_ignore_ascii_case(&name))
+    {
+        return Err((StatusCode::CONFLICT, "player name already used"));
+    }
+    let config = room.config;
+    let admission = Uuid::new_v4();
+    let token = Uuid::new_v4();
+    let token_hash = hash_token(token);
+    let table_id = aztec_table_id(id);
+    let entry_id = aztec_entry_id()
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot reserve entry"))?;
+
+    state
+        .db
+        .reserve_aztec(NewAdmission {
+            id: admission,
+            room: id,
+            seat,
+            token_hash: &token_hash,
+            account: &account,
+            table_id: &table_id,
+            entry_id: &entry_id,
+            amount: AZTEC_BUY_IN,
+            config,
+            entropy: &entropy,
+            name: &name,
+        })
+        .await
+        .map_err(|_| (StatusCode::CONFLICT, "seat entry pending"))?;
+
+    Ok(Json(aztec_reservation(
+        id, seat, admission, token, table_id, entry_id, false,
+    )))
+}
+
+async fn authorize_aztec_admission(
+    AxumState(state): AxumState<AppState>,
+    Path(admission): Path<Uuid>,
+    Json(request): Json<AztecTokenRequest>,
+) -> Result<Json<AztecReservation>, HttpError> {
+    let boundary = require_aztec(&state)?.clone();
+    let lock = admission_lock(&state, admission).await;
+    let _guard = lock.lock().await;
+    let token_hash = hash_token(request.token);
+    let mut stored = load_admission(&state, admission, &token_hash).await?;
+
+    if stored.status == "reserved" {
+        let authorization = boundary
+            .authorize(&aztec_entry(&stored)?)
+            .await
+            .map_err(|_| (StatusCode::BAD_GATEWAY, "aztec network unavailable"))?;
+        let tx = authorization.tx.as_deref().unwrap_or("reconciled");
+        state
+            .db
+            .authorize_aztec(admission, &token_hash, tx)
+            .await
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot authorize entry"))?;
+        stored.status = "authorized".to_owned();
+    } else if stored.status != "authorized" && stored.status != "confirmed" {
+        return Err((StatusCode::CONFLICT, "entry unavailable"));
+    }
+
+    Ok(Json(reservation_from_stored(&stored, request.token, true)?))
+}
+
+async fn confirm_aztec_admission(
+    AxumState(state): AxumState<AppState>,
+    Path(admission): Path<Uuid>,
+    Json(request): Json<AztecTokenRequest>,
+) -> Result<Json<SeatResponse>, HttpError> {
+    let boundary = require_aztec(&state)?.clone();
+    let lock = admission_lock(&state, admission).await;
+    let _guard = lock.lock().await;
+    let token_hash = hash_token(request.token);
+    let stored = load_admission(&state, admission, &token_hash).await?;
+
+    if stored.status == "confirmed" {
+        return Ok(Json(seat_response(&stored, request.token)?));
+    }
+    if stored.status != "authorized" {
+        return Err((StatusCode::CONFLICT, "entry authorization pending"));
+    }
+    if !boundary
+        .confirms(&aztec_entry(&stored)?)
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "aztec network unavailable"))?
+    {
+        return Err((
+            StatusCode::PAYMENT_REQUIRED,
+            "entry does not match this seat",
+        ));
+    }
+
+    if stored.seat == 0 {
+        confirm_aztec_creator(&state, &stored, token_hash).await?;
+    } else {
+        confirm_aztec_join(&state, &stored, token_hash).await?;
+    }
+
+    Ok(Json(seat_response(&stored, request.token)?))
+}
+
+async fn confirm_aztec_creator(
+    state: &AppState,
+    admission: &StoredAdmission,
+    token_hash: TokenHash,
+) -> Result<(), HttpError> {
+    let config = admission_config(admission)?;
+    let share = admission_entropy(admission)?;
+    let ceremony = fairness::random_ceremony(admission.room, 0, config.players).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "cannot create deal ceremony",
+        )
+    })?;
+    let mut room = Room::new_fair(config, RoomMode::Aztec, token_hash, ceremony.clone(), share)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error))?;
+    room.set_creator_name(admission.name.clone());
+    bind_aztec_seat(&mut room.seats[0], admission)?;
+
+    fairness::create_aztec(&state.db, admission, config, &token_hash, &ceremony, share)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot confirm entry"))?;
+    state
+        .rooms
+        .lock()
+        .await
+        .insert(admission.room, Arc::new(Mutex::new(room)));
+    Ok(())
+}
+
+async fn confirm_aztec_join(
+    state: &AppState,
+    admission: &StoredAdmission,
+    token_hash: TokenHash,
+) -> Result<(), HttpError> {
+    let room = find_room(state, admission.room)
+        .await
+        .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
+    let mut room = room.lock().await;
+    if room.mode != RoomMode::Aztec
+        || room.config != admission_config(admission)?
+        || aztec_table_id(admission.room) != admission.table_id
+    {
+        return Err((StatusCode::CONFLICT, "entry does not match this room"));
+    }
+    let seat = usize::try_from(admission.seat)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "invalid entry seat"))?;
+    if room.next_seat().ok() != Some(seat) {
+        return Err((StatusCode::CONFLICT, "entry does not match this seat"));
+    }
+    if room
+        .seats
+        .iter()
+        .any(|stored| stored.name.eq_ignore_ascii_case(&admission.name))
+    {
+        return Err((StatusCode::CONFLICT, "player name already used"));
+    }
+
+    join_fair(
+        &state.db,
+        admission.room,
+        &mut room,
+        token_hash,
+        admission.name.clone(),
+        admission_entropy(admission)?,
+        state.deck_proof.is_some(),
+        Some(admission),
+    )
+    .await
+    .map_err(|error| match error {
+        "room full" => (StatusCode::CONFLICT, error),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, error),
+    })?;
+    Ok(())
+}
+
+fn require_aztec(state: &AppState) -> Result<&aztec::Aztec, HttpError> {
+    state
+        .aztec
+        .as_ref()
+        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "aztec network unavailable"))
+}
+
+async fn admission_lock(state: &AppState, id: Uuid) -> Arc<Mutex<()>> {
+    state
+        .admission_locks
+        .lock()
+        .await
+        .entry(id)
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
+async fn load_admission(
+    state: &AppState,
+    id: Uuid,
+    token_hash: &TokenHash,
+) -> Result<StoredAdmission, HttpError> {
+    state
+        .db
+        .aztec_admission(id, token_hash)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "cannot load entry"))?
+        .ok_or((StatusCode::UNAUTHORIZED, "invalid entry token"))
+}
+
+fn admission_config(admission: &StoredAdmission) -> Result<RoomConfig, HttpError> {
+    let config = RoomConfig {
+        players: usize::try_from(admission.players)
+            .map_err(|_| (StatusCode::BAD_REQUEST, "invalid entry players"))?,
+        stack: u32::try_from(admission.stack)
+            .map_err(|_| (StatusCode::BAD_REQUEST, "invalid entry stack"))?,
+        small_blind: u32::try_from(admission.small_blind)
+            .map_err(|_| (StatusCode::BAD_REQUEST, "invalid entry blind"))?,
+        big_blind: u32::try_from(admission.big_blind)
+            .map_err(|_| (StatusCode::BAD_REQUEST, "invalid entry blind"))?,
+        hands: u32::try_from(admission.total_hands)
+            .map_err(|_| (StatusCode::BAD_REQUEST, "invalid entry hands"))?,
+    };
+
+    if config.stack != AZTEC_BUY_IN
+        || config.small_blind != AZTEC_SMALL_BLIND
+        || config.big_blind != AZTEC_BIG_BLIND
+    {
+        return Err((StatusCode::BAD_REQUEST, "invalid aztec table config"));
+    }
+    config
+        .validate()
+        .map_err(|error| (StatusCode::BAD_REQUEST, error))?;
+    Ok(config)
+}
+
+fn admission_entropy(admission: &StoredAdmission) -> Result<[u8; 32], HttpError> {
+    admission
+        .entropy
+        .clone()
+        .try_into()
+        .map_err(|_| (StatusCode::BAD_REQUEST, "invalid entry entropy"))
+}
+
+fn aztec_entry(admission: &StoredAdmission) -> Result<aztec::Entry, HttpError> {
+    Ok(aztec::Entry {
+        table_id: admission.table_id.clone(),
+        entry_id: admission.entry_id.clone(),
+        seat: usize::try_from(admission.seat)
+            .map_err(|_| (StatusCode::BAD_REQUEST, "invalid entry seat"))?,
+        account: aztec_account(&admission.account)?,
+        amount: u64::try_from(admission.amount)
+            .map_err(|_| (StatusCode::BAD_REQUEST, "invalid entry amount"))?,
+    })
+}
+
+fn bind_aztec_seat(seat: &mut Seat, admission: &StoredAdmission) -> Result<(), HttpError> {
+    seat.aztec_account = Some(aztec_account(&admission.account)?);
+    seat.aztec_entry = Some(admission.entry_id.clone());
+    seat.aztec_amount = Some(
+        u32::try_from(admission.amount)
+            .map_err(|_| (StatusCode::BAD_REQUEST, "invalid entry amount"))?,
+    );
+    Ok(())
+}
+
+fn seat_response(admission: &StoredAdmission, token: Uuid) -> Result<SeatResponse, HttpError> {
+    Ok(SeatResponse {
+        room: room_code(admission.room),
+        room_id: admission.room,
+        seat: usize::try_from(admission.seat)
+            .map_err(|_| (StatusCode::BAD_REQUEST, "invalid entry seat"))?,
+        token,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn aztec_reservation(
+    room: Uuid,
+    seat: usize,
+    admission: Uuid,
+    token: Uuid,
+    table_id: String,
+    entry_id: String,
+    authorized: bool,
+) -> AztecReservation {
+    AztecReservation {
+        room: room_code(room),
+        room_id: room,
+        seat,
+        admission,
+        token,
+        table_id,
+        entry_id,
+        amount: AZTEC_BUY_IN,
+        authorized,
+    }
+}
+
+fn reservation_from_stored(
+    admission: &StoredAdmission,
+    token: Uuid,
+    authorized: bool,
+) -> Result<AztecReservation, HttpError> {
+    Ok(aztec_reservation(
+        admission.room,
+        usize::try_from(admission.seat)
+            .map_err(|_| (StatusCode::BAD_REQUEST, "invalid entry seat"))?,
+        admission.id,
+        token,
+        admission.table_id.clone(),
+        admission.entry_id.clone(),
+        authorized,
+    ))
+}
+
+fn aztec_account(value: &str) -> Result<String, HttpError> {
+    let value = value.trim();
+    if value.len() != 66
+        || !value.starts_with("0x")
+        || !value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        || value[2..].bytes().all(|byte| byte == b'0')
+    {
+        return Err((StatusCode::BAD_REQUEST, "invalid aztec account"));
+    }
+    Ok(value.to_ascii_lowercase())
+}
+
+fn valid_aztec_field(value: &str) -> bool {
+    value.len() == 66
+        && value.starts_with("0x")
+        && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        && value[2..].bytes().any(|byte| byte != b'0')
+}
+
+fn aztec_table_id(room: Uuid) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"NOIR_POKER_TABLE_V1");
+    digest.update(room.as_bytes());
+    let digest = digest.finalize();
+    let mut field = [0; 32];
+    field[1..].copy_from_slice(&digest[..31]);
+    format!("0x{}", encode_hex(field))
+}
+
+fn aztec_entry_id() -> Result<String, getrandom::Error> {
+    let mut field = [0; 32];
+    getrandom::fill(&mut field[1..])?;
+    Ok(format!("0x{}", encode_hex(field)))
+}
+
 async fn create_room(
     AxumState(state): AxumState<AppState>,
     Json(request): Json<CreateRoomRequest>,
@@ -1210,6 +1630,7 @@ async fn join_room(
         name,
         share,
         state.deck_proof.is_some(),
+        None,
     )
     .await
     .map_err(|err| match err {
@@ -1233,6 +1654,7 @@ async fn join_fair(
     name: String,
     share: [u8; 32],
     mental: bool,
+    admission: Option<&StoredAdmission>,
 ) -> Result<usize, &'static str> {
     let seat = room.next_seat().map_err(|_| "room full")?;
     let next_rev = room.rev.checked_add(1).ok_or("revision limit reached")?;
@@ -1294,22 +1716,41 @@ async fn join_fair(
     };
     let ceremony = room.ceremony.as_ref().ok_or("deal ceremony missing")?;
 
-    fairness::join_room(
-        db,
-        id,
-        seat,
-        &token_hash,
-        &name,
-        share,
-        room.rev,
-        next_rev,
-        ceremony,
-        hand,
-        next.as_ref(),
-    )
-    .await
-    .map_err(|_| "cannot join room")?;
+    if let Some(admission) = admission {
+        fairness::join_aztec(
+            db,
+            admission,
+            &token_hash,
+            share,
+            room.rev,
+            next_rev,
+            ceremony,
+            hand,
+            next.as_ref(),
+        )
+        .await
+        .map_err(|_| "cannot join room")?;
+    } else {
+        fairness::join_room(
+            db,
+            id,
+            seat,
+            &token_hash,
+            &name,
+            share,
+            room.rev,
+            next_rev,
+            ceremony,
+            hand,
+            next.as_ref(),
+        )
+        .await
+        .map_err(|_| "cannot join room")?;
+    }
     room.commit_fair_join(token_hash, name, seat, share, game, next, next_rev);
+    if let Some(admission) = admission {
+        bind_aztec_seat(&mut room.seats[seat], admission).map_err(|_| "invalid aztec entry")?;
+    }
     if mental && final_join {
         room.deck = Some(new_deck(id, 0, 0, room.mode, room.config.players)?);
         room.mental = true;
@@ -1976,7 +2417,7 @@ async fn deck_open(
             &hand.actions,
         )?;
         let result = result.ok_or("settlement result missing")?;
-        let commitments = if hand.no == 0 || room.mode != RoomMode::Multiplayer {
+        let commitments = if hand.no == 0 || !room.mode.challenges() {
             Vec::new()
         } else {
             let salts = (0..players)
@@ -1987,17 +2428,25 @@ async fn deck_open(
         };
         let transcript =
             serde_json::to_vec(&deck.audit()?).map_err(|_| "invalid deck transcript")?;
+        let settlement = stage_aztec_settlement(id, &room, &game)?;
         state
             .db
-            .finish_deck(id, hand_no, &transcript, &cards, &commitments)
+            .finish_deck_with_settlement(
+                id,
+                hand_no,
+                &transcript,
+                &cards,
+                &commitments,
+                settlement.as_ref(),
+            )
             .await
             .map_err(|_| "cannot persist deck transcript")?;
-        Some((game, result, facts, commitments))
+        Some((game, result, facts, commitments, settlement.is_some()))
     } else {
         None
     };
     room.deck = Some(deck);
-    if let Some((game, result, facts, commitments)) = finished {
+    if let Some((game, result, facts, commitments, settlement)) = finished {
         let hand = room.hand.as_mut().ok_or("game not started")?;
         hand.game = game;
         hand.result = Some(result);
@@ -2013,6 +2462,9 @@ async fn deck_open(
             challenge.facts_salt = Some(commitment.salt);
             challenge.facts_hash = Some(commitment.value);
             challenge.facts = Some(facts);
+        }
+        if settlement {
+            room.settlement = Some(SettlementState::Pending);
         }
     }
     let _ = room.notify.send(rev);
@@ -2126,33 +2578,172 @@ async fn apply_action_once(
     }
     let mut next = room.stage_action(seat, action)?;
 
-    if next.facts.is_some() && room.mode == RoomMode::Multiplayer {
+    if next.facts.is_some() && room.mode.challenges() {
         let salts = (0..room.config.players)
             .map(|_| secure_nonce().map_err(|_| "cannot commit challenge facts"))
             .collect::<Result<Vec<_>, _>>()?;
 
         bind_facts(&mut next, &room.current_challenges, salts, room.mode)?;
     }
+    let settlement = stage_aztec_settlement(id, &room, &next.game)?;
 
     // command commit before state swap
     state
         .db
-        .append_action(NewAction {
-            room: id,
-            hand: next.hand,
-            hand_no: room.hand.as_ref().expect("staged hand").no,
-            seq: next.seq,
-            player: next.player,
-            action: next.action,
-            facts: next.fact_commitments.as_deref(),
-            rev: room.rev,
-            next_rev: next.rev,
-        })
+        .append_action_with_settlement(
+            NewAction {
+                room: id,
+                hand: next.hand,
+                hand_no: room.hand.as_ref().expect("staged hand").no,
+                seq: next.seq,
+                player: next.player,
+                action: next.action,
+                facts: next.fact_commitments.as_deref(),
+                rev: room.rev,
+                next_rev: next.rev,
+            },
+            settlement.as_ref(),
+        )
         .await
         .map_err(|_| "cannot persist action")?;
     room.action_pause = true;
     room.commit_action(next);
+    if settlement.is_some() {
+        room.settlement = Some(SettlementState::Pending);
+    }
     Ok(())
+}
+
+fn stage_aztec_settlement(
+    id: Uuid,
+    room: &Room,
+    game: &State,
+) -> Result<Option<NewSettlement>, &'static str> {
+    if room.mode != RoomMode::Aztec || !room.game_complete_with(game) || room.settlement.is_some() {
+        return Ok(None);
+    }
+    if room.seats.len() != room.config.players || game.players.len() != room.config.players {
+        return Err("aztec settlement seats missing");
+    }
+
+    let mut recipients: [String; 6] = core::array::from_fn(|_| format!("0x{}", "0".repeat(64)));
+    let mut payouts = [0; 6];
+    let mut locked = 0u64;
+    let mut paid = 0u64;
+
+    for (index, (seat, player)) in room.seats.iter().zip(&game.players).enumerate() {
+        let account = seat
+            .aztec_account
+            .as_ref()
+            .ok_or("aztec settlement account missing")?;
+        if seat.aztec_entry.is_none() || seat.aztec_amount != Some(AZTEC_BUY_IN) {
+            return Err("aztec settlement entry missing");
+        }
+        recipients[index].clone_from(account);
+        payouts[index] = player.stack;
+        locked = locked
+            .checked_add(u64::from(AZTEC_BUY_IN))
+            .ok_or("aztec settlement limit reached")?;
+        paid = paid
+            .checked_add(u64::from(player.stack))
+            .ok_or("aztec settlement limit reached")?;
+    }
+    if locked != paid {
+        return Err("aztec settlement pool mismatch");
+    }
+
+    Ok(Some(NewSettlement {
+        room: id,
+        table_id: aztec_table_id(id),
+        recipients,
+        payouts,
+    }))
+}
+
+async fn settle_aztec(state: AppState) {
+    loop {
+        sleep(Duration::from_secs(3)).await;
+        settle_aztec_once(&state).await;
+    }
+}
+
+async fn settle_aztec_once(state: &AppState) {
+    let Some(boundary) = state.aztec.as_ref() else {
+        return;
+    };
+    let settlements = match state.db.pending_aztec_settlements().await {
+        Ok(settlements) => settlements,
+        Err(error) => {
+            eprintln!("cannot load aztec settlements: {error}");
+            return;
+        }
+    };
+
+    for stored in settlements {
+        let settlement = match chain_settlement(&stored) {
+            Ok(settlement) => settlement,
+            Err(error) => {
+                let _ = state.db.fail_aztec_settlement(stored.room, error).await;
+                continue;
+            }
+        };
+        let result = async {
+            let settled = boundary.settled(&stored.table_id).await?;
+            let tx = if settled {
+                stored
+                    .tx_hash
+                    .clone()
+                    .unwrap_or_else(|| "reconciled".to_owned())
+            } else {
+                boundary.settle(&settlement).await?
+            };
+            state.db.confirm_aztec_settlement(stored.room, &tx).await?;
+            Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+        }
+        .await;
+
+        match result {
+            Ok(()) => mark_aztec_returned(state, stored.room).await,
+            Err(error) => {
+                let _ = state
+                    .db
+                    .fail_aztec_settlement(stored.room, &error.to_string())
+                    .await;
+            }
+        }
+    }
+}
+
+fn chain_settlement(stored: &db::StoredSettlement) -> Result<aztec::Settlement, &'static str> {
+    if stored.status != "pending" && stored.status != "submitted" {
+        return Err("invalid aztec settlement status");
+    }
+    let recipients = stored
+        .recipients
+        .clone()
+        .try_into()
+        .map_err(|_| "invalid aztec settlement recipients")?;
+    let mut payouts = [0; 6];
+    if stored.payouts.len() != payouts.len() {
+        return Err("invalid aztec settlement payouts");
+    }
+    for (target, value) in payouts.iter_mut().zip(&stored.payouts) {
+        *target = u64::try_from(*value).map_err(|_| "invalid aztec settlement payout")?;
+    }
+    Ok(aztec::Settlement {
+        table_id: stored.table_id.clone(),
+        recipients,
+        payouts,
+    })
+}
+
+async fn mark_aztec_returned(state: &AppState, id: Uuid) {
+    let Some(room) = find_room(state, id).await else {
+        return;
+    };
+    let mut room = room.lock().await;
+    room.settlement = Some(SettlementState::Returned);
+    let _ = room.notify.send(room.rev);
 }
 
 async fn drive_bots(state: &AppState, id: Uuid, mut pause: bool) -> Result<(), &'static str> {
@@ -2978,6 +3569,17 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
         }
     }
     view.proofs = proof_views(room, hand);
+    if room.mode == RoomMode::Aztec
+        && let Some(settlement) = room.settlement
+    {
+        view.settlement = Some(SettlementView {
+            status: match settlement {
+                SettlementState::Pending => "pending",
+                SettlementState::Returned => "returned",
+            },
+            final_stack: hand.game.players[seat].stack,
+        });
+    }
 
     if hand.game.settled {
         view.result = Some(result_view(
@@ -2987,7 +3589,7 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
         if room.deck.as_ref().is_some_and(|deck| !deck.complete) {
             return view;
         }
-        if room.mode == RoomMode::Multiplayer
+        if room.mode.challenges()
             && let Some(challenge) = room.current_challenges[seat].as_ref()
         {
             view.claim = challenge
@@ -3062,14 +3664,14 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
             .ceremony
             .as_ref()
             .map(|ceremony| pending_deal_view(ceremony, seat, room.config.players));
-        if room.mode == RoomMode::Multiplayer {
+        if room.mode.challenges() {
             view.challenge = Some(challenge_view(
                 next_no,
                 hand_tag(*id.as_bytes(), next_no),
                 room.next_challenges[seat].as_ref(),
             ));
         }
-    } else if room.mode == RoomMode::Multiplayer
+    } else if room.mode.challenges()
         && let Some(challenge) = room.current_challenges[seat].as_ref()
     {
         view.challenge = Some(challenge_view(
@@ -3114,7 +3716,7 @@ fn challenge_view(
 }
 
 fn proof_views(room: &Room, hand: &LiveHand) -> Vec<PlayerProofView> {
-    if room.mode != RoomMode::Multiplayer {
+    if !room.mode.challenges() {
         return Vec::new();
     }
 
@@ -3365,6 +3967,30 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
             return Err(recovery_error(id, "invalid player name"));
         }
 
+        let aztec_amount = seat
+            .aztec_amount
+            .map(|amount| {
+                u32::try_from(amount).map_err(|_| recovery_error(id, "invalid aztec amount"))
+            })
+            .transpose()?;
+        let aztec =
+            seat.aztec_account.is_some() && seat.aztec_entry.is_some() && aztec_amount.is_some();
+        if mode == RoomMode::Aztec {
+            if !aztec
+                || aztec_amount != Some(AZTEC_BUY_IN)
+                || aztec_account(seat.aztec_account.as_deref().unwrap_or_default()).is_err()
+                || !seat.aztec_entry.as_deref().is_some_and(valid_aztec_field)
+            {
+                return Err(recovery_error(id, "invalid aztec seat binding"));
+            }
+        } else if aztec
+            || seat.aztec_account.is_some()
+            || seat.aztec_entry.is_some()
+            || aztec_amount.is_some()
+        {
+            return Err(recovery_error(id, "aztec binding on normal room"));
+        }
+
         seats.push(Seat {
             token_hash,
             name: seat.name,
@@ -3373,6 +3999,11 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
                 .map_err(|_| recovery_error(id, "invalid challenge count"))?,
             challenge_bonus: u32::try_from(seat.challenge_bonus)
                 .map_err(|_| recovery_error(id, "invalid challenge bonus"))?,
+            aztec_account: seat
+                .aztec_account
+                .map(|account| account.to_ascii_lowercase()),
+            aztec_entry: seat.aztec_entry,
+            aztec_amount,
         });
     }
 
@@ -3427,6 +4058,50 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
                     .count()
                     < 2)
     });
+    let settlement = match stored.settlement {
+        Some(settlement) => {
+            if mode != RoomMode::Aztec
+                || !terminal
+                || settlement.room != id
+                || settlement.table_id != aztec_table_id(id)
+                || settlement.recipients.len() != 6
+                || settlement.payouts.len() != 6
+            {
+                return Err(recovery_error(id, "invalid aztec settlement"));
+            }
+            let game = &hand.as_ref().expect("terminal settlement hand").game;
+            for index in 0..6 {
+                let (account, payout) = if index < seats.len() {
+                    (
+                        seats[index]
+                            .aztec_account
+                            .as_deref()
+                            .expect("aztec account"),
+                        i64::from(game.players[index].stack),
+                    )
+                } else {
+                    (
+                        "0x0000000000000000000000000000000000000000000000000000000000000000",
+                        0,
+                    )
+                };
+                if !settlement.recipients[index].eq_ignore_ascii_case(account)
+                    || settlement.payouts[index] != payout
+                {
+                    return Err(recovery_error(id, "aztec settlement mismatch"));
+                }
+            }
+            Some(match settlement.status.as_str() {
+                "pending" | "submitted" => SettlementState::Pending,
+                "confirmed" if settlement.tx_hash.is_some() => SettlementState::Returned,
+                _ => return Err(recovery_error(id, "invalid aztec settlement state")),
+            })
+        }
+        None if mode == RoomMode::Aztec && terminal => {
+            return Err(recovery_error(id, "aztec settlement missing"));
+        }
+        None => None,
+    };
     if stored.challenge_awarded {
         let expected = challenge_bonuses(config.stack, &seats);
         if mode != RoomMode::Multiplayer
@@ -3525,6 +4200,7 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
         bot_running: false,
         bot_wake: false,
         challenge_awarded: stored.challenge_awarded,
+        settlement,
         current_challenges,
         next_challenges,
         rev,
@@ -3823,7 +4499,7 @@ fn restore_challenges(
         }
     }
 
-    let missing = mode == RoomMode::Multiplayer && current.iter().any(Option::is_none);
+    let missing = mode.challenges() && current.iter().any(Option::is_none);
 
     if hand.no > 0 && missing {
         return Err(recovery_error(id, "current challenge missing"));

@@ -7,9 +7,9 @@ use sqlx::postgres::{PgPoolOptions, PgQueryResult};
 use sqlx::{PgPool, Postgres, Row, Transaction, query};
 use uuid::Uuid;
 
-use crate::room::{FactCommitment, RoomConfig};
 #[cfg(test)]
 use crate::room::RoomMode;
+use crate::room::{FactCommitment, RoomConfig};
 
 type DbResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -356,12 +356,7 @@ impl Db {
         .transpose()
     }
 
-    pub async fn authorize_aztec(
-        &self,
-        id: Uuid,
-        token_hash: &[u8; 32],
-        tx: &str,
-    ) -> DbResult<()> {
+    pub async fn authorize_aztec(&self, id: Uuid, token_hash: &[u8; 32], tx: &str) -> DbResult<()> {
         let changed = query(
             "UPDATE aztec_admissions SET status = 'authorized', authorized_tx = $3, \
              updated_at = now() WHERE id = $1 AND token_hash = $2 AND status = 'reserved'",

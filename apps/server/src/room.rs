@@ -112,17 +112,21 @@ pub(super) struct Room {
 
 impl Room {
     pub(super) fn game_complete(&self) -> bool {
-        self.hand.as_ref().is_some_and(|hand| {
-            hand.game.settled
-                && (self.config.last_hand(hand.no)
-                    || hand
-                        .game
-                        .players
-                        .iter()
-                        .filter(|player| player.stack > 0)
-                        .count()
-                        < 2)
-        })
+        self.hand
+            .as_ref()
+            .is_some_and(|hand| self.game_complete_with(&hand.game))
+    }
+
+    pub(super) fn game_complete_with(&self, game: &State) -> bool {
+        let hand = self.hand.as_ref().expect("game complete hand");
+        game.settled
+            && (self.config.last_hand(hand.no)
+                || game
+                    .players
+                    .iter()
+                    .filter(|player| player.stack > 0)
+                    .count()
+                    < 2)
     }
 
     #[cfg(test)]
