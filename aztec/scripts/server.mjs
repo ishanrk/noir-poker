@@ -239,7 +239,7 @@ async function run(request, contract, owner) {
         )
         .send({ ...(await sendOptions(owner)), wait: NO_WAIT });
 
-      return { tx: result.toString() };
+      return { tx: result.txHash.toString() };
     }
     case "settlement": {
       if (!Array.isArray(request.recipients) || request.recipients.length !== 6) {

@@ -1,0 +1,24 @@
+[Unit]
+Description=Noir Poker
+Wants=network-online.target
+After=network-online.target postgresql.service
+Requires=postgresql.service
+ConditionPathExists=/etc/noir-poker/server.env
+
+[Service]
+Type=simple
+User=noir-poker
+Group=noir-poker
+WorkingDirectory=/opt/noir-poker
+EnvironmentFile=/etc/noir-poker/server.env
+ExecStart=/opt/noir-poker/target/release/server
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
