@@ -3,7 +3,7 @@ import Link from "next/link";
 const LINKS = [
   ["/", "Play"],
   ["/motivation", "Motivation"],
-  ["/chips", "Chips"],
+  ["/chips", "Tajaderos"],
 ] as const;
 
 export function SiteHeader({ compact = false }: { compact?: boolean }) {

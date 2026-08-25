@@ -25,11 +25,13 @@ export function AztecPlayChips() {
 
       <AztecConnect />
 
-      <details className="chips-network">
-        <summary>Technical details</summary>
-        <span>Aztec 5.2.0 testnet</span>
-        <code>{AZTEC_TESTNET_NODE_URL}</code>
-      </details>
+      <div className="chips-network">
+        <strong>Technical details</strong>
+        <div>
+          <span>Aztec 5.2.0 testnet</span>
+          <code>{AZTEC_TESTNET_NODE_URL}</code>
+        </div>
+      </div>
     </section>
   );
 }

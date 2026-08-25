@@ -28,7 +28,9 @@ export default function Home() {
             </span>
             <span className="hero-title-poker">Poker</span>
           </h1>
-          <p className="hero-tagline">Poker where the server cannot cheat even if it wanted to.</p>
+          <p className="hero-tagline">
+            I promise that a rigged server isn&apos;t why you blew threw your stack (you can check)
+          </p>
           <p className="hero-tech">
             Written in <span className="tech-rust">Rust</span> and{" "}
             <span className="tech-typescript">TypeScript</span> with{" "}

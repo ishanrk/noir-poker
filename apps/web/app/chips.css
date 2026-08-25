@@ -377,6 +377,11 @@
   text-transform: uppercase;
 }
 
+.chips-network > div {
+  display: grid;
+  gap: 8px;
+}
+
 .chips-network code {
   font-size: 10px;
   overflow-wrap: anywhere;

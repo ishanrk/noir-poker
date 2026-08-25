@@ -303,7 +303,7 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
                 ? "Open your wallet"
                 : "Connect Aztec"}
           </button>
-          <p>
+          <p className={phase !== "discovering" && configured ? "aztec-testnet-note" : undefined}>
             {phase === "discovering"
               ? "Looking for an Aztec browser wallet"
               : configured
@@ -385,7 +385,7 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
           <li>Lock 1,000 to enter</li>
           <li>Final stack returns to your wallet</li>
         </ol>
-        <p>Testnet only  Tajaderos have no monetary value</p>
+        <p className="aztec-testnet-note">Testnet only  Tajaderos have no monetary value</p>
       </section>
     </section>
   );

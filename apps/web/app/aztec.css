@@ -438,6 +438,11 @@ html[data-noir-mode="aztec"] .aztec-guide p {
   text-transform: uppercase;
 }
 
+html[data-noir-mode="aztec"] .aztec-testnet-note {
+  color: var(--aztec-ember-hot) !important;
+  font-weight: 800;
+}
+
 html[data-noir-mode="aztec"] .aztec-guide a {
   color: var(--aztec-bronze);
   font-size: 11px;
@@ -801,14 +806,13 @@ html[data-noir-mode="aztec"] .chips-network {
 
 html[data-noir-mode="aztec"] .chips-story-note span,
 html[data-noir-mode="aztec"] .chips-story-note a,
-html[data-noir-mode="aztec"] .chips-network summary,
+html[data-noir-mode="aztec"] .chips-network > strong,
 html[data-noir-mode="aztec"] .chips-network span {
   color: var(--aztec-bronze);
 }
 
 html[data-noir-mode="aztec"] .chips-network {
   display: grid;
-  cursor: pointer;
 }
 
 html[data-noir-mode="aztec"] .chips-network code {
