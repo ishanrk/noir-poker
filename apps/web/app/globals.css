@@ -688,14 +688,10 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .deck-protocol-step::before { position: absolute; top: 0; left: -11px; width: 17px; height: 17px; background: var(--lime); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); content: ""; }
 .deck-protocol-step > span { color: var(--blue); font-size: 12px; font-weight: 800; }
 .deck-protocol-step h2 { max-width: 760px; margin: 20px 0 16px; font-size: clamp(29px, 4vw, 44px); line-height: 1; }
-.deck-protocol-step p { max-width: 780px; margin: 0; color: var(--ink); font-size: 17px; line-height: 1.65; }
-.deck-protocol-data { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 780px; margin: 24px 0 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
-.deck-protocol-data > div { padding: 13px 16px 13px 0; }
-.deck-protocol-data > div + div { padding-left: 16px; border-left: 1px solid var(--line); }
-.deck-protocol-data dt { color: var(--blue); font-size: 10px; font-weight: 800; }
-.deck-protocol-data dd { overflow-wrap: anywhere; margin: 7px 0 0; color: var(--ink); font-size: 12px; line-height: 1.4; }
-.deck-protocol-step strong { display: block; max-width: 760px; margin: 28px 0 24px; padding-left: 18px; border-left: 3px solid var(--lime); color: var(--blue); font-size: 15px; line-height: 1.45; }
-.deck-protocol-step a { color: var(--blue); font-size: 12px; font-weight: 800; text-underline-offset: 4px; }
+.deck-protocol-explanation { display: grid; gap: 12px; max-width: 780px; margin: 0; padding: 0; counter-reset: deck-explanation; list-style: none; }
+.deck-protocol-explanation li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 13px; align-items: start; color: var(--ink); font-size: 17px; line-height: 1.55; counter-increment: deck-explanation; }
+.deck-protocol-explanation li::before { color: var(--blue); content: counter(deck-explanation, decimal-leading-zero); font-size: 11px; font-weight: 800; line-height: 2.35; }
+.deck-protocol-step a { display: inline-block; margin-top: 28px; color: var(--blue); font-size: 12px; font-weight: 800; text-underline-offset: 4px; }
 .deck-protocol-controls { display: grid; grid-template-columns: 150px 1fr 150px; align-items: center; gap: 18px; margin: 22px 0 70px 52px; }
 .deck-protocol-controls button { min-height: 46px; border: 0; color: white; background: var(--blue); clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px); box-shadow: inset 0 -5px 0 var(--lime); cursor: pointer; font-size: 12px; font-weight: 800; }
 .deck-protocol-controls button:disabled { color: var(--muted); background: var(--line); box-shadow: none; cursor: default; }
@@ -713,9 +709,7 @@ code { font-family: "Courier New", ui-monospace, monospace; }
   .deck-protocol-path::before { top: 16px; }
   .deck-protocol-path button { width: 34px; height: 34px; clip-path: polygon(7px 0, 27px 0, 34px 7px, 34px 27px, 27px 34px, 7px 34px, 0 27px, 0 7px); }
   .deck-protocol-step { min-height: 390px; padding: 22px 8px 30px 28px; }
-  .deck-protocol-step p { font-size: 15px; }
-  .deck-protocol-data { grid-template-columns: 1fr; }
-  .deck-protocol-data > div + div { padding-left: 0; border-top: 1px solid var(--line); border-left: 0; }
+  .deck-protocol-explanation li { grid-template-columns: 28px minmax(0, 1fr); gap: 10px; font-size: 15px; }
   .deck-protocol-controls { grid-template-columns: 1fr 92px 1fr; margin-left: 0; }
   .deck-limit { width: calc(100% - 32px); }
 }

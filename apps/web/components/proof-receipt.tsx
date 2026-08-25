@@ -254,130 +254,93 @@ function receiptSteps({
   receipt: ProofReceipt;
   verificationActions: ReactNode;
 }): ProofGuideStep[] {
-  const drawIncluded = Boolean(receipt.draw_proof && receipt.draw_public_inputs);
-
   return [
     {
-      title: "The browser created a private secret before play",
-      text: "The browser created 32 random bytes when the challenge was drawn. Those bytes formed the secret. BLAKE2s is a cryptographic hash function. It combined the secret with a fingerprint for this room hand and player. The public result is called a commitment. The commitment went to the server while the secret stayed in the browser.",
+      title: "The browser created a private random value",
+      text: "The browser created 32 random bytes when the challenge draw began. BLAKE2s is a hash function that turns data into a fixed fingerprint. The browser hashed the private value with the room hand and player. The resulting fingerprint is called a commitment. It locked the private value without revealing it. The server stored the commitment while the private value stayed in the browser.",
       detail: (
         <dl>
           <ReceiptValue label="Commitment fingerprint" value={receipt.commitment} />
-          <ReceiptValue label="Private secret" value="Never published" />
         </dl>
       ),
-      result: "The commitment fixed the secret before the server continued",
       source: <Source href={BLAKE2_SPEC}>BLAKE2 specification</Source>,
     },
     {
-      title: "The server added a random value",
-      text: "After storing the commitment the server created a fresh random 32 byte value called a nonce. A nonce is a random value used once. The browser combined its secret with this nonce and the fingerprint for the hand and player. The first three result bits selected one challenge from the eight fixed choices.",
+      title: "The server created a nonce",
+      text: "After storing the commitment the server created another random 32 byte value. This value is called a nonce because it is used once. The browser combined its private value with the nonce and the fingerprint for the hand and player. The first three bits selected one of eight fixed challenges. Neither side knew both random values before the commitment was stored.",
       detail: (
         <dl>
           <ReceiptValue label="Server nonce" value={receipt.nonce} />
-          <ReceiptValue label="Possible challenges" value="8" />
-          <ReceiptValue label="Selected challenge" value="Private to the player" />
         </dl>
       ),
-      result: "Neither the server nor player could choose the challenge alone",
       source: <Source href={RANDOM_SOURCE}>Secure random values</Source>,
     },
     {
-      title: "Noir checked the fixed challenge list",
-      text: "The eight challenge rules form one public catalog. The catalog root below is one fingerprint covering the complete list. The selected rule and three supporting hashes stayed private. Those supporting hashes form a Merkle path. The circuit used them to rebuild the catalog root and reject any invented rule.",
+      title: "Noir proved the challenge came from the list",
+      text: "Noir Poker has eight fixed challenge rules. The catalog root below is one public fingerprint representing that complete list. The browser gave Noir the selected rule and three supporting fingerprints. Those fingerprints are called a Merkle path. Noir used them to rebuild the public catalog root. A rule outside the fixed list could not rebuild the same root.",
       detail: (
         <dl>
           <ReceiptValue label="Catalog root" value={receipt.catalog_root} />
-          <ReceiptValue label="Catalog size" value="8 fixed challenge rules" />
-          <ReceiptValue label="Private values" value="Selected rule and Merkle path" />
         </dl>
       ),
-      result: "The player could not replace the assigned rule",
       source: <Source href={MERKLE_SOURCE}>Merkle authentication source</Source>,
     },
     {
-      title: "The finished hand recorded six facts",
-      text: "When the hand ended the game recorded six true or false facts for this player. They record reaching the flop raising before the flop calling before the flop checking on the flop reaching showdown and finishing with a net profit.",
-      detail: (
-        <dl>
-          <ReceiptValue label="Fact 1" value="Reached the flop" />
-          <ReceiptValue label="Fact 2" value="Raised before the flop" />
-          <ReceiptValue label="Fact 3" value="Called before the flop" />
-          <ReceiptValue label="Fact 4" value="Checked on the flop" />
-          <ReceiptValue label="Fact 5" value="Reached showdown" />
-          <ReceiptValue label="Fact 6" value="Finished with a net profit" />
-        </dl>
-      ),
-      result: "The fact list contains every condition used by the catalog",
+      title: "The game recorded six facts after the hand",
+      text: "The game recorded six true or false facts for this player after the hand. They covered reaching the flop. They covered raising before the flop. They covered calling before the flop. They covered checking on the flop. They covered reaching showdown. They covered finishing with a net profit.",
       source: <Source href={CIRCUIT_SOURCE}>Challenge circuit source</Source>,
     },
     {
-      title: "The facts received a private random value",
-      text: "The player browser received the six facts and a fresh random value called a salt. A salt is extra randomness mixed into a hash. BLAKE2s combined the hand player salt and six facts into the facts fingerprint below. The salt stayed private so another person cannot test every possible fact combination against the fingerprint.",
+      title: "The browser locked the facts in a fingerprint",
+      text: "The player browser received the six facts and created a private random value called a salt. A salt prevents another person from guessing the facts by testing every possible list. BLAKE2s hashed the hand player salt and six facts into the facts fingerprint below. The server stored the fingerprint while the facts and salt stayed private.",
       detail: (
         <dl>
           <ReceiptValue label="Facts fingerprint" value={receipt.facts_hash} />
-          <ReceiptValue label="Private values" value="Six facts and random salt" />
         </dl>
       ),
-      result: "The public fingerprint locked the facts without revealing them",
       source: <Source href={BLAKE2_SPEC}>BLAKE2 specification</Source>,
     },
     {
-      title: "Noir compared the assigned challenge with the hand facts",
-      text: "The completion circuit first recreated the original commitment from the private secret. It recreated the challenge choice from the secret and stored server nonce. It checked that the challenge belonged to the fixed catalog. It then checked every required true or false condition against the six hand facts. These checks run inside the completion proof even when a separate draw proof is absent.",
-      detail: (
-        <dl>
-          <ReceiptValue label="Earlier draw proof" value={drawIncluded ? "Included and checked separately" : "Not required by the completion proof"} />
-          <ReceiptValue label="Private values" value="Secret challenge path facts and salt" />
-        </dl>
-      ),
-      result: "A valid proof means the assigned challenge conditions passed",
+      title: "Noir checked the challenge against the hand",
+      text: "A Noir circuit is a program that checks rules without publishing the private inputs. The circuit rebuilt the earlier commitment from the private value. It selected the challenge again using that value and the stored server nonce. It proved that the challenge belonged to the fixed list. It then checked every required condition against the six facts from the hand. These draw checks ran inside the completion proof even when no separate draw proof was published.",
       source: <Source href={CIRCUIT_SOURCE}>Completion constraints</Source>,
     },
     {
-      title: "The completion can only be counted once",
-      text: "The circuit hashed the hand fingerprint player seat and private secret into the nullifier below. A nullifier is a unique public fingerprint for one challenge claim. The server accepts it once. Reusing the same completion proof produces the same nullifier and is rejected.",
+      title: "Noir created a unique claim fingerprint",
+      text: "The circuit hashed the hand fingerprint player seat and private value into one claim fingerprint. This fingerprint is called a nullifier. The same challenge completion always creates the same nullifier. The server stores accepted nullifiers and rejects a second claim with the same value.",
       detail: (
         <dl>
           <ReceiptValue label="Nullifier" value={receipt.nullifier} />
-          <ReceiptValue label="Private input" value="Challenge secret" />
         </dl>
       ),
-      result: "One completed challenge can be counted once",
       source: <Source href={BLAKE2_SPEC}>BLAKE2 specification</Source>,
     },
     {
       title: "The browser created the completion proof",
-      text: "A Noir circuit is a program that checks public and private values while keeping the private values hidden. Barretenberg created an UltraHonk proof after every circuit check passed. The proof bytes form the cryptographic certificate. The public input bytes contain the public values tied to that certificate. The secret challenge facts path and salt do not appear in either byte sequence.",
+      text: "The Noir circuit checked the original challenge draw hand facts and unique claim fingerprint together. Barretenberg is the software that creates and verifies UltraHonk proofs. An UltraHonk proof lets anyone confirm that every circuit check passed without receiving the private inputs. The proof bytes contain the accepted proof. The public input bytes contain the visible values covered by the proof. The challenge facts private value Merkle path and salt do not appear in either byte sequence.",
       detail: (
         <dl>
           <ReceiptValue label="Proof type" value={receipt.proof_system} />
           <ReceiptValue label="Checking program" value={receipt.circuit_id} />
-          <ReceiptValue label="Hidden inputs" value="Never published" />
         </dl>
       ),
-      result: "The proof certifies the checks without exposing the private values",
       source: <Source href={CIRCUIT_SOURCE}>Challenge circuit source</Source>,
     },
     {
-      title: "The server checked the proof before publication",
-      text: "The server compared the hand player commitment nonce catalog root facts fingerprint and nullifier with its stored hand data. It ran the UltraHonk verifier and rejected reused nullifiers. The public receipt exists only after those checks pass. This browser downloads that exact accepted proof and runs the same cryptographic verification locally.",
+      title: "The server verified the completion proof",
+      text: "The server checked the hand and player. It checked the commitment nonce and catalog root. It checked the facts fingerprint and nullifier. It ran the UltraHonk verifier. It also rejected a nullifier that had already been used. The public receipt exists only after those checks pass. This browser downloads that accepted proof and runs the same verification locally.",
       detail: (
         <dl>
           <ReceiptValue label="Circuit artifact fingerprint" value={receipt.artifact_sha256} />
           <ReceiptValue label="Verification key fingerprint" value={receipt.vk_sha256} />
-          <ReceiptValue label="Separate draw proof" value={drawIncluded ? "Included and verified first" : "Not included"} />
         </dl>
       ),
-      result: "The browser does not rely on the server verification result",
       source: <Source href={SERVER_VERIFIER}>Rust server verifier</Source>,
     },
     {
-      title: "The downloaded receipt verifies in a terminal",
-      text: "Download the JSON with the action above. The file contains the exact accepted proof public values and circuit fingerprints. Run the command below from the web application folder. The local script repeats the public checks and UltraHonk verification. Changing one proof byte or public value makes the command fail.",
+      title: "The downloaded file verifies on another computer",
+      text: "Download the JSON file with the action above. The file contains the accepted proof public values and circuit fingerprints. Run the command below from the web application folder. The script repeats the public comparisons and UltraHonk verification without trusting this page. Changing one proof byte or public value makes the command fail.",
       detail: verificationActions,
-      result: "Browser and terminal checks use the same accepted proof",
       source: <Source href={LOCAL_VERIFIER}>Local verifier source</Source>,
     },
   ];

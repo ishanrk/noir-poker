@@ -143,12 +143,33 @@
   line-height: 1;
 }
 
-.proof-guide-step > p {
+.proof-guide-explanation {
+  display: grid;
+  gap: 12px;
   max-width: 780px;
   margin: 0;
+  padding: 0;
+  counter-reset: proof-explanation;
+  list-style: none;
+}
+
+.proof-guide-explanation li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 13px;
+  align-items: start;
   color: var(--ink);
   font-size: 17px;
-  line-height: 1.65;
+  line-height: 1.55;
+  counter-increment: proof-explanation;
+}
+
+.proof-guide-explanation li::before {
+  color: var(--blue);
+  content: counter(proof-explanation, decimal-leading-zero);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 2.35;
 }
 
 .proof-guide-detail {
@@ -196,22 +217,12 @@
   font: 650 12px/1.45 "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
 }
 
-.proof-guide-result {
-  display: block;
-  max-width: 760px;
-  margin: 28px 0 24px;
-  padding-left: 18px;
-  border-left: 3px solid var(--lime);
-  color: var(--blue);
-  font-size: 15px;
-  line-height: 1.45;
-}
-
 .proof-guide-source {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 20px;
   max-width: 780px;
+  margin-top: 28px;
 }
 
 .proof-guide-source a {
@@ -418,7 +429,9 @@
     padding: 22px 8px 30px 28px;
   }
 
-  .proof-guide-step > p {
+  .proof-guide-explanation li {
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 10px;
     font-size: 15px;
   }
 

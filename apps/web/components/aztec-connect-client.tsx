@@ -386,7 +386,6 @@ export function AztecConnect({ compact = false, onSession }: AztecConnectProps) 
           <li>Final stack returns to your wallet</li>
         </ol>
         <p>Testnet only  Tajaderos have no monetary value</p>
-        <Link href="/protocol">View Aztec protocol</Link>
       </section>
     </section>
   );

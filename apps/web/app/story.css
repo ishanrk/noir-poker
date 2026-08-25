@@ -6,7 +6,7 @@
   --story-width: 1120px;
   color: var(--ink);
   background: var(--background);
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif !important;
 }
 
 .story-page h1,
@@ -880,7 +880,7 @@
 
 .site-header,
 .site-footer {
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif !important;
 }
 
 .site-header nav a { font-family: inherit; font-weight: 700; }
@@ -1217,23 +1217,6 @@
   --bp-tick-y: 29%;
 }
 
-.story-protocol {
-  --bp-ring-a-size: 480px;
-  --bp-ring-a-x: 112%;
-  --bp-ring-a-y: 9%;
-  --bp-ring-b-size: 370px;
-  --bp-ring-b-x: -10%;
-  --bp-ring-b-y: 62%;
-  --bp-grid-left: 7%;
-  --bp-grid-top: 34%;
-  --bp-line-x: 72%;
-  --bp-line-y: 78%;
-  --bp-mark-x: 88%;
-  --bp-mark-y: 43%;
-  --bp-tick-x: 12%;
-  --bp-tick-y: 82%;
-}
-
 .story-motivation {
   --bp-ring-a-size: 390px;
   --bp-ring-a-x: -7%;
@@ -1251,7 +1234,137 @@
   --bp-tick-y: 25%;
 }
 
-.story-page:not(.story-protocol):not(.story-motivation) {
+.brief-hero,
+.brief-stack {
+  width: min(calc(100% - 40px), 1040px);
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.brief-hero {
+  padding: 70px 0 54px;
+  border-bottom: 4px solid var(--blue);
+}
+
+.brief-hero > p {
+  margin: 0;
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.brief-hero h1 {
+  max-width: 860px;
+  margin: 18px 0 22px;
+  font-size: clamp(46px, 6vw, 72px);
+  line-height: 0.98;
+}
+
+.brief-hero > span {
+  display: block;
+  max-width: 760px;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.65;
+}
+
+.brief-stack {
+  display: grid;
+  gap: 24px;
+  padding: 54px 0 84px;
+}
+
+.brief-panel {
+  padding: 34px 40px 32px;
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+
+.brief-panel[data-tone="cobalt"] {
+  color: white;
+  background: var(--blue);
+}
+
+.brief-panel[data-tone="lime"] {
+  color: var(--ink);
+  background: var(--lime);
+}
+
+.brief-panel > span {
+  display: block;
+  margin-bottom: 18px;
+  color: inherit;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif !important;
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 0.72;
+}
+
+.brief-panel h2 {
+  max-width: 850px;
+  margin: 0 0 24px;
+  color: inherit;
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1.05;
+}
+
+.brief-panel ol {
+  display: grid;
+  gap: 13px;
+  max-width: 850px;
+  margin: 0;
+  padding: 0;
+  counter-reset: brief-point;
+  list-style: none;
+}
+
+.brief-panel li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 13px;
+  align-items: start;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1.55;
+  counter-increment: brief-point;
+}
+
+.brief-panel li::before {
+  color: inherit;
+  content: counter(brief-point, decimal-leading-zero);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif !important;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 2.45;
+  opacity: 0.72;
+}
+
+.brief-panel footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid currentColor;
+}
+
+.brief-panel footer a {
+  color: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  text-underline-offset: 4px;
+}
+
+.brief-panel[data-tone="cobalt"] footer a {
+  color: var(--lime);
+}
+
+.brief-panel[data-tone="lime"] footer a {
+  color: var(--blue);
+}
+
+.story-page:not(.story-motivation) {
   --bp-ring-a-size: 430px;
   --bp-ring-a-x: 108%;
   --bp-ring-a-y: 24%;
@@ -1319,6 +1432,29 @@
     --bp-ring-a-size: 270px;
     --bp-ring-b-size: 220px;
     --bp-ring-c-size: 320px;
+  }
+
+  .brief-hero {
+    padding: 52px 0 44px;
+  }
+
+  .brief-hero h1 {
+    font-size: clamp(40px, 13vw, 56px);
+  }
+
+  .brief-stack {
+    gap: 16px;
+    padding: 34px 0 60px;
+  }
+
+  .brief-panel {
+    padding: 27px 23px 25px;
+  }
+
+  .brief-panel li {
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 9px;
+    font-size: 14px;
   }
 
   .site-shell::before {

@@ -6,7 +6,6 @@ export type ProofGuideStep = {
   title: string;
   text: string;
   detail?: ReactNode;
-  result?: ReactNode;
   source?: ReactNode;
 };
 
@@ -58,9 +57,10 @@ export function ProofGuide({
       <article className="proof-guide-step" key={current.title}>
         <span>STEP {String(currentStep + 1).padStart(2, "0")}</span>
         <h2>{current.title}</h2>
-        <p>{current.text}</p>
+        <ol className="proof-guide-explanation">
+          {current.text.split(/(?<=[.!?])\s+/).map((line) => <li key={line}>{line}</li>)}
+        </ol>
         {current.detail && <div className="proof-guide-detail">{current.detail}</div>}
-        {current.result && <strong className="proof-guide-result">{current.result}</strong>}
         {current.source && <div className="proof-guide-source">{current.source}</div>}
       </article>
 

@@ -37,7 +37,7 @@ export default function Home() {
           </p>
           <div className="home-actions">
             <a href="#play">Create a game</a>
-            <Link href="/protocol">See how verification works</Link>
+            <Link href="/motivation">Why Noir Poker</Link>
           </div>
         </div>
 
