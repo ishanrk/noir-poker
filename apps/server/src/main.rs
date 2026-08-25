@@ -6564,6 +6564,22 @@ mod tests {
 
         let restored = restore_hand(TEST_ROOM, config, stored).unwrap().0.game;
 
+        assert_eq!(
+            legacy
+                .hole
+                .iter()
+                .map(|cards| cards.map(Card::id))
+                .collect::<Vec<_>>(),
+            vec![[38, 31], [13, 47]]
+        );
+        assert_eq!(
+            legacy
+                .board
+                .iter()
+                .map(|card| card.id())
+                .collect::<Vec<_>>(),
+            vec![24, 8, 36, 5, 2]
+        );
         assert_ne!(legacy.hole, current.hole);
         assert_eq!(restored, legacy);
     }
