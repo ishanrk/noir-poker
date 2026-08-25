@@ -532,6 +532,7 @@ pub async fn audit(db: &Db, room: Uuid, hand_no: u64) -> FairResult<Option<Store
             stacks: row.try_get("starting_stacks")?,
             actions,
             final_deck: None,
+            legacy_seed: false,
         },
         server_secret: bytes(row.try_get("server_secret")?)?,
         commitment: bytes(row.try_get("commitment")?)?,

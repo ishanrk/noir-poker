@@ -1,5 +1,8 @@
 use challenge_core::{Facts, facts_hash, hand_tag};
 use game_core::{Action, ActionError, Event, NextHandError, State, Street};
+use rand::SeedableRng;
+use rand::seq::SliceRandom;
+use rand_chacha::ChaCha20Rng;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use uuid::Uuid;
@@ -1028,6 +1031,20 @@ pub(super) fn replay_hand(
         stacks,
         actions,
     )
+}
+
+pub(super) fn replay_legacy_hand(
+    config: RoomConfig,
+    seed: [u8; 32],
+    dealer: usize,
+    stacks: &[u32],
+    actions: &[PlayedAction],
+) -> Result<(State, Option<HandResult>, Vec<Facts>), &'static str> {
+    let mut cards = core::array::from_fn(|id| game_core::Card::from_id(id as u8).unwrap());
+    let mut rng = ChaCha20Rng::from_seed(seed);
+
+    cards.shuffle(&mut rng);
+    replay_deck(config, cards, dealer, stacks, actions)
 }
 
 pub(super) fn replay_deck(

@@ -193,6 +193,7 @@ pub struct StoredHand {
     pub stacks: Vec<i64>,
     pub actions: Vec<StoredAction>,
     pub final_deck: Option<Vec<u8>>,
+    pub legacy_seed: bool,
 }
 
 #[derive(Clone)]
@@ -1242,8 +1243,11 @@ impl Db {
     async fn load_hand(&self, room: Uuid) -> DbResult<Option<StoredHand>> {
         let Some(row) = query(
             "SELECT hands.id, hands.hand_no, hands.seed, hands.dealer, hands.starting_stacks, \
-             deck_transcripts.final_deck FROM hands LEFT JOIN deck_transcripts \
+            deck_transcripts.final_deck, hand_ceremonies.room_id IS NULL AS legacy_seed \
+            FROM hands LEFT JOIN deck_transcripts \
              ON deck_transcripts.hand_id = hands.id \
+             LEFT JOIN hand_ceremonies ON hand_ceremonies.room_id = hands.room_id \
+             AND hand_ceremonies.hand_no = hands.hand_no \
              WHERE hands.room_id = $1 ORDER BY hands.hand_no DESC LIMIT 1",
         )
         .bind(room)
@@ -1280,6 +1284,7 @@ impl Db {
             stacks: row.try_get("starting_stacks")?,
             actions,
             final_deck: row.try_get("final_deck")?,
+            legacy_seed: row.try_get("legacy_seed")?,
         }))
     }
 

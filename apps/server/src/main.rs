@@ -56,6 +56,7 @@ use crate::room::{
     ActionNotice, Ceremony, Challenge, Challenges, HandResult, HandResultKind, LiveHand,
     PendingClaim, PendingDraw, PlayedAction, Room, RoomConfig, RoomMode, Seat, SettlementState,
     TokenHash, bind_facts, challenge_bonuses, challenge_facts, replay_deck, replay_hand,
+    replay_legacy_hand,
 };
 
 type HttpError = (StatusCode, &'static str);
@@ -4499,6 +4500,7 @@ fn restore_hand(
                 .map_err(|_| recovery_error(id, "invalid final deck"))?;
             replay_deck(config, cards, dealer, &stacks, &actions)
         }
+        None if stored.legacy_seed => replay_legacy_hand(config, seed, dealer, &stacks, &actions),
         None => replay_hand(config, seed, dealer, &stacks, &actions),
     };
     let (game, result, facts) = replay.map_err(|_| recovery_error(id, "action replay failed"))?;
@@ -5116,6 +5118,7 @@ mod tests {
                 stacks: vec![1000, 1000],
                 actions: Vec::new(),
                 final_deck: None,
+                legacy_seed: false,
             }),
             challenges: Vec::new(),
             settlement: None,
@@ -6512,6 +6515,57 @@ mod tests {
                 game.players[seat].stack > stacks[seat]
             );
         }
+    }
+
+    #[test]
+    fn legacy_hand_recovery() {
+        let config = config(2);
+        let stacks = [1000, 1000];
+        let actions = [
+            (0, Action::Call),
+            (1, Action::Check),
+            (1, Action::Check),
+            (0, Action::Check),
+            (1, Action::Check),
+            (0, Action::Check),
+            (1, Action::Check),
+            (0, Action::Check),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(seq, (player, action))| StoredAction {
+            seq: seq as i64,
+            player,
+            action: match action {
+                Action::Call => "call",
+                Action::Check => "check",
+                _ => unreachable!(),
+            }
+            .to_owned(),
+            raise_to: None,
+        })
+        .collect::<Vec<_>>();
+        let played = actions
+            .iter()
+            .map(|action| PlayedAction {
+                player: action.player as usize,
+                action: restore_action(action).unwrap(),
+            })
+            .collect::<Vec<_>>();
+        let legacy = replay_legacy_hand(config, SEED, 0, &stacks, &played)
+            .unwrap()
+            .0;
+        let current = replay_hand(config, SEED, 0, &stacks, &played).unwrap().0;
+        let mut stored = stored_room().hand.unwrap();
+
+        stored.hand_no = 1;
+        stored.actions = actions;
+        stored.legacy_seed = true;
+
+        let restored = restore_hand(TEST_ROOM, config, stored).unwrap().0.game;
+
+        assert_ne!(legacy.hole, current.hole);
+        assert_eq!(restored, legacy);
     }
 
     #[test]
