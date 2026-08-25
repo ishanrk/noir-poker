@@ -5,6 +5,7 @@ import {
 import { AztecAddress } from "@aztec/aztec.js/addresses";
 import { Fr, GrumpkinScalar } from "@aztec/aztec.js/fields";
 import { createAztecNodeClient, waitForNode } from "@aztec/aztec.js/node";
+import { ContractInitializationStatus } from "@aztec/aztec.js/wallet";
 import { EmbeddedWallet } from "@aztec/wallets/embedded";
 
 import {
@@ -51,6 +52,11 @@ async function storedManager(wallet, account) {
     saved.salt,
     saved.signingKey,
   );
+}
+
+async function accountInitialized(wallet, account) {
+  const metadata = await wallet.getContractMetadata(account);
+  return metadata.initializationStatus === ContractInitializationStatus.INITIALIZED;
 }
 
 async function requirePlayChips(node, wallet, address, owner) {
@@ -115,7 +121,7 @@ try {
     throw new Error("configured server account does not match persistent wallet");
   }
 
-  if (!(await node.getContract(owner))) {
+  if (!(await accountInitialized(wallet, owner))) {
     manager ??= await storedManager(wallet, owner);
     const deployment = await manager.getDeployMethod();
     await deployment.send({
@@ -123,7 +129,7 @@ try {
       fee: { paymentMethod: fpc.paymentMethod },
     });
 
-    if (!(await node.getContract(owner))) {
+    if (!(await accountInitialized(wallet, owner))) {
       throw new Error("server account deployment failed");
     }
   }
