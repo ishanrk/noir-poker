@@ -1364,6 +1364,45 @@
   color: var(--blue);
 }
 
+.crypto-papers {
+  width: min(calc(100% - 40px), 1040px);
+  margin: 54px auto 84px;
+  padding: 42px 40px 40px;
+  border-top: 5px solid var(--blue);
+  border-bottom: 1px solid var(--line-strong);
+  background: rgb(255 255 255 / 82%);
+}
+
+.crypto-papers > header { max-width: 790px; }
+.crypto-papers > header > span {
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.crypto-papers h2 { margin: 15px 0 14px; font-size: clamp(32px, 4vw, 46px); line-height: 1; }
+.crypto-papers header p { max-width: 760px; margin: 8px 0 0; color: var(--muted); font-size: 15px; line-height: 1.6; }
+.crypto-papers header p:first-of-type { color: var(--ink); font-size: 19px; font-weight: 750; }
+.crypto-papers ol { margin: 38px 0 0; padding: 0; counter-reset: crypto-paper; list-style: none; }
+.crypto-papers li { counter-increment: crypto-paper; border-top: 1px solid var(--line); }
+.crypto-papers li:last-child { border-bottom: 1px solid var(--line); }
+.crypto-papers li a {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) minmax(180px, 0.45fr);
+  gap: 18px;
+  align-items: center;
+  min-height: 76px;
+  color: var(--ink);
+  text-decoration: none;
+}
+.crypto-papers li a::before { color: var(--blue); content: counter(crypto-paper, decimal-leading-zero); font-size: 12px; font-weight: 800; }
+.crypto-papers li strong { font-size: 15px; line-height: 1.45; }
+.crypto-papers li span { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.crypto-papers li a:hover strong { color: var(--blue); }
+.crypto-notes { margin: 30px 0 0; padding-left: 18px; border-left: 4px solid var(--lime); font-size: 14px; line-height: 1.6; }
+.crypto-notes a { color: var(--blue); font-weight: 800; text-underline-offset: 4px; }
+
 .story-page:not(.story-motivation) {
   --bp-ring-a-size: 430px;
   --bp-ring-a-x: 108%;
@@ -1456,6 +1495,10 @@
     gap: 9px;
     font-size: 14px;
   }
+
+  .crypto-papers { padding: 30px 23px; }
+  .crypto-papers li a { grid-template-columns: 32px minmax(0, 1fr); gap: 10px; padding: 15px 0; }
+  .crypto-papers li span { grid-column: 2; }
 
   .site-shell::before {
     width: 64vw;

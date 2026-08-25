@@ -1534,12 +1534,30 @@ button.key-space { width: min(420px, 100%); height: 68px; justify-self: center; 
 }
 
 .action-copy {
+  position: relative;
   min-height: 56px;
-  transition: color 260ms ease-out;
+  overflow: hidden;
 }
 
-.action-copy strong {
-  animation: action-notice-in 320ms ease-out both;
+.action-copy-layer {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 300ms ease, transform 300ms ease;
+}
+
+.action-copy[data-swap="true"][data-moving="false"] .action-copy-current {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.action-copy[data-swap="true"][data-moving="true"] .action-copy-prior {
+  opacity: 0;
+  transform: translateY(-6px);
 }
 
 .action-copy[data-stage="crypto"] span {

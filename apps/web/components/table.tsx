@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 import { Card } from "@/components/card";
 import {
@@ -149,12 +149,69 @@ function deckStatus(stage: string): [string, string] {
     return ["Proving deck randomness", "Checking the encrypted shuffle proof"];
   }
   if (stage.includes("key") || stage.includes("collecting")) {
-    return ["Building the encrypted deck", "Each player adds a private key"];
+    return ["Building the encrypted deck", ""];
   }
   if (stage.includes("opening") || stage.includes("decrypting") || stage.includes("cards")) {
     return ["Opening the dealt cards", "Decrypting only the cards now in play"];
   }
   return ["Preparing the next hand", stage];
+}
+
+type ActionCopyState = { status: string; message: string; crypto: boolean };
+
+function ActionCopy({ status, message, stage }: {
+  status: string;
+  message: string;
+  stage?: string;
+}) {
+  const initial = { status, message, crypto: Boolean(stage) };
+  const shownRef = useRef<ActionCopyState>(initial);
+  const [shown, setShown] = useState(initial);
+  const [prior, setPrior] = useState<ActionCopyState>();
+  const [moving, setMoving] = useState(false);
+
+  useEffect(() => {
+    const next = { status, message, crypto: Boolean(stage) };
+    const current = shownRef.current;
+    if (
+      current.status === next.status &&
+      current.message === next.message &&
+      current.crypto === next.crypto
+    ) return;
+
+    shownRef.current = next;
+    setPrior(current);
+    setShown(next);
+    setMoving(false);
+    const frame = window.requestAnimationFrame(() => setMoving(true));
+    const timer = window.setTimeout(() => setPrior(undefined), 420);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [message, stage, status]);
+
+  return (
+    <div
+      className="action-copy"
+      data-stage={shown.crypto ? "crypto" : undefined}
+      data-moving={moving}
+      data-swap={prior ? "true" : "false"}
+      aria-live="polite"
+    >
+      {prior && (
+        <div className="action-copy-layer action-copy-prior" aria-hidden="true">
+          <span>{prior.status}</span>
+          {prior.message && <strong>{prior.message}</strong>}
+        </div>
+      )}
+      <div className="action-copy-layer action-copy-current">
+        <span>{shown.status}</span>
+        {shown.message && <strong>{shown.message}</strong>}
+      </div>
+    </div>
+  );
 }
 const playerName = (
   player: number,
@@ -496,10 +553,7 @@ export function Table({
       )}
 
       <div className="action-bar" aria-label="Player actions" aria-busy={disabled}>
-        <div key={stage ?? status} className="action-copy" data-stage={stage ? "crypto" : undefined} aria-live="polite">
-          <span>{status}</span>
-          <strong>{message}</strong>
-        </div>
+        <ActionCopy status={status} message={message} stage={stage} />
         <div className="action-controls">
           <div className="plain-actions">
             <button className="key-action key-fold" type="button" onClick={onFold} disabled={disabled || !actions?.fold}>

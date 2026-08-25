@@ -117,11 +117,11 @@ const deckSecretKey = (room: string, hand: number) => `noir-poker-deck-${room}-$
 const deckHoleKey = (room: string, hand: number, seat: number) =>
   `noir-poker-hole-${room}-${hand}-${seat}`;
 const MAX_AUTO_PROOF_DELAY_MS = 10_000;
-const GAME_OVER_DELAY_MS = 3000;
+const GAME_OVER_DELAY_MS = 7000;
 const BONUS_ADD_MS = 1200;
 const BONUS_DELAY_MS = 6000;
-const GAME_OVER_DISPLAY_MS = 2000;
-const DECK_STAGE_MS = 900;
+const GAME_OVER_DISPLAY_MS = 4000;
+const DECK_STAGE_MS = 1200;
 
 function noticeKey(notice: TableNoticeView) {
   return notice.kind === "action"

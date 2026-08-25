@@ -232,12 +232,21 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
 
       {audit && (
         <section className="audit-transcript">
-          <div className="section-index"><span>Transcript</span><p>One completed hand</p></div>
-          <dl>
-            <div><dt>room</dt><dd>{audit.room}</dd></div>
-            <div><dt>hand</dt><dd>{audit.hand_no + 1}</dd></div>
-            <div><dt>SHA 256 chain head</dt><dd>{audit.transcript_hash}</dd></div>
-          </dl>
+          <header className="audit-transcript-head">
+            <span>Transcript</span>
+            <h2>Hand {audit.hand_no + 1} record</h2>
+            <p>The exact public record checked in this browser</p>
+          </header>
+          <div className="audit-record">
+            <dl className="audit-record-meta">
+              <div><dt>Room</dt><dd>{audit.room}</dd></div>
+              <div><dt>Hand</dt><dd>{audit.hand_no + 1}</dd></div>
+            </dl>
+            <div className="audit-record-hash">
+              <span>SHA 256 chain head</span>
+              <strong>{audit.transcript_hash}</strong>
+            </div>
+          </div>
           <div className="audit-proof-actions">
             <button type="button" className="primary-action" onClick={() => downloadProofs(audit)}>
               Download Proof Transcript
