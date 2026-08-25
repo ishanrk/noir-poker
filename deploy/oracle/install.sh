@@ -76,8 +76,6 @@ apt-get install -y --no-install-recommends \
     libssl-dev \
     openssl \
     pkg-config \
-    postgresql \
-    postgresql-contrib \
     ufw \
     xz-utils
 
@@ -95,6 +93,25 @@ apt-get install -y --no-install-recommends caddy
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 chmod 0755 "$tmp"
+
+curl -fsSL \
+    https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    -o "$tmp/postgresql.asc"
+pg_fingerprint="$(gpg --show-keys --with-colons "$tmp/postgresql.asc" \
+    | awk -F: '$1 == "fpr" { print $10; exit }')"
+if [[ "$pg_fingerprint" != "B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8" ]]; then
+    echo "PostgreSQL signing key check failed" >&2
+    exit 1
+fi
+install -d -m 0755 /usr/share/postgresql-common/pgdg
+gpg --dearmor --yes \
+    -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg \
+    "$tmp/postgresql.asc"
+printf '%s\n' \
+    "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+    > /etc/apt/sources.list.d/pgdg.list
+apt-get update
+apt-get install -y --no-install-recommends postgresql-client-18
 
 fetch() {
     local url="$1"
@@ -116,7 +133,10 @@ link_tool() {
     ln -sfn "$target" "$link"
 }
 
-if [[ "$(/usr/local/bin/node --version 2>/dev/null || true)" != "v$node_version" ]]; then
+if [[ "$(/usr/local/bin/node --version 2>/dev/null || true)" != "v$node_version" \
+    || ! -x /usr/local/bin/npm \
+    || ! -x /usr/local/bin/npx \
+    || ! -x /usr/local/bin/corepack ]]; then
     node_archive="node-v${node_version}-linux-arm64.tar.xz"
     fetch \
         "https://nodejs.org/dist/v${node_version}/${node_archive}" \
@@ -181,6 +201,10 @@ if [[ "$(/usr/local/bin/rustc --version | awk '{print $2}')" != "$rust_version" 
     echo "Rust version check failed" >&2
     exit 1
 fi
+if [[ "$(/usr/lib/postgresql/18/bin/pg_dump --version 2>/dev/null || true)" != pg_dump\ \(PostgreSQL\)\ 18.* ]]; then
+    echo "PostgreSQL client version check failed" >&2
+    exit 1
+fi
 
 if ! getent group noir-poker >/dev/null; then
     groupadd --system noir-poker
@@ -230,7 +254,6 @@ install -m 0644 \
     "$root/deploy/oracle/noir-poker.service" \
     /etc/systemd/system/noir-poker.service
 systemctl daemon-reload
-systemctl enable --now postgresql
 
 echo
 echo "Oracle dependencies and Noir Poker are built"

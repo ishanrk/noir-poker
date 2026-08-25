@@ -1,6 +1,5 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses";
 import { NO_WAIT } from "@aztec/aztec.js/contracts";
-import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee";
 import { Fr } from "@aztec/aztec.js/fields";
 import { createAztecNodeClient } from "@aztec/aztec.js/node";
 import { TxHash } from "@aztec/aztec.js/tx";
@@ -13,6 +12,7 @@ import {
   PlayChipsContract,
   PlayChipsContractArtifact,
 } from "../../apps/web/lib/aztec/artifacts/PlayChips.ts";
+import { registerSponsoredFpc } from "./fpc.mjs";
 
 const FIELD = /^0x[0-9a-fA-F]{62,64}$/;
 const ADDRESS = /^0x[0-9a-fA-F]{64}$/;
@@ -76,25 +76,25 @@ function fieldText(value) {
   return `0x${raw.toString(16).padStart(64, "0")}`;
 }
 
-async function sendOptions(owner) {
-  const fpc = process.env.AZTEC_SPONSORED_FPC_ADDRESS;
-
-  if (!fpc) {
-    return { from: owner };
-  }
-
+function sendOptions(owner, paymentMethod) {
   return {
     from: owner,
-    fee: { paymentMethod: new SponsoredFeePaymentMethod(await address(fpc, "fee contract")) },
+    fee: { paymentMethod },
   };
 }
 
 async function connect() {
-  const node = env("AZTEC_NODE_URL");
+  const nodeUrl = env("AZTEC_NODE_URL");
+  const node = createAztecNodeClient(nodeUrl);
   const contractAddress = await address(env("AZTEC_PLAY_CHIPS_ADDRESS"), "contract address");
   const owner = await address(env("AZTEC_SERVER_ACCOUNT"), "server account");
   const dataDirectory = process.env.AZTEC_SERVER_WALLET_DIR ?? join(homedir(), ".aztec", "wallet");
   const wallet = await EmbeddedWallet.create(node, { pxe: { dataDirectory } });
+  const fpc = await registerSponsoredFpc(
+    wallet,
+    node,
+    env("AZTEC_SPONSORED_FPC_ADDRESS"),
+  );
   const accounts = await wallet.getAccounts();
 
   if (!accounts.some(({ item }) => item.equals(owner))) {
@@ -117,7 +117,7 @@ async function connect() {
     throw new Error("server account not contract owner");
   }
 
-  return { wallet, contract, owner };
+  return { wallet, contract, owner, paymentMethod: fpc.paymentMethod };
 }
 
 async function entry(contract, owner, request) {
@@ -186,7 +186,7 @@ async function authorized(contract, owner, request) {
   return true;
 }
 
-async function run(request, contract, owner) {
+async function run(request, contract, owner, paymentMethod) {
   switch (request.op) {
     case "check":
       return { owner: owner.toString() };
@@ -203,7 +203,7 @@ async function run(request, contract, owner) {
           await address(request.account, "account"),
           amount(request.amount, "amount"),
         )
-        .send(await sendOptions(owner));
+        .send(sendOptions(owner, paymentMethod));
 
       return { existing: false, tx: result.receipt.txHash.toString() };
     }
@@ -212,7 +212,7 @@ async function run(request, contract, owner) {
     case "cancel": {
       const result = await contract.methods
         .cancel_entry(field(request.entry_id, "entry id"))
-        .send(await sendOptions(owner));
+        .send(sendOptions(owner, paymentMethod));
       return { tx: result.receipt.txHash.toString() };
     }
     case "entry":
@@ -237,7 +237,7 @@ async function run(request, contract, owner) {
           recipients,
           payouts,
         )
-        .send({ ...(await sendOptions(owner)), wait: NO_WAIT });
+        .send({ ...sendOptions(owner, paymentMethod), wait: NO_WAIT });
 
       return { tx: result.txHash.toString() };
     }
@@ -293,7 +293,12 @@ try {
   const request = JSON.parse(input);
   const connected = await connect();
   wallet = connected.wallet;
-  const result = await run(request, connected.contract, connected.owner);
+  const result = await run(
+    request,
+    connected.contract,
+    connected.owner,
+    connected.paymentMethod,
+  );
   console.log(JSON.stringify(result));
 } catch (error) {
   console.error(error instanceof Error ? error.message : "aztec helper failed");

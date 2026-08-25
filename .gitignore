@@ -1,6 +1,8 @@
 .local/
 /target/
 /circuits/challenge-v2/target/
+/circuits/deck-v1/target/
+/aztec/node_modules/
 /aztec/target/
 /aztec/artifacts/
 /aztec/codegenCache.json

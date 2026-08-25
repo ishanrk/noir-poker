@@ -7,11 +7,12 @@ import {
   PlayChipsContractArtifact,
 } from "./artifacts/PlayChips";
 import { requirePlayChipsAddress } from "./config";
-import { sponsoredFeePayment } from "./fees";
+import { registerSponsoredFpc, sponsoredFeePayment } from "./fees";
 
 export type PlayChips = PlayChipsContract;
 
 export async function attachPlayChips(wallet: Wallet) {
+  await registerSponsoredFpc(wallet);
   const address = AztecAddress.fromStringUnsafe(requirePlayChipsAddress());
   const metadata = await wallet.getContractMetadata(address);
 

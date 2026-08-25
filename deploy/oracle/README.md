@@ -9,7 +9,7 @@ internet
    |
  Rust :3001
    |
- PostgreSQL :5432 localhost only
+ Neon PostgreSQL
 
 Rust
    |
@@ -30,7 +30,7 @@ In Oracle Cloud create a compute instance with:
 - an Ampere A1 shape
 - a public IPv4 address
 - your SSH public key
-- enough boot disk space for PostgreSQL builds and the Aztec wallet
+- enough boot disk space for source builds and the Aztec wallet
 
 Keep the boot volume when rebooting or stopping the instance.
 
@@ -80,7 +80,7 @@ Node 24.12.0
 Rust 1.93.0
 Nargo 1.0.0-beta.26
 Barretenberg 5.2.0
-PostgreSQL
+PostgreSQL client tools
 Caddy
 ```
 
@@ -119,30 +119,38 @@ Expected versions are Node `v24.12.0`, Nargo `1.0.0-beta.26`, BB `5.2.0`, and Ru
 
 Aztec 5.2.0 bundles Nargo beta.25 for its own CLI. The application ZK build deliberately uses the separate beta.26 `/usr/local/bin/nargo` installed above.
 
-## 5 Create PostgreSQL role and database
+## 5 Verify and back up Neon
 
-Choose a new random hexadecimal password in a password manager. Hex avoids URL escaping mistakes. Do not put the password in shell history.
+Production uses the existing Neon database URL in `/etc/noir-poker/server.env`. Do not replace it with a local PostgreSQL database and do not print it.
+
+Test the connection and inspect migration history as the service user:
 
 ```bash
-sudo -u postgres createuser --pwprompt noir_poker
-sudo -u postgres createdb --owner=noir_poker noir_poker
-sudo -u postgres psql -d noir_poker -c 'select current_database(), current_user;'
-sudo -u postgres psql -tAc 'show listen_addresses;'
+sudo -u noir-poker bash -c '
+  set -a
+  source /etc/noir-poker/server.env
+  set +a
+  psql "$DATABASE_URL" -c "select 1"
+  psql "$DATABASE_URL" -c \
+    "select version, description, installed_on from _sqlx_migrations order by version"
+'
 ```
 
-The normal Ubuntu PostgreSQL configuration listens locally. Do not change it to `*`. The `noir_poker` role owns the database so the server can run its embedded SQLx migrations.
-
-On an existing database take a backup and inspect migration history before first startup:
+Take a private backup before the first application startup:
 
 ```bash
-(
+sudo install -d -m 0700 -o root -g root /var/backups/noir-poker
+sudo bash -c '
+  set -euo pipefail
   umask 077
-  sudo -u postgres pg_dump --format=custom noir_poker \
-    > "$HOME/noir-poker-before-deploy.dump"
-)
-pg_restore --list "$HOME/noir-poker-before-deploy.dump" >/dev/null
-sudo -u postgres psql -d noir_poker -c \
-  'select version, description, installed_on from _sqlx_migrations order by version;'
+  set -a
+  source /etc/noir-poker/server.env
+  set +a
+  /usr/lib/postgresql/18/bin/pg_dump --format=custom "$DATABASE_URL" \
+    > /var/backups/noir-poker/neon-before-deploy.dump
+  /usr/lib/postgresql/18/bin/pg_restore --list \
+    /var/backups/noir-poker/neon-before-deploy.dump >/dev/null
+'
 ```
 
 Migration `20260821000000_challenge_v2.sql` truncates old room data. A fresh database is unaffected. Never upgrade an older database across that migration without a verified backup.
@@ -159,38 +167,23 @@ The directory must contain the configured server account and survive every updat
 
 ### Case A No server wallet or PlayChips deployment exists
 
-Install the official native Aztec 5.2.0 CLI as the `ubuntu` operator:
-
-```bash
-VERSION=5.2.0 bash -i <(curl -fsSL https://install.aztec.network/5.2.0)
-export PATH="$HOME/.aztec/current/bin:$HOME/.aztec/bin:$PATH"
-aztec --version
-aztec-wallet --help >/dev/null
-```
-
-The official installer supports Linux ARM64. Give the operator temporary ownership of the empty wallet directory and run the repository's existing one-time deployment script:
+Run the repository-pinned one-process initializer as the service user. The same EmbeddedWallet registers the canonical Aztec 5.2.0 Sponsored FPC then creates and deploys one Schnorr account and one PlayChips contract. A fixed deployment salt prevents an interrupted rerun from creating another PlayChips contract for the same account.
 
 ```bash
 cd /opt/noir-poker
 sudo systemctl stop noir-poker 2>/dev/null || true
-(
-  set -e
-  restore_wallet() {
-    sudo chown -R noir-poker:noir-poker /var/lib/noir-poker/aztec-wallet
-    sudo chmod -R go-rwx /var/lib/noir-poker/aztec-wallet
-  }
-  trap restore_wallet EXIT
-
-  sudo chown -R "$USER":"$USER" /var/lib/noir-poker/aztec-wallet
-  export AZTEC_VERSION=5.2.0
-  export AZTEC_NODE_URL=https://v5.testnet.rpc.aztec-labs.com
-  export AZTEC_SERVER_WALLET_DIR=/var/lib/noir-poker/aztec-wallet
-  ./aztec/scripts/deploy-testnet.sh
-)
+sudo chown -R noir-poker:noir-poker /var/lib/noir-poker
+sudo chmod 0750 /var/lib/noir-poker
+sudo chmod 0700 /var/lib/noir-poker/aztec-wallet
+sudo -u noir-poker env \
+  AZTEC_NODE_URL=https://v5.testnet.rpc.aztec-labs.com \
+  AZTEC_SERVER_WALLET_DIR=/var/lib/noir-poker/aztec-wallet \
+  AZTEC_SPONSORED_FPC_ADDRESS=0x2ece607a8dba690c9aa4ee1d53a55286fa815543a27f9364bbaf65eb68e7315b \
+  /usr/local/bin/npm --prefix /opt/noir-poker/aztec run deploy:testnet
 git status --short
 ```
 
-Copy the values printed by the script. It creates or reuses its account alias but deploys a new PlayChips contract every time. Do not run it again after a real contract has been selected.
+Copy the five public configuration values printed by the script. A rerun reuses the sole stored account. If `AZTEC_PLAY_CHIPS_ADDRESS` and `AZTEC_SERVER_ACCOUNT` are supplied it verifies and reuses them rather than deploying replacements.
 
 The Git status output should remain empty. If exact-version code generation changes a committed artifact stop and inspect it rather than discarding or committing it on the server.
 
@@ -213,7 +206,7 @@ NEXT_PUBLIC_AZTEC_PLAY_CHIPS_ADDRESS
 
 ### Case B A server wallet and PlayChips deployment already exist
 
-Do not run `deploy-testnet.sh` and do not deploy another contract.
+Do not run the initializer without supplying the existing account and contract values. Do not deploy another contract.
 
 Stop Noir Poker. Transfer the complete existing wallet directory over SSH using an encrypted connection. Keep the original untouched until Oracle passes preflight. Do not merge two wallet directories or copy only selected files.
 
@@ -267,21 +260,23 @@ Use the same Aztec 5.2.0 node URL, PlayChips address, sponsored FPC, and server 
 
 ## 7 Configure the server environment
 
-Install the placeholder template:
+Preserve an existing `/etc/noir-poker/server.env`, especially its Neon `DATABASE_URL`. Install the placeholder template only when the file does not exist:
 
 ```bash
-sudo install -m 0640 -o root -g noir-poker \
-  /opt/noir-poker/deploy/oracle/server.env.example \
-  /etc/noir-poker/server.env
+if ! sudo test -f /etc/noir-poker/server.env; then
+  sudo install -m 0640 -o root -g noir-poker \
+    /opt/noir-poker/deploy/oracle/server.env.example \
+    /etc/noir-poker/server.env
+fi
 sudoedit /etc/noir-poker/server.env
 ```
 
-Replace every `CHANGE_ME` and `YOUR_...` value. Use the database password from step 5. Set `WEB_ORIGINS` to the exact HTTPS Vercel and custom frontend origins separated by commas. Do not put a trailing slash on an origin.
+Replace every remaining `CHANGE_ME` and `YOUR_...` value. Set `WEB_ORIGINS` to the exact HTTPS Vercel and custom frontend origins separated by commas. Do not put a trailing slash on an origin.
 
 Example shape:
 
 ```text
-DATABASE_URL=postgresql://noir_poker:HEX_PASSWORD@127.0.0.1:5432/noir_poker
+DATABASE_URL=the existing Neon URL
 PORT=3001
 WEB_ORIGINS=https://project.vercel.app,https://www.example.com
 ```
@@ -337,12 +332,13 @@ Expected output is one JSON object containing the configured owner:
 {"owner":"0x..."}
 ```
 
-This single helper operation verifies all four boundaries used at startup:
+This helper operation verifies the production boundaries used at startup:
 
 1. The Aztec RPC responds.
-2. The configured server account exists in the persistent wallet.
-3. The PlayChips contract exists at the configured address.
-4. The server account equals the contract owner.
+2. The canonical Sponsored FPC matches the pinned artifact and registers in the same wallet.
+3. The configured server account exists in the persistent wallet.
+4. The PlayChips contract exists at the configured address.
+5. The server account equals the contract owner.
 
 Do not start the service if this check fails.
 
@@ -357,10 +353,10 @@ sudo journalctl -u noir-poker -n 100 --no-pager
 
 The health response is `ok`. Startup connects to PostgreSQL, applies migrations, restores durable rooms, loads proof verifiers, and checks Aztec before binding the port. A failure in any of those steps prevents public traffic.
 
-Confirm neither internal port has an OCI or UFW public allow rule:
+Confirm the internal server port has no OCI or UFW public allow rule:
 
 ```bash
-sudo ss -ltnp | grep -E ':(3001|5432)[[:space:]]'
+sudo ss -ltnp | grep -E ':3001[[:space:]]'
 ```
 
 The Rust server binds port 3001 on all VM interfaces. The OCI ingress rules and explicit UFW deny rule must keep it private while Caddy reaches it over loopback.
@@ -416,22 +412,29 @@ To verify WSS use the existing website to create a room and inspect the table co
 
 ## 12 Back up persistent state
 
-PostgreSQL data lives under `/var/lib/postgresql`. The Aztec wallet lives under `/var/lib/noir-poker/aztec-wallet`.
+Neon stores PostgreSQL data remotely. The Aztec wallet lives under `/var/lib/noir-poker/aztec-wallet`.
 
 Before an OS or application migration:
 
 ```bash
 sudo systemctl stop noir-poker
-(
+sudo install -d -m 0700 -o root -g root /var/backups/noir-poker
+sudo bash -c '
+  set -euo pipefail
   umask 077
-  sudo -u postgres pg_dump --format=custom noir_poker > "$HOME/noir-poker.dump"
-  sudo tar -C /var/lib/noir-poker -czf - aztec-wallet \
-    > "$HOME/noir-poker-aztec-wallet.tar.gz"
-)
-chmod 0600 "$HOME/noir-poker.dump" "$HOME/noir-poker-aztec-wallet.tar.gz"
-sha256sum "$HOME/noir-poker.dump" "$HOME/noir-poker-aztec-wallet.tar.gz"
-pg_restore --list "$HOME/noir-poker.dump" >/dev/null
-tar -tzf "$HOME/noir-poker-aztec-wallet.tar.gz" >/dev/null
+  set -a
+  source /etc/noir-poker/server.env
+  set +a
+  /usr/lib/postgresql/18/bin/pg_dump --format=custom "$DATABASE_URL" \
+    > /var/backups/noir-poker/neon.dump
+  tar -C /var/lib/noir-poker -czf - aztec-wallet \
+    > /var/backups/noir-poker/aztec-wallet.tar.gz
+'
+sudo chmod 0600 /var/backups/noir-poker/neon.dump \
+  /var/backups/noir-poker/aztec-wallet.tar.gz
+sudo /usr/lib/postgresql/18/bin/pg_restore --list \
+  /var/backups/noir-poker/neon.dump >/dev/null
+sudo tar -tzf /var/backups/noir-poker/aztec-wallet.tar.gz >/dev/null
 sudo systemctl start noir-poker
 ```
 
@@ -478,7 +481,7 @@ If fetched code changes `apps/server/migrations`, the script stops before mergin
 - the VM reboots and Noir Poker returns
 - the Node helper check returns the same owner
 - `bb --version` returns `5.2.0`
-- the service connects to PostgreSQL
+- the service connects to Neon PostgreSQL
 
 ### Persistence
 
@@ -528,7 +531,12 @@ sudo systemctl status noir-poker --no-pager
 sudo journalctl -u noir-poker -f
 sudo systemctl status caddy --no-pager
 sudo journalctl -u caddy -n 100 --no-pager
-sudo -u postgres psql -d noir_poker -c 'select 1'
+sudo -u noir-poker bash -c '
+  set -a
+  source /etc/noir-poker/server.env
+  set +a
+  psql "$DATABASE_URL" -c "select 1"
+'
 curl -v http://127.0.0.1:3001/health
 curl -v https://api.example.com/health
 ```

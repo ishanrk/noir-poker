@@ -94,6 +94,11 @@ if [[ -n "$(git -C "$root" status --short)" ]]; then
     exit 1
 fi
 
+sudo install -m 0644 \
+    "$root/deploy/oracle/noir-poker.service" \
+    /etc/systemd/system/noir-poker.service
+sudo systemctl daemon-reload
+
 sudo systemctl start noir-poker
 sudo systemctl is-active --quiet noir-poker
 sudo bash -c '

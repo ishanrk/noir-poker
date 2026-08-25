@@ -98,12 +98,12 @@ AZTEC_NODE_URL
 AZTEC_PLAY_CHIPS_ADDRESS
 AZTEC_SERVER_ACCOUNT
 AZTEC_SERVER_WALLET_DIR
-AZTEC_SPONSORED_FPC_ADDRESS optional
+AZTEC_SPONSORED_FPC_ADDRESS
 AZTEC_SERVER_HELPER optional
 AZTEC_SERVER_NODE optional
 ```
 
-The account named by `AZTEC_SERVER_ACCOUNT` must already exist in the embedded wallet directory and must own the deployed contract. The helper checks both conditions before the Rust listener starts. A Sponsored FPC address is optional for the server helper. The browser uses the configured Sponsored FPC path for normal wallet transactions.
+The account named by `AZTEC_SERVER_ACCOUNT` must already exist in the embedded wallet directory and must own the deployed contract. The helper checks both conditions before the Rust listener starts. The server derives the Aztec 5.2.0 Sponsored FPC from the pinned artifact and official salt then requires `AZTEC_SPONSORED_FPC_ADDRESS` to match it. The browser derives the same instance for wallet transactions.
 
 The Rust server also requires its normal `DATABASE_URL` `BB_PATH` and web-origin configuration.
 

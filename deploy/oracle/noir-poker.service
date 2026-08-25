@@ -1,8 +1,7 @@
 [Unit]
 Description=Noir Poker
 Wants=network-online.target
-After=network-online.target postgresql.service
-Requires=postgresql.service
+After=network-online.target
 ConditionPathExists=/etc/noir-poker/server.env
 
 [Service]
