@@ -1,6 +1,6 @@
 # Noir Poker
 
-Live website: noirpoker.ishankumthekar.com
+Live website: https://noirpoker.ishankumthekar.com
 
 In general, online poker is vulnerable to the server cheating.
 - For example, the server can deal better cards favoring certain players.
