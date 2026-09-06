@@ -1378,6 +1378,16 @@ async fn participant_persistence() {
     .await
     .unwrap();
     let id = first.room;
+    let room = find_room(&state, id).await.unwrap();
+    room.lock().await.mode = RoomMode::Aztec;
+    assert_eq!(
+        join_room(AxumState(state.clone()), Path(id), Json(JoinRequest {}))
+            .await
+            .err(),
+        Some((StatusCode::CONFLICT, "experimental aztec disabled")),
+    );
+    assert_eq!(reload(&db, id).await.seats.len(), 1);
+    room.lock().await.mode = RoomMode::Multiplayer;
     let Json(second) = join_room(AxumState(state.clone()), Path(id), Json(JoinRequest {}))
         .await
         .unwrap();

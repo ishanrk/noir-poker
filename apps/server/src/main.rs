@@ -320,12 +320,16 @@ async fn join_room(
     Path(id): Path<Uuid>,
     Json(_request): Json<JoinRequest>,
 ) -> Result<Json<SeatResponse>, HttpError> {
+    let experimental_aztec = state.admission.lock().await.experimental_aztec;
     let room = find_room(&state, id)
         .await
         .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
     let mut room = room.lock().await;
     if room.mode == RoomMode::Single {
         return Err((StatusCode::CONFLICT, "single room full"));
+    }
+    if room.mode == RoomMode::Aztec && !experimental_aztec {
+        return Err((StatusCode::CONFLICT, "experimental aztec disabled"));
     }
     let (token, token_hash) = room_token(&room);
     let seat = room
