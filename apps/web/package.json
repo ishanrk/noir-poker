@@ -2,8 +2,10 @@
   "name": "noir-poker-web",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@11.9.0",
   "engines": {
-    "node": ">=24"
+    "node": ">=24.12.0 <25",
+    "npm": "11.9.0"
   },
   "scripts": {
     "runtime": "../../scripts/web-runtime.sh update",

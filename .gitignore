@@ -1,4 +1,7 @@
 .local/
+.private/
+.env
+.env.local
 /target/
 /circuits/challenge-v2/target/
 /aztec/target/
