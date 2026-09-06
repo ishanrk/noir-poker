@@ -47,7 +47,7 @@ async function visit(route, name, expected) {
 }
 
 await visit("/", "home", [
-  "The game server cannot cheat even if it wanted to.",
+  "Play-chip poker with locally recorded deal commitments and private challenge proofs.",
   "Rust backend, Next.js and TypeScript frontend, Noir zero knowledge circuits.",
   "Create a game",
 ]);
@@ -124,6 +124,7 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
   await visit("/", "home-after-single", ["Create a game"]);
 }
 
+if (process.env.AZTEC_SMOKE === "1") {
 await page.getByRole("radio", { name: /Aztec/ }).check();
 // wait for lazy wallet ui
 await page
@@ -137,6 +138,9 @@ assert.equal(
   true,
   "Aztec controls did not load",
 );
+} else {
+  assert.equal(await page.getByRole("button", { name: "Connect Aztec" }).count(), 0);
+}
 await visit("/rules", "rules", [
   "Bluff and win with seven-deuce",
   "These are the same challenge controls shown at the poker table.",
@@ -161,10 +165,9 @@ await visit("/protocol", "protocol", [
   "Where the poker program fits",
   "Limitations",
 ]);
-await visit("/chips", "chips", [
-  "Aztec testnet",
-  "Private chips for Aztec tables.",
-]);
+await visit("/chips", "chips", process.env.AZTEC_SMOKE === "1"
+  ? ["Aztec testnet", "Private chips for Aztec tables."]
+  : ["Experimental Aztec is disabled"]);
 
 await browser.close();
 

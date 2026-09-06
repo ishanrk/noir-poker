@@ -26,8 +26,8 @@ export default function ProtocolPage() {
         <span>Protocol</span>
         <h1>How verification works</h1>
         <p>
-          There are two checks: the deck was fixed fairly, and a private challenge was assigned and
-          completed correctly.
+          There are two checks: a deal transcript can be reproduced and compared with your saved
+          participant record, and a private challenge can be proved against server-committed facts.
         </p>
       </header>
 
@@ -43,10 +43,12 @@ export default function ProtocolPage() {
             <code>/audit/&lt;room&gt;/&lt;hand&gt;</code>
             <p>
               Recomputes the server commitment, player randomness, final seed, 52 card shuffle and
-              every dealt position. A mismatch makes the audit fail.
+              every dealt position. With your local participant record it also checks the earlier
+              commitment, your contribution, configuration and only the cards you actually observed.
+              A downloaded transcript alone cannot establish precommitment timing.
             </p>
             <p><b>Download:</b> choose Export JSON on that page.</p>
-            <code>npm --prefix apps/web run deal:verify -- audit.json</code>
+            <code>npm --prefix apps/web run deal:verify -- audit.json [participant.json]</code>
           </article>
           <article>
             <strong>Challenge receipt</strong>
@@ -54,7 +56,8 @@ export default function ProtocolPage() {
             <code>/proof/&lt;nullifier&gt;</code>
             <p>
               Verifies two UltraHonk proofs: the private challenge was assigned from the fixed
-              catalog, and the same hidden challenge was completed.
+              catalog, and the same hidden challenge was completed against server-committed facts.
+              It does not prove the whole poker execution or the truth of those facts.
             </p>
             <p><b>Download:</b> choose Export JSON on that page.</p>
             <code>npm --prefix apps/web run proof:verify -- receipt.json</code>
@@ -172,14 +175,17 @@ export default function ProtocolPage() {
             </p>
             <code className="protocol-formula">C = SHA256(&quot;NPDEAL01&quot; || room || hand || S)</code>
             <p>
-              The commitment locks in the server&apos;s value. After player values arrive, replacing
-              <code> S</code> would change <code>C</code> and fail the later audit.
+              The commitment binds the server only relative to the earlier value a participant saved.
+              A replacement self-consistent transcript may reproduce on its own while failing that saved record.
             </p>
 
             <h3>Player randomness</h3>
             <p>
-              Each joining browser calls <code>crypto.getRandomValues</code> to generate 32 random
-              bytes. The player values, seat numbers and committed server secret are hashed together.
+              Each human reserves a seat without entropy, authenticates and saves the room, hand,
+              configuration and server commitment locally. Only then does the browser call
+              <code> crypto.getRandomValues</code>, persist its 32 byte contribution and submit it
+              bound to that hand and commitment. Retries reuse it. The hand starts after every required
+              contribution is durable. This applies to the final joining player and subsequent hands.
             </p>
             <code className="protocol-formula">seed = SHA256(&quot;NPSEED01&quot; || room || hand || seats || player_randomness || S)</code>
 
@@ -195,6 +201,9 @@ export default function ProtocolPage() {
             <p>
               After settlement the server secret and player values are revealed. The audit page reruns
               every step from the commitment through the final dealt positions.
+              The public <code>/audits/&lt;room&gt;/&lt;hand&gt;</code> endpoint reveals the secret and
+              full reconstructed deck, including folded and mucked hole cards. This play-money
+              tradeoff does not provide permanent hole-card privacy.
             </p>
           </div>
         </details>
@@ -301,8 +310,20 @@ export default function ProtocolPage() {
             <p>
               The completion circuit currently uses six server-committed hand facts. The receipt proves
               the private challenge against those committed facts, but it does not yet reconstruct the
-              facts independently from a public action transcript. Card-rank challenges such as
+              facts independently from a public action transcript. The server knows the live cards
+              and can abort. Card-rank challenges such as
               seven-deuce also need additional private hand facts before they can be claimable.
+            </p>
+            <p>
+              Legacy ceremonies remain version 1 and do not gain participant evidence retroactively.
+              New version 2 ceremonies retain the same shuffle algorithm and add the explicit
+              commitment-before-contribution sequence. Public transcripts without saved participant
+              evidence have a weaker assurance level.
+            </p>
+            <p>
+              This is not trustless poker. Participants still trust the server-delivered browser code.
+              Server aborts, server knowledge, collusion and different commitments shown to different
+              players are not eliminated; local records can expose conflicts only when compared.
             </p>
           </div>
         </details>

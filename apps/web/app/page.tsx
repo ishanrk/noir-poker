@@ -30,7 +30,7 @@ export default function Home() {
             </span>
             <span className="hero-title-poker">Poker</span>
           </h1>
-          <p className="hero-tagline">The game server cannot cheat even if it wanted to.</p>
+          <p className="hero-tagline">Play-chip poker with locally recorded deal commitments and private challenge proofs.</p>
           <p className="hero-tech">
             Rust backend, Next.js and TypeScript frontend, Noir zero knowledge circuits.
           </p>
@@ -72,12 +72,17 @@ export default function Home() {
             <p>
               Between hands, every active player receives one random private challenge. Examples
               include reach showdown, check on the flop, or finish the hand ahead. A completed
-              challenge earns proof points without revealing the challenge or the player&apos;s hole cards.
+              challenge earns proof points without revealing the challenge in the proof.
+              After settlement, the public deal audit reveals every hole card, including folded hands.
             </p>
           </div>
           <Link href="/rules">Examples and proofs →</Link>
         </div>
       </section>
+      <p className="audit-footnote">
+        The server knows the live cards and can abort. This is not trustless or mental poker.
+        Challenge proofs check private challenges against server-committed facts, not the entire poker execution or the truth of those facts.
+      </p>
     </main>
   );
 }

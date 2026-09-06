@@ -1,11 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { type FormEvent, useMemo, useState } from "react";
 
 import { AztecConnect } from "@/components/aztec-connect";
 import {
   AZTEC_BIG_BLIND,
+  AZTEC_ENABLED,
   AZTEC_SMALL_BLIND,
   AZTEC_TABLE_STACK,
 } from "@/lib/aztec/config";
@@ -59,6 +61,7 @@ export function Lobby() {
   const [bigIndex, setBigIndex] = useState(2);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [reserved, setReserved] = useState<{ room: string; seat: number; token: string }>();
   const normalStack = STACKS[stackIndex];
   const normalSmallBlind = SMALL_BLINDS[smallIndex];
   const normalBigBlind = BIG_BLINDS[bigIndex];
@@ -91,12 +94,13 @@ export function Lobby() {
         big_blind: bigBlind,
         mode,
       });
+      setReserved(result);
+      saveSeat(result.room, result);
 
       if (mode === "aztec" && aztec) {
         await enterAztec(aztec, result.room, result.seat, AZTEC_TABLE_STACK);
       }
 
-      saveSeat(result.room, result);
       router.push(`/table/${result.room}${mode === "aztec" ? "?mode=aztec" : ""}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "server unavailable");
@@ -117,12 +121,13 @@ export function Lobby() {
       }
 
       const result = await joinRoom(room);
+      setReserved(result);
+      saveSeat(result.room, result);
 
       if (mode === "aztec" && aztec) {
         await enterAztec(aztec, result.room, result.seat, AZTEC_TABLE_STACK);
       }
 
-      saveSeat(result.room, result);
       router.push(`/table/${result.room}${mode === "aztec" ? "?mode=aztec" : ""}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "server unavailable");
@@ -167,7 +172,7 @@ export function Lobby() {
               <small>No wallet</small>
             </span>
           </label>
-          <label>
+          {AZTEC_ENABLED && <label>
             <input
               type="radio"
               name="mode"
@@ -179,14 +184,29 @@ export function Lobby() {
               }}
             />
             <span>
-              <strong>Aztec Poker</strong>
-              <small>Private PLAY</small>
+              <strong>Experimental Aztec</strong>
+              <small>Test PLAY only</small>
             </span>
-          </label>
+          </label>}
         </div>
       </fieldset>
 
-      {mode === "aztec" && <AztecConnect compact onSession={setAztec} />}
+      {mode === "aztec" && (
+        <>
+          <p role="note">Experimental test PLAY only. The Rust server does not verify contract admission or settle the contract automatically. A wallet rejection leaves your reserved server seat recoverable below. Review these limits before locking PLAY.</p>
+          <AztecConnect compact onSession={setAztec} />
+        </>
+      )}
+      {reserved && error && (
+        <section role="status">
+          <p>Your seat {reserved.seat + 1} in room {reserved.room} is reserved. Wallet or storage failure did not release it.</p>
+          <button type="button" onClick={() => {
+            try { saveSeat(reserved.room, reserved); router.push(`/table/${reserved.room}`); }
+            catch (cause) { setError(cause instanceof Error ? cause.message : "Cannot save seat"); }
+          }}>Save and recover seat</button>
+          <Link href={`/table/${reserved.room}`}>Open saved seat</Link>
+        </section>
+      )}
 
       <div className="lobby">
         <form className="lobby-create" onSubmit={create}>

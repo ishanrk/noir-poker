@@ -1,4 +1,5 @@
 export const AZTEC_VERSION = "5.1.0";
+export const AZTEC_ENABLED = process.env.NEXT_PUBLIC_ENABLE_EXPERIMENTAL_AZTEC === "true";
 export const AZTEC_TESTNET_NODE_URL =
   process.env.NEXT_PUBLIC_AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com";
 export const AZTEC_TESTNET_CHAIN_ID = 11_155_111n;
