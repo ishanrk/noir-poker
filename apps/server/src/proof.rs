@@ -11,6 +11,7 @@ use barretenberg_rs::generated_types::ProofSystemSettings;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use sha2::{Digest, Sha256};
+use tokio::sync::Semaphore;
 
 const FIELD_BYTES: usize = 32;
 // circuit public u8s use one field each
@@ -32,6 +33,7 @@ type ProofResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
 #[derive(Clone)]
 pub struct ProofVerifier {
+    admission: Arc<Semaphore>,
     api: Arc<Mutex<BarretenbergApi<PipeBackend>>>,
     vk: Arc<Vec<u8>>,
 }
@@ -74,12 +76,16 @@ impl ProofVerifier {
         let backend = PipeBackend::new(bb, None)?;
 
         Ok(Self {
+            admission: Arc::new(Semaphore::new(1)),
             api: Arc::new(Mutex::new(BarretenbergApi::new(backend))),
             vk: Arc::new(vk),
         })
     }
 
     pub async fn verify(&self, proof: &ChallengeProof) -> ProofResult<bool> {
+        let permit = Arc::clone(&self.admission)
+            .try_acquire_owned()
+            .map_err(|_| io::Error::new(io::ErrorKind::WouldBlock, "proof verifier busy"))?;
         let api = Arc::clone(&self.api);
         let vk = Arc::clone(&self.vk);
         let public_inputs = proof.public_inputs.clone();
@@ -87,6 +93,7 @@ impl ProofVerifier {
 
         // pipe proof work off async runtime
         tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             let mut api = api
                 .lock()
                 .map_err(|_| io::Error::other("proof verifier stopped"))?;

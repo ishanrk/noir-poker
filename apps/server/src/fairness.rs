@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::io;
 
-use deal_core::{PROTOCOL_VERSION, commitment, seed};
+use deal_core::{commitment, seed};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row, Transaction, query};
 use uuid::Uuid;
@@ -12,6 +12,7 @@ use crate::room::{Ceremony, RoomConfig, RoomMode};
 type FairResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
 pub struct StoredAudit {
+    pub protocol_version: u8,
     pub config: RoomConfig,
     pub hand: StoredHand,
     pub server_secret: [u8; 32],
@@ -44,7 +45,10 @@ pub async fn ensure_pending(db: &Db) -> FairResult<()> {
             continue;
         }
 
-        let ceremony = random_ceremony(room, hand_no, players)?;
+        let mut ceremony = random_ceremony(room, hand_no, players)?;
+        if hand_no == 0 {
+            ceremony.protocol_version = 1;
+        }
         let mut tx = db.pool().begin().await?;
         insert_ceremony(&mut tx, room, &ceremony).await?;
 
@@ -74,6 +78,7 @@ pub fn random_ceremony(room: Uuid, hand_no: u64, players: usize) -> FairResult<C
     let commitment = commitment(*room.as_bytes(), hand_no, server_secret);
 
     Ok(Ceremony {
+        protocol_version: 2,
         hand_no,
         server_secret,
         commitment,
@@ -93,6 +98,7 @@ pub fn bot_share(room: Uuid, ceremony: &Ceremony, seat: usize) -> [u8; 32] {
     input.finalize().into()
 }
 
+#[cfg(test)]
 pub async fn create_room(
     db: &Db,
     id: Uuid,
@@ -127,10 +133,22 @@ pub async fn create_room(
     Ok(())
 }
 
+#[cfg(test)]
 pub async fn create_pending_room(
     db: &Db,
     id: Uuid,
     config: RoomConfig,
+    token_hash: &[u8; 32],
+    ceremony: &Ceremony,
+) -> FairResult<()> {
+    reserve_room(db, id, config, RoomMode::Single, token_hash, ceremony).await
+}
+
+pub async fn reserve_room(
+    db: &Db,
+    id: Uuid,
+    config: RoomConfig,
+    mode: RoomMode,
     token_hash: &[u8; 32],
     ceremony: &Ceremony,
 ) -> FairResult<()> {
@@ -141,7 +159,7 @@ pub async fn create_pending_room(
          VALUES ($1, $2, $3, $4, $5, $6, 0)",
     )
     .bind(id)
-    .bind(RoomMode::Single.text())
+    .bind(mode.text())
     .bind(i32::try_from(config.players)?)
     .bind(i64::from(config.stack))
     .bind(i64::from(config.small_blind))
@@ -202,6 +220,7 @@ pub async fn start_single(
     Ok(())
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub async fn join_room(
     db: &Db,
@@ -295,7 +314,7 @@ pub async fn ready(
 
 pub async fn load_pending(db: &Db, room: Uuid, players: usize) -> FairResult<Option<Ceremony>> {
     let Some(row) = query(
-        "SELECT hand_no, server_secret, commitment FROM hand_ceremonies \
+        "SELECT hand_no, version, server_secret, commitment FROM hand_ceremonies \
          WHERE room_id = $1 AND final_seed IS NULL ORDER BY hand_no DESC LIMIT 1",
     )
     .bind(room)
@@ -326,6 +345,7 @@ pub async fn load_pending(db: &Db, room: Uuid, players: usize) -> FairResult<Opt
     }
 
     Ok(Some(Ceremony {
+        protocol_version: u8::try_from(row.try_get::<i32, _>("version")?)?,
         hand_no,
         server_secret,
         commitment,
@@ -333,9 +353,9 @@ pub async fn load_pending(db: &Db, room: Uuid, players: usize) -> FairResult<Opt
     }))
 }
 
-pub async fn current_commitment(db: &Db, room: Uuid) -> FairResult<Option<[u8; 32]>> {
+pub async fn current_commitment(db: &Db, room: Uuid) -> FairResult<Option<([u8; 32], u8)>> {
     let row = query(
-        "SELECT ceremony.commitment FROM hands \
+        "SELECT ceremony.commitment, ceremony.version FROM hands \
          JOIN hand_ceremonies ceremony \
            ON ceremony.room_id = hands.room_id AND ceremony.hand_no = hands.hand_no \
          WHERE hands.room_id = $1 ORDER BY hands.hand_no DESC LIMIT 1",
@@ -344,14 +364,20 @@ pub async fn current_commitment(db: &Db, room: Uuid) -> FairResult<Option<[u8; 3
     .fetch_optional(db.pool())
     .await?;
 
-    row.map(|row| bytes(row.try_get("commitment")?)).transpose()
+    row.map(|row| {
+        Ok((
+            bytes(row.try_get("commitment")?)?,
+            u8::try_from(row.try_get::<i32, _>("version")?)?,
+        ))
+    })
+    .transpose()
 }
 
 pub async fn audit(db: &Db, room: Uuid, hand_no: u64) -> FairResult<Option<StoredAudit>> {
     let Some(row) = query(
         "SELECT rooms.players, rooms.stack, rooms.small_blind, rooms.big_blind, \
          hands.id, hands.seed, hands.dealer, hands.starting_stacks, \
-         ceremony.server_secret, ceremony.commitment, ceremony.final_seed \
+         ceremony.server_secret, ceremony.commitment, ceremony.final_seed, ceremony.version \
          FROM rooms JOIN hands ON hands.room_id = rooms.id \
          JOIN hand_ceremonies ceremony \
            ON ceremony.room_id = hands.room_id AND ceremony.hand_no = hands.hand_no \
@@ -409,6 +435,7 @@ pub async fn audit(db: &Db, room: Uuid, hand_no: u64) -> FairResult<Option<Store
     }
 
     Ok(Some(StoredAudit {
+        protocol_version: u8::try_from(row.try_get::<i32, _>("version")?)?,
         config: RoomConfig {
             players,
             stack: u32::try_from(row.try_get::<i64, _>("stack")?)?,
@@ -445,7 +472,7 @@ async fn insert_ceremony(
     )
     .bind(room)
     .bind(i64::try_from(ceremony.hand_no)?)
-    .bind(i32::from(PROTOCOL_VERSION))
+    .bind(i32::from(ceremony.protocol_version))
     .bind(ceremony.server_secret.as_slice())
     .bind(ceremony.commitment.as_slice())
     .execute(&mut **tx)
@@ -577,6 +604,55 @@ fn bytes(value: Vec<u8>) -> FairResult<[u8; 32]> {
         .map_err(|_| io::Error::other("invalid deal transcript bytes").into())
 }
 
+pub async fn reserve_seat(
+    db: &Db,
+    room: Uuid,
+    seat: usize,
+    token: &[u8; 32],
+    rev: u64,
+    next_rev: u64,
+) -> FairResult<()> {
+    let mut tx = db.pool().begin().await?;
+    query("INSERT INTO seats (room_id, seat, token_hash) VALUES ($1, $2, $3)")
+        .bind(room)
+        .bind(i32::try_from(seat)?)
+        .bind(token.as_slice())
+        .execute(&mut *tx)
+        .await?;
+    update_rev(&mut tx, room, rev, next_rev).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn contribute(
+    db: &Db,
+    room: Uuid,
+    seat: usize,
+    share: [u8; 32],
+    rev: u64,
+    next_rev: u64,
+    ceremony: &Ceremony,
+    hand: Option<NewHand<'_>>,
+    next: Option<&Ceremony>,
+) -> FairResult<()> {
+    let mut tx = db.pool().begin().await?;
+    insert_share(&mut tx, room, ceremony.hand_no, seat, share).await?;
+    if let Some(hand) = hand {
+        let completed = ceremony_with_share(ceremony, seat, share)?;
+        finalize_ceremony(&mut tx, room, &completed, hand.seed).await?;
+        insert_hand(&mut tx, room, &hand).await?;
+        insert_ceremony(
+            &mut tx,
+            room,
+            next.ok_or_else(|| io::Error::other("next ceremony missing"))?,
+        )
+        .await?;
+    }
+    update_rev(&mut tx, room, rev, next_rev).await?;
+    tx.commit().await?;
+    Ok(())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -585,6 +661,7 @@ mod tests {
     fn ceremony_binds_context() {
         let room = Uuid::from_u128(1);
         let first = Ceremony {
+            protocol_version: 1,
             hand_no: 4,
             server_secret: [7; 32],
             commitment: commitment(*room.as_bytes(), 4, [7; 32]),
@@ -602,6 +679,7 @@ mod tests {
     fn bot_shares_bind_ceremony() {
         let room = Uuid::from_u128(1);
         let ceremony = Ceremony {
+            protocol_version: 1,
             hand_no: 4,
             server_secret: [7; 32],
             commitment: commitment(*room.as_bytes(), 4, [7; 32]),

@@ -34,7 +34,7 @@ impl RoomMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(super) struct RoomConfig {
     pub(super) players: usize,
     pub(super) stack: u32,
@@ -76,6 +76,7 @@ pub(super) struct Room {
     pub(super) seats: Vec<Seat>,
     pub(super) hand: Option<LiveHand>,
     pub(super) current_commitment: Option<[u8; 32]>,
+    pub(super) current_protocol: u8,
     pub(super) ceremony: Option<Ceremony>,
     pub(super) current_challenges: Challenges,
     pub(super) next_challenges: Challenges,
@@ -107,6 +108,7 @@ impl Room {
             }],
             hand: None,
             current_commitment: None,
+            current_protocol: 1,
             ceremony: None,
             current_challenges: vec![None; config.players],
             next_challenges: vec![None; config.players],
@@ -115,6 +117,7 @@ impl Room {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn new_fair(
         config: RoomConfig,
         mode: RoomMode,
@@ -130,12 +133,22 @@ impl Room {
         Ok(room)
     }
 
+    #[cfg(test)]
     pub(super) fn new_pending(
         config: RoomConfig,
         token_hash: TokenHash,
         ceremony: Ceremony,
     ) -> Result<Self, &'static str> {
-        let mut room = Self::new_with_mode(config, RoomMode::Single, token_hash)?;
+        Self::reserve(config, RoomMode::Single, token_hash, ceremony)
+    }
+
+    pub(super) fn reserve(
+        config: RoomConfig,
+        mode: RoomMode,
+        token_hash: TokenHash,
+        ceremony: Ceremony,
+    ) -> Result<Self, &'static str> {
+        let mut room = Self::new_with_mode(config, mode, token_hash)?;
 
         room.ceremony = Some(ceremony);
         Ok(room)
@@ -160,6 +173,7 @@ impl Room {
         self.changed(rev);
     }
 
+    #[cfg(test)]
     pub(super) fn commit_fair_join(
         &mut self,
         token_hash: TokenHash,
@@ -180,6 +194,7 @@ impl Room {
 
         if let Some(hand) = hand {
             self.current_commitment = Some(ceremony.commitment);
+            self.current_protocol = ceremony.protocol_version;
             self.hand = Some(hand);
             self.ceremony = next;
         }
@@ -209,6 +224,11 @@ impl Room {
         }
 
         self.current_commitment = Some(commitment);
+        self.current_protocol = self
+            .ceremony
+            .as_ref()
+            .expect("deal ceremony")
+            .protocol_version;
         self.hand = Some(hand);
         self.ceremony = Some(next);
         self.changed(rev);
@@ -343,6 +363,11 @@ impl Room {
 
             self.commit_ready(seat, Some(hand), pending.rev);
             self.current_commitment = Some(commitment);
+            self.current_protocol = self
+                .ceremony
+                .as_ref()
+                .expect("deal ceremony")
+                .protocol_version;
             self.ceremony = next;
         } else {
             self.commit_ready(seat, None, pending.rev);
@@ -580,7 +605,7 @@ impl Room {
         self.changed(action.rev);
     }
 
-    fn changed(&mut self, rev: u64) {
+    pub(super) fn changed(&mut self, rev: u64) {
         self.rev = rev;
         let _ = self.notify.send(self.rev);
     }
@@ -588,6 +613,7 @@ impl Room {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct Ceremony {
+    pub(super) protocol_version: u8,
     pub(super) hand_no: u64,
     pub(super) server_secret: [u8; 32],
     pub(super) commitment: [u8; 32],
