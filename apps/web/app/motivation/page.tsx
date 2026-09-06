@@ -81,7 +81,8 @@ export default function MotivationPage() {
           If the player misses the challenge, there is no completion proof and no proof points. If the
           player completes it, the browser generates a zero knowledge proof. Other players can verify
           that the challenge was selected from the fixed catalog and that the same hidden challenge was
-          completed without learning the challenge itself or the player&apos;s hole cards.
+          completed against server-committed facts without learning the challenge from the proof.
+          The separate public deal audit reveals all hole cards after settlement, including folded hands.
         </p>
         <p>
           Once the server accepts the completion proof, it publishes a receipt at
@@ -94,8 +95,9 @@ export default function MotivationPage() {
         <h2>Limitations</h2>
         <p>
           The server still sees the cards while a hand is being played, and it can abort before a hand
-          settles. The deal audit protects the choice of the completed deck; it is not a mental-poker
-          protocol that hides cards from the server.
+          settles. A deal audit compares the completed deck with the commitment and cards actually
+          recorded by a participant. A downloaded transcript alone only checks consistency.
+          This is not a mental-poker protocol that hides cards from the server.
         </p>
         <p>
           Challenge completion is currently proved against six hand facts committed by the server.

@@ -125,7 +125,8 @@ export default function RulesPage() {
           <p>
             Share that URL. Opening it downloads the receipt and verifies both UltraHonk proofs in the
             visitor&apos;s browser. The challenge and the player&apos;s hole cards are not included in the
-            receipt.
+            receipt. The separate deal audit reveals the full deck after settlement, including folded
+            and mucked hole cards.
           </p>
           <p>
             For an independent command-line check, choose <strong>Export JSON</strong> on the receipt
