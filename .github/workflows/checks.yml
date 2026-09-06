@@ -1,0 +1,70 @@
+name: checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      database:
+        description: run isolated postgres persistence checks
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.12.0
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm install --global npm@11.9.0
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run challenge:test && npm run deal:test && npm run receipt:test && npm run session:test
+      - run: npm run build
+
+  database:
+    if: github.event_name == 'workflow_dispatch' && inputs.database
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: noir_poker_test
+          POSTGRES_PASSWORD: local_test_only
+          POSTGRES_DB: noir_poker_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U noir_poker_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://noir_poker_test:local_test_only@127.0.0.1:5432/noir_poker_test
+      ALLOW_TEST_DATABASE_RESET: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.93.0
+      - run: bash scripts/validate-branch.sh db

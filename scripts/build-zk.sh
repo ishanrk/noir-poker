@@ -4,6 +4,15 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 nargo="${NARGO_PATH:-nargo}"
 bb="${BB_PATH:-bb}"
+mode="${1:-check}"
+
+case "$mode" in
+    check | update) ;;
+    *)
+        echo "usage $0 check or update" >&2
+        exit 1
+        ;;
+esac
 
 resolve_tool() {
     local tool="$1"
@@ -31,29 +40,29 @@ if test "$bb_version" != "5.2.0"; then
     exit 1
 fi
 
+tmp="$(mktemp -d)"
+trap 'rm -rf -- "$tmp"' EXIT
+
+mkdir -p "$tmp/circuits/challenge-v2"
+cp "$root/circuits/challenge-v2/Nargo.toml" "$tmp/circuits/challenge-v2/Nargo.toml"
+cp -R "$root/circuits/challenge-v2/src" "$tmp/circuits/challenge-v2/src"
+
 (
-    cd "$root/circuits/challenge-v2"
+    cd "$tmp/circuits/challenge-v2"
     "$nargo" compile --force
 )
 
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-
 "$bb" write_vk \
-    -b "$root/circuits/challenge-v2/target/challenge_v2.json" \
+    -b "$tmp/circuits/challenge-v2/target/challenge_v2.json" \
     -o "$tmp/vk" \
     -t noir-recursive
 
-mkdir -p "$root/apps/web/zk" "$root/apps/server/zk"
-cp "$tmp/vk/vk" "$root/apps/server/zk/challenge_v2.vk"
-
 # remove checkout path from debug metadata
 sed -E 's#"path":"[^"]*/circuits/challenge-v2/src/main.nr"#"path":"/repo/circuits/challenge-v2/src/main.nr"#g' \
-    "$root/circuits/challenge-v2/target/challenge_v2.json" > "$tmp/challenge_v2.json"
-cp "$tmp/challenge_v2.json" "$root/apps/web/zk/challenge_v2.json"
+    "$tmp/circuits/challenge-v2/target/challenge_v2.json" > "$tmp/challenge_v2.json"
 
-artifact_digest="$(sha256sum "$root/apps/web/zk/challenge_v2.json" | awk '{print $1}')"
-vk_digest="$(sha256sum "$root/apps/server/zk/challenge_v2.vk" | awk '{print $1}')"
+artifact_digest="$(sha256sum "$tmp/challenge_v2.json" | awk '{print $1}')"
+vk_digest="$(sha256sum "$tmp/vk/vk" | awk '{print $1}')"
 
 if test "$artifact_digest" != "1c89fb88ae0fb02558efa61de73260f871b323cba2a8a3d7c6423a302237bd5d"; then
     echo "challenge artifact digest mismatch" >&2
@@ -64,6 +73,25 @@ if test "$vk_digest" != "b435db9d240683e181d8bad47203bf85d57ca27982bc676cf2686b5
     echo "challenge verification key digest mismatch" >&2
     exit 1
 fi
+
+case "$mode" in
+    check)
+        cmp -s "$tmp/challenge_v2.json" "$root/apps/web/zk/challenge_v2.json" || {
+            echo "runtime artifact drift apps/web/zk/challenge_v2.json" >&2
+            exit 1
+        }
+        cmp -s "$tmp/vk/vk" "$root/apps/server/zk/challenge_v2.vk" || {
+            echo "runtime artifact drift apps/server/zk/challenge_v2.vk" >&2
+            exit 1
+        }
+        echo "challenge runtime and verification key match source"
+        ;;
+    update)
+        mkdir -p "$root/apps/web/zk" "$root/apps/server/zk"
+        install -m 0644 "$tmp/challenge_v2.json" "$root/apps/web/zk/challenge_v2.json"
+        install -m 0644 "$tmp/vk/vk" "$root/apps/server/zk/challenge_v2.vk"
+        ;;
+esac
 
 echo "$artifact_digest  $root/apps/web/zk/challenge_v2.json"
 echo "$vk_digest  $root/apps/server/zk/challenge_v2.vk"
