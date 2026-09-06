@@ -24,6 +24,8 @@ for (const value of [null, [], { type: "unknown" }, { ...snapshot, rev: Number.M
   { ...snapshot, view: { ...view, hand_no: -1 } }, { ...snapshot, view: { ...view, hole: [{ value: "11♣" }, { value: "A♠" }] } },
   { ...snapshot, view: { ...view, actions: { fold: true, check: false, raise: { min_to: 20, max_to: 10 } } } },
   { ...snapshot, view: { ...view, challenge: { ...view.challenge, commitment: undefined } } },
+  { ...snapshot, view: { ...view, deal: { ...deal, hand_no: 1 } } },
+  { ...snapshot, view: { ...view, board: [{ value: "10♣" }, { value: "2♣" }, { value: "3♣" }] } },
   { ...waiting, deal: { ...deal, config: { ...deal.config, players: 7 } } },
   { ...waiting, deal: { ...deal, commitment: "not a hash" } }, { ...waiting, rev: undefined }]) {
   assert.throws(() => parse(value));

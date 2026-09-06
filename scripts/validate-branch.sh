@@ -61,11 +61,11 @@ proof_checks() {
     echo "BB_PATH must point to bb 5.2.0" >&2
     return 1
   fi
-  cargo test -p server --locked real_proof_roundtrip -- --list | rg -q '(^|::)real_proof_roundtrip: test$' || {
-    echo "real_proof_roundtrip test unavailable" >&2
+  cargo test -p server --locked tests::real_claim -- --list | rg -q '^tests::real_claim: test$' || {
+    echo "real_claim fixture test unavailable" >&2
     return 1
   }
-  cargo test -p server --locked real_proof_roundtrip -- --ignored --test-threads=1 --nocapture
+  cargo test -p server --locked tests::real_claim -- --ignored --exact --test-threads=1 --nocapture
 }
 
 web_typegen() {
@@ -93,7 +93,7 @@ for mode in "$@"; do
       check diff-check git diff --check
       ;;
     db) check postgres-persistence database_checks ;;
-    proof) check real-proof proof_checks ;;
+    proof) check fixture-proof-claim-handler proof_checks ;;
     runtime) check challenge-runtime bash scripts/web-runtime.sh check ;;
     browser) check browser-smoke env SMOKE_DIR="$out/browser" npm --prefix apps/web run browser:smoke ;;
     aztec)

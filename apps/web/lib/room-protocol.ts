@@ -55,7 +55,7 @@ function claim(value: unknown): boolean {
 }
 
 function view(value: unknown): boolean {
-  if (!object(value) || !Array.isArray(value.players) || value.players.length < 2 || value.players.length > 6) return false;
+  if (!object(value) || !Array.isArray(value.players) || !Array.isArray(value.hole) || value.players.length < 2 || value.players.length > 6) return false;
   const players = value.players.length;
   const seat = (value: unknown) => integer(value) && value < players;
   const actions = (value: unknown) => object(value) && typeof value.fold === "boolean" && typeof value.check === "boolean" &&
@@ -71,7 +71,10 @@ function view(value: unknown): boolean {
     integer(value.pot) && ["preflop", "flop", "turn", "river"].includes(String(value.street)) &&
     typeof value.round_complete === "boolean" && typeof value.settled === "boolean" &&
     optional(value.actions, actions) && optional(value.ready, ready) && optional(value.result, result) &&
-    optional(value.challenge, challenge) && optional(value.claim, claim) && optional(value.deal, deal) && optional(value.next_deal, deal);
+    optional(value.challenge, challenge) && optional(value.claim, claim) && optional(value.deal, deal) && optional(value.next_deal, deal) &&
+    (!object(value.deal) || (value.deal.hand_no === value.hand_no && value.deal.dealer === value.dealer && object(value.deal.config) && value.deal.config.players === players)) &&
+    (!object(value.next_deal) || (value.next_deal.hand_no === value.hand_no + 1 && object(value.next_deal.config) && value.next_deal.config.players === players)) &&
+    new Set([...value.hole, ...value.board].map((card) => card.value)).size === value.hole.length + value.board.length;
 }
 
 export function parseServerMessage(text: string): ServerMessage {
@@ -83,7 +86,8 @@ export function parseServerMessage(text: string): ServerMessage {
   if (value.type === "snapshot") valid = integer(value.rev) && view(value.view);
   if (value.type === "waiting" || value.type === "waiting_fair") {
     valid = positive(value.players) && value.players >= 2 && value.players <= 6 && integer(value.joined) && value.joined <= value.players && mode(value.mode);
-    if (value.type === "waiting_fair") valid = valid && integer(value.rev) && deal(value.deal);
+    if (value.type === "waiting_fair") valid = valid && integer(value.rev) && deal(value.deal) &&
+      object(value.deal) && object(value.deal.config) && value.deal.config.players === value.players;
   }
   if (!valid) throw new Error("Invalid server message");
   return value as ServerMessage;
