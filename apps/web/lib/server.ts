@@ -61,6 +61,7 @@ export type DealAudit = {
   hand_no: number;
   players: number;
   dealer: number;
+  config?: Omit<RoomConfig, "mode">;
   commitment: string;
   server_secret: string;
   contributions: Array<{ seat: number; share: string }>;
@@ -79,11 +80,10 @@ function entropy() {
 }
 
 export async function createRoom(config: RoomConfig): Promise<SeatResponse> {
-  const body = config.mode === "single" ? config : { ...config, entropy: entropy() };
   const response = await fetch(`${serverUrl()}/rooms`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(config),
   });
 
   if (!response.ok) throw new Error(await responseError(response));
@@ -94,7 +94,7 @@ export async function joinRoom(room: string): Promise<SeatResponse> {
   const response = await fetch(`${serverUrl()}/rooms/${encodeURIComponent(room)}/join`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ entropy: entropy() }),
+    body: JSON.stringify({}),
   });
 
   if (!response.ok) throw new Error(await responseError(response));

@@ -1,6 +1,10 @@
 import Link from "next/link";
+import type { RoomConfig } from "@/lib/server";
 
 export type DealView = {
+  protocol_version: number;
+  config: Omit<RoomConfig, "mode">;
+  dealer: number;
   hand_no: number;
   commitment: string;
   contributors: number;

@@ -5,14 +5,16 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import { Card } from "@/components/card";
 import { SiteHeader } from "@/components/site-header";
-import { cardValue, verifyDealAudit, type DealVerification } from "@/lib/deal";
-import { loadDealAudit, type DealAudit } from "@/lib/server";
+import { cardValue, verifyDealAudit, type DealVerification, type ParticipantRecord } from "@/lib/deal";
+import { loadParticipant } from "@/lib/participant";
+import { loadDealAudit, loadSeat, type DealAudit } from "@/lib/server";
 
 type AuditState = "loading" | "verified" | "failed";
 
 export function DealAuditView({ room, hand }: { room: string; hand: number }) {
   const [audit, setAudit] = useState<DealAudit>();
   const [verification, setVerification] = useState<DealVerification>();
+  const [participant, setParticipant] = useState<ParticipantRecord>();
   const [state, setState] = useState<AuditState>("loading");
   const [error, setError] = useState<string>();
   const [replay, setReplay] = useState(0);
@@ -21,10 +23,13 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
     let live = true;
     void loadDealAudit(room, hand)
       .then((value) => {
-        const result = verifyDealAudit(value);
+        const seat = loadSeat(room);
+        const record = seat ? loadParticipant(room, hand, seat.seat) : undefined;
+        const result = verifyDealAudit(value, record, { room, hand_no: hand });
         if (!live) return;
         setAudit(value);
         setVerification(result);
+        setParticipant(record);
         setState("verified");
       })
       .catch((cause) => {
@@ -53,14 +58,29 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
     URL.revokeObjectURL(url);
   }
 
+  function exportParticipant() {
+    if (!participant) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(participant, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `noir-poker-participant-${room.slice(0, 8)}-${hand}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <main className="site-shell audit-page">
       <SiteHeader compact />
       <header className="audit-hero">
         <div>
-          <p className="eyebrow">Independent deal audit</p>
+          <p className="eyebrow">Deal transcript audit</p>
           <h1>{state === "verified" ? "All 52 positions reproduce." : "Rebuilding the deck."}</h1>
           <p>The browser recomputes the commitment, seed, shuffle and deal locally.</p>
+          {verification && <p>{verification.transcript} — {verification.participant}.</p>}
+          {verification?.participant === "participant evidence unavailable" && (
+            <p>No saved participant record is available here. This checks the downloaded transcript only; it does not establish what was recorded before play.</p>
+          )}
+          {audit?.protocol_version === 1 && <p>Legacy ceremony: contributions were not collected using the new participant ordering.</p>}
         </div>
         <div className="audit-deck" data-state={state} data-replay={replay}>
           {Array.from({ length: 9 }, (_, index) => <i key={index} style={{ "--card-index": index } as CSSProperties} />)}
@@ -73,10 +93,10 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
           ["01", "Open commitment", verification?.commitment],
           ["02", "Combine player entropy", verification?.seed],
           ["03", "Replay unbiased shuffle", verification?.shuffle],
-          ["04", "Map seats and board", verification?.seats],
+          ["04", "Match saved participant record", verification?.participant === "matches participant record"],
         ].map(([number, label, passed]) => (
           <div key={String(number)} data-state={passed ? "verified" : state}>
-            <span>{number}</span><strong>{label}</strong><i>{passed ? "pass" : state}</i>
+            <span>{number}</span><strong>{label}</strong><i>{passed ? "pass" : state === "verified" ? "unavailable" : state}</i>
           </div>
         ))}
       </section>
@@ -99,7 +119,7 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
 
           <section className="deal-replay" key={replay}>
             <header>
-              <div><p className="protocol-label">Deterministic deal map</p><h2>Verified deal</h2></div>
+              <div><p className="protocol-label">Deterministic deal map</p><h2>Reconstructed deal</h2></div>
               <button type="button" onClick={() => setReplay((value) => value + 1)}>Replay motion ↻</button>
             </header>
             <div className="audit-table">
@@ -121,7 +141,9 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
 
       <section className="receipt-actions">
         <button type="button" onClick={exportAudit} disabled={!audit}>Export JSON</button>
-        <details><summary>CLI verifier</summary><code>npm --prefix apps/web run deal:verify -- audit.json</code></details>
+        <button type="button" onClick={exportParticipant} disabled={!participant}>Export participant evidence</button>
+        <p>The public audit reveals the entire deck, including folded and mucked hole cards. Participant export identifies your seat, contribution and cards you saw. It contains no seat token or challenge secret; share it only intentionally.</p>
+        <details><summary>CLI verifier</summary><code>npm --prefix apps/web run deal:verify -- audit.json [participant.json]</code></details>
         <Link href="/protocol#deals">Read protocol →</Link>
       </section>
     </main>

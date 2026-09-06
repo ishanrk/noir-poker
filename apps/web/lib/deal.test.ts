@@ -9,7 +9,9 @@ import {
   encodeHex,
   shuffleDeck,
   verifyDealAudit,
+  type ParticipantRecord,
 } from "./deal.ts";
+import { contribution, loadParticipant, observeDeal, pinDeal } from "./participant.ts";
 
 const room = "00112233-4455-6677-8899-aabbccddeeff";
 const secret = Uint8Array.from({ length: 32 }, () => 0x11);
@@ -58,3 +60,63 @@ assert.throws(() =>
 );
 
 process.stdout.write("deal protocol vectors ok\n");
+
+const config = { players: 3, stack: 1000, small_blind: 5, big_blind: 10 };
+const current = { ...audit, protocol_version: 2, config };
+const layout = dealLayout(deck, 3, 1);
+const record: ParticipantRecord = {
+  version: 1, protocol_version: 2, room, hand_no: 7, config, dealer: 1,
+  commitment: current.commitment, seat: 0, contribution: encodeHex(shares[0]),
+  observed: { hole: layout.hole[0].map(cardValue), board: layout.board.slice(0, 3).map(cardValue) },
+};
+assert.equal(verifyDealAudit(current, record).participant, "matches participant record");
+assert.equal(verifyDealAudit(current).participant, "participant evidence unavailable");
+const replacementSecret = new Uint8Array(32).fill(0x77);
+const replacementSeed = dealSeed(room, 7n, replacementSecret, shares);
+const replacement = {
+  ...current, commitment: encodeHex(dealCommitment(room, 7n, replacementSecret)),
+  server_secret: encodeHex(replacementSecret), seed: encodeHex(replacementSeed),
+  deck: shuffleDeck(replacementSeed).map((card) => ({ value: cardValue(card) })),
+};
+assert.equal(verifyDealAudit(replacement).transcript, "transcript consistent");
+assert.throws(() => verifyDealAudit(replacement, record), /participant/);
+assert.throws(() => verifyDealAudit(current, { ...record, contribution: "ff".repeat(32) }), /participant/);
+assert.throws(() => verifyDealAudit(current, {
+  ...record, observed: { ...record.observed, hole: ["2♣", "3♣"] },
+}), /participant/);
+for (const bad of [
+  null, {}, { ...current, hand_no: Number.MAX_SAFE_INTEGER + 1 },
+  { ...current, hand_no: -1 }, { ...current, players: 1 }, { ...current, dealer: 3 },
+  { ...current, dealer: 0.5 }, { ...current, deck: current.deck.slice(1) },
+  { ...current, deck: [...current.deck, current.deck[0]] },
+  { ...current, deck: [{ value: "1♠" }, ...current.deck.slice(1)] },
+  { ...current, deck: [current.deck[1], ...current.deck.slice(1)] },
+  { ...current, contributions: null }, { ...current, config: {} },
+]) assert.throws(() => verifyDealAudit(bad));
+assert.throws(() => verifyDealAudit(current, record, { room, hand_no: 8 }), /identity/);
+assert.throws(() => verifyDealAudit(current, { ...record, token: "private" }), /invalid participant/);
+
+const data = new Map<string, string>();
+const store = {
+  getItem: (key: string) => data.get(key) ?? null,
+  setItem: (key: string, value: string) => { data.set(key, value); },
+};
+const deal = {
+  protocol_version: 2, config, dealer: 1, hand_no: 7, commitment: current.commitment,
+  contributors: 0, required: 3, mine: false, state: "collecting" as const, audit: false,
+};
+pinDeal(room, 0, deal, store);
+assert.equal(loadParticipant(room, 7, 0, store)?.contribution, undefined);
+const share = contribution(room, 0, deal, store);
+assert.equal(contribution(room, 0, deal, store), share);
+assert.throws(() => contribution(room, 0, { ...deal, commitment: "ff".repeat(32) }, store), /conflict/);
+const hole = record.observed.hole.map((value) => ({ value }));
+observeDeal(room, 0, deal, hole, [], store);
+observeDeal(room, 0, deal, hole, record.observed.board.map((value) => ({ value })), store);
+const saved = JSON.stringify([...data]);
+assert.throws(() => observeDeal(room, 0, deal, [{ value: "2♣" }, { value: "3♣" }], [], store), /conflict/);
+assert.equal(JSON.stringify([...data]), saved);
+assert.throws(() => contribution(room, 1, deal, {
+  ...store, setItem: () => { throw new Error("quota"); },
+}), /Cannot save/);
+process.stdout.write("participant evidence and storage checks ok\n");

@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import type { DealAudit } from "@/lib/server";
+import type { DealAudit, RoomConfig } from "./server.ts";
 
 const COMMIT_DOMAIN = new TextEncoder().encode("NPDEAL01");
 const SEED_DOMAIN = new TextEncoder().encode("NPSEED01");
@@ -18,7 +18,8 @@ export type DealVerification = {
   commitment: boolean;
   seed: boolean;
   shuffle: boolean;
-  seats: boolean;
+  transcript: "transcript consistent";
+  participant: "matches participant record" | "participant evidence unavailable";
   layout: DealLayout;
   deck: number[];
 };
@@ -58,7 +59,7 @@ export function shuffleDeck(seed: Uint8Array) {
 }
 
 export function dealLayout(deck: readonly number[], players: number, dealer: number): DealLayout {
-  if (deck.length !== 52 || players < 2 || players > 6 || dealer < 0 || dealer >= players) {
+  if (deck.length !== 52 || !integer(players, 2, 6) || !integer(dealer, 0, players - 1)) {
     throw new Error("invalid deal layout");
   }
 
@@ -84,17 +85,95 @@ export function cardValue(card: number) {
   return `${RANKS[card % 13]}${SUITS[Math.floor(card / 13)]}`;
 }
 
-export function verifyDealAudit(audit: DealAudit): DealVerification {
-  if (
-    audit.protocol_version !== 1 ||
-    audit.algorithm !== "sha256-counter-rejection-fisher-yates-v1" ||
-    !Number.isInteger(audit.hand_no) ||
-    !Number.isInteger(audit.players) ||
-    !Number.isInteger(audit.dealer) ||
-    audit.contributions.length !== audit.players ||
-    audit.contributions.some((entry, seat) => entry.seat !== seat)
-  ) {
+export type ParticipantRecord = {
+  version: 1;
+  protocol_version: number;
+  room: string;
+  hand_no: number;
+  config: Omit<RoomConfig, "mode">;
+  dealer: number;
+  commitment: string;
+  seat: number;
+  contribution?: string;
+  observed: { hole: string[]; board: string[] };
+};
+
+export function integer(value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
+}
+
+export function object(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function validConfig(value: unknown): value is ParticipantRecord["config"] {
+  return object(value) && integer(value.players, 2, 6) &&
+    integer(value.stack, 1, 0xffffffff) && integer(value.small_blind, 1, value.stack) &&
+    integer(value.big_blind, value.small_blind, value.stack) && value.stack * value.players <= 0xffffffff;
+}
+
+export function sameConfig(left: ParticipantRecord["config"], right: ParticipantRecord["config"]) {
+  return left.players === right.players && left.stack === right.stack &&
+    left.small_blind === right.small_blind && left.big_blind === right.big_blind;
+}
+
+function validHex(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+}
+
+function validRoom(value: unknown): value is string {
+  return typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+}
+
+export function validCard(value: unknown): value is string {
+  return typeof value === "string" && /^(?:[2-9]|10|J|Q|K|A)[♣♦♥♠]$/.test(value);
+}
+
+export function participantRecord(value: unknown): ParticipantRecord {
+  if (!object(value) || value.version !== 1 || ![1, 2].includes(Number(value.protocol_version)) ||
+    !integer(value.protocol_version, 1, 2) || !validRoom(value.room) || !integer(value.hand_no) ||
+    !validConfig(value.config) || !integer(value.dealer, 0, value.config.players - 1) ||
+    !integer(value.seat, 0, value.config.players - 1) || !validHex(value.commitment) ||
+    (value.contribution !== undefined && !validHex(value.contribution)) ||
+    !object(value.observed) || !Array.isArray(value.observed.hole) || !Array.isArray(value.observed.board) ||
+    ![0, 2].includes(value.observed.hole.length) || ![0, 3, 4, 5].includes(value.observed.board.length) ||
+    ![...value.observed.hole, ...value.observed.board].every(validCard) ||
+    new Set([...value.observed.hole, ...value.observed.board]).size !==
+      value.observed.hole.length + value.observed.board.length ||
+    Object.keys(value).some((key) => ![
+      "version", "protocol_version", "room", "hand_no", "config", "dealer",
+      "commitment", "seat", "contribution", "observed",
+    ].includes(key)) ||
+    Object.keys(value.config).some((key) => !["players", "stack", "small_blind", "big_blind"].includes(key)) ||
+    Object.keys(value.observed).some((key) => !["hole", "board"].includes(key))) {
+    throw new Error("invalid participant record");
+  }
+  return value as ParticipantRecord;
+}
+
+export function verifyDealAudit(
+  value: unknown,
+  evidence?: unknown,
+  expected?: { room: string; hand_no: number },
+): DealVerification {
+  if (!object(value) || !integer(value.protocol_version, 1, 2) ||
+    value.algorithm !== "sha256-counter-rejection-fisher-yates-v1" ||
+    !validRoom(value.room) || !integer(value.hand_no) ||
+    !integer(value.players, 2, 6) || !integer(value.dealer, 0, value.players - 1) ||
+    !validHex(value.commitment) || !validHex(value.server_secret) || !validHex(value.seed) ||
+    !Array.isArray(value.contributions) || value.contributions.length !== value.players ||
+    value.contributions.some((entry, seat) => !object(entry) || entry.seat !== seat || !validHex(entry.share)) ||
+    !Array.isArray(value.deck) || value.deck.length !== 52 ||
+    value.deck.some((entry) => !object(entry) || !validCard(entry.value)) ||
+    new Set(value.deck.map((entry) => entry.value)).size !== 52 ||
+    (value.protocol_version === 2 && (!validConfig(value.config) || value.config.players !== value.players)) ||
+    (value.config !== undefined && (!validConfig(value.config) || value.config.players !== value.players))) {
     throw new Error("invalid deal audit");
+  }
+  const audit = value as DealAudit;
+  if (expected && (audit.room !== expected.room || audit.hand_no !== expected.hand_no)) {
+    throw new Error("deal identity mismatch");
   }
 
   const secret = decodeHex(audit.server_secret);
@@ -102,18 +181,32 @@ export function verifyDealAudit(audit: DealAudit): DealVerification {
   const commitment = dealCommitment(audit.room, BigInt(audit.hand_no), secret);
   const seed = dealSeed(audit.room, BigInt(audit.hand_no), secret, shares);
   const deck = shuffleDeck(seed);
-  const serverDeck = audit.deck.map(({ value }) => value);
-  const expectedDeck = deck.map(cardValue);
   const layout = dealLayout(deck, audit.players, audit.dealer);
   const checks = {
     commitment: encodeHex(commitment) === audit.commitment,
     seed: encodeHex(seed) === audit.seed,
-    shuffle: expectedDeck.every((card, index) => card === serverDeck[index]),
-    seats: layout.hole.length === audit.players,
+    shuffle: deck.every((card, index) => cardValue(card) === audit.deck[index].value),
   };
 
   if (!Object.values(checks).every(Boolean)) throw new Error("deal audit mismatch");
-  return { ...checks, layout, deck };
+  if (evidence !== undefined) {
+    const record = participantRecord(evidence);
+    if (record.room !== audit.room || record.hand_no !== audit.hand_no ||
+      record.protocol_version !== audit.protocol_version || record.commitment !== audit.commitment ||
+      record.dealer !== audit.dealer || !audit.config || !sameConfig(record.config, audit.config) ||
+      !record.contribution || record.contribution !== audit.contributions[record.seat]?.share) {
+      throw new Error("participant commitment or contribution mismatch");
+    }
+    if (!record.observed.hole.every((card, index) => card === cardValue(layout.hole[record.seat][index])) ||
+      !record.observed.board.every((card, index) => card === cardValue(layout.board[index]))) {
+      throw new Error("participant observed cards mismatch");
+    }
+  }
+  return {
+    ...checks, layout, deck,
+    transcript: "transcript consistent",
+    participant: evidence === undefined ? "participant evidence unavailable" : "matches participant record",
+  };
 }
 
 export function encodeHex(bytes: Uint8Array) {
@@ -128,6 +221,7 @@ export function decodeHex(value: string) {
 }
 
 export function uuidBytes(value: string) {
+  if (!validRoom(value)) throw new Error("invalid room id");
   const hex = value.replaceAll("-", "");
 
   if (!/^[0-9a-f]{32}$/.test(hex)) throw new Error("invalid room id");
