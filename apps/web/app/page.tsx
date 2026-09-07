@@ -80,7 +80,6 @@ export default function Home() {
         </div>
       </section>
       <p className="audit-footnote">
-        The server knows the live cards and can abort. This is not trustless or mental poker.
         Challenge proofs check private challenges against server-committed facts, not the entire poker execution or the truth of those facts.
       </p>
     </main>

@@ -1,7 +1,7 @@
 @font-face {
   font-family: "Block Blueprint";
   src: url("/fonts/block-blueprint.ttf") format("truetype");
-  font-display: swap;
+  font-display: block;
 }
 
 :root {
@@ -68,6 +68,7 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .site-header nav { display: flex; gap: 26px; }
 .site-header nav a {
   color: #454a52;
+  font-family: var(--font-blockprint);
   font-size: 13px;
   text-decoration: none;
 }
@@ -398,6 +399,20 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .protocol-details dd { overflow-wrap: anywhere; margin: 0; font-family: "Courier New", monospace; font-size: 9px; }
 
 .proof-page, .audit-page, .protocol-page { padding-bottom: 90px; }
+.proof-page,
+.audit-page {
+  font-family: var(--font-blockprint);
+}
+.proof-page :is(.eyebrow, .protocol-label, .section-index, .section-index > p),
+.audit-page :is(.eyebrow, .protocol-label, .section-index, .section-index > p),
+.proof-page .receipt-hero h1,
+.audit-page .audit-hero h1,
+.proof-page .receipt-seal :is(span, strong, small),
+.proof-page .verification-timeline :is(span, p, strong),
+.audit-page .audit-steps :is(span, strong, i),
+.proof-page .statement-grid :is(span, strong) {
+  font-family: var(--font-blockprint);
+}
 .receipt-hero, .audit-hero, .protocol-hero { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 60px; align-items: center; width: min(100% - 40px, 1040px); margin: 0 auto; padding: 72px 0 78px; border-bottom: 4px solid var(--blue); }
 .receipt-hero h1, .audit-hero h1, .protocol-hero h1 { max-width: 770px; margin: 10px 0 20px; font-family: Georgia, "Times New Roman", serif; font-size: clamp(44px, 6vw, 68px); font-weight: 500; line-height: 1; letter-spacing: -0.04em; }
 .receipt-hero p:not(.eyebrow), .audit-hero p:not(.eyebrow), .protocol-hero > p { max-width: 700px; margin: 0; color: var(--muted); font-size: 17px; line-height: 1.65; }
@@ -424,6 +439,7 @@ code { font-family: "Courier New", ui-monospace, monospace; }
 .statement-grid article:nth-child(even) { padding-left: 26px; border-left: 1px solid var(--line); }
 .statement-grid span { color: var(--blue); font-family: "Courier New", monospace; font-size: 9px; text-transform: uppercase; }
 .statement-grid strong { font-size: 13px; line-height: 1.5; }
+.statement-grid code { font-size: inherit; }
 .receipt-actions { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; width: min(100% - 40px, 1040px); margin: 34px auto 0; }
 .receipt-actions a { color: var(--blue); font-size: 12px; font-weight: 700; }
 .receipt-actions details { position: relative; }

@@ -94,8 +94,7 @@ export default function MotivationPage() {
       <section className="motivation-plain-section motivation-limitations">
         <h2>Limitations</h2>
         <p>
-          The server still sees the cards while a hand is being played, and it can abort before a hand
-          settles. A deal audit compares the completed deck with the commitment and cards actually
+          A deal audit compares the completed deck with the commitment and cards actually
           recorded by a participant. A downloaded transcript alone only checks consistency.
           This is not a mental-poker protocol that hides cards from the server.
         </p>

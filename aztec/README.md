@@ -112,7 +112,7 @@ NEXT_PUBLIC_AZTEC_PLAY_CHIPS_ADDRESS
 
 Add both values to the Vercel environment for this branch and redeploy. The deployer account remains in the local `aztec-wallet` keystore.
 
-## Current trust boundary
+## Current integration status
 
 The private account, balance, faucet and table-entry transaction are real Aztec operations. The current browser verifies the recorded entry before opening the table.
 

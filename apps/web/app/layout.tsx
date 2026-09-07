@@ -25,6 +25,15 @@ type LayoutProps = Readonly<{ children: ReactNode }>;
 export default function RootLayout({ children }: LayoutProps) {
   return (
     <html lang="en">
+      <head>
+        <link
+          rel="preload"
+          href="/fonts/block-blueprint.ttf"
+          as="font"
+          type="font/ttf"
+          crossOrigin="anonymous"
+        />
+      </head>
       <body>
         {children}
         <SiteFooter />

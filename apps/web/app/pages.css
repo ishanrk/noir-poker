@@ -300,6 +300,7 @@
   align-items: center;
   padding: 0 12px;
   color: var(--ink);
+  font-family: var(--font-blockprint);
   font-size: 12px;
   font-weight: 700;
   transition: color 160ms ease, transform 160ms ease;

@@ -304,14 +304,12 @@ export default function ProtocolPage() {
           <summary><span>Limitations</span><strong>Properties the current implementation does not prove</strong></summary>
           <div className="protocol-detail-body">
             <p>
-              The server sees the cards while the hand is live and may abort before settlement. The
-              deal protocol makes the completed deck auditable; it is not mental poker.
+              The deal protocol makes the completed deck auditable; it is not mental poker.
             </p>
             <p>
               The completion circuit currently uses six server-committed hand facts. The receipt proves
               the private challenge against those committed facts, but it does not yet reconstruct the
-              facts independently from a public action transcript. The server knows the live cards
-              and can abort. Card-rank challenges such as
+              facts independently from a public action transcript. Card-rank challenges such as
               seven-deuce also need additional private hand facts before they can be claimable.
             </p>
             <p>
@@ -322,7 +320,7 @@ export default function ProtocolPage() {
             </p>
             <p>
               This is not trustless poker. Participants still trust the server-delivered browser code.
-              Server aborts, server knowledge, collusion and different commitments shown to different
+              Server knowledge, collusion and different commitments shown to different
               players are not eliminated; local records can expose conflicts only when compared.
             </p>
           </div>
