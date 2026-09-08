@@ -1,4 +1,4 @@
-# Noir Poker on Aztec
+Noir Poker on Aztec
 
 Aztec Poker uses private testnet credits named Tajaderos. Single Player and normal Multiplayer require no wallet and never use this contract.
 

@@ -231,16 +231,16 @@ git status --short > "$out/git-status.txt"
 git diff --stat > "$out/diff-stat.txt"
 
 {
-  printf '# branch validation\n\n'
+  printf 'branch validation\n\n'
   if test "$failed" -eq 0; then
-    printf '**PASS**\n\n'
+    printf 'PASS\n\n'
   else
-    printf '**FAIL**\n\n'
+    printf 'FAIL\n\n'
   fi
-  printf '| check | exit |\n|---|---:|\n'
+  printf 'check\texit\n'
   while IFS=$'\t' read -r name code; do
-    printf '| `%s` | %s |\n' "$name" "$code"
+    printf '%s\t%s\n' "$name" "$code"
   done < "$out/status.tsv"
-} > "$out/README.md"
+} > "$out/README.txt"
 
 exit "$failed"

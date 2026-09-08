@@ -1,4 +1,4 @@
-# Oracle ARM64 deployment
+Oracle ARM64 deployment
 
 This deploys the existing Noir Poker backend directly on one Oracle Ubuntu VM.
 

@@ -258,4 +258,4 @@ systemctl daemon-reload
 echo
 echo "Oracle dependencies and Noir Poker are built"
 echo "The Noir Poker service remains disabled"
-echo "Continue with deploy/oracle/README.md"
+echo "Continue with deploy/oracle/README.txt"
