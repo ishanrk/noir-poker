@@ -47,7 +47,7 @@ async function visit(route, name, expected) {
 }
 
 await visit("/", "home", [
-  "Poker where the server cannot cheat even if it wanted to.",
+  "I promise that a rigged server isn't why you blew through your stack",
   "Written in",
   "Create a game",
 ]);
@@ -157,7 +157,7 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
     const message = JSON.parse(frame.payload);
     return message.type === "challenge_draw" || message.type === "challenge_claim";
   }), false);
-  const ready = page.getByRole("button", { name: "Ready for Next Hand" });
+  const ready = page.getByRole("button", { name: /^(Ready for Next Hand|Next hand)$/i });
   await ready.waitFor({ state: "visible", timeout: 30_000 });
   await waitForEnabled(ready, "next hand unavailable");
   const afterReady = frames.length;
@@ -181,8 +181,8 @@ if (process.env.SINGLE_PLAYER_SMOKE === "1") {
     const message = JSON.parse(frame.payload);
     return message.type === "error" && message.message === "invalid deck key";
   }), false, "next hand deck key rejected");
-  await page.getByText("Deck Randomness Proof — Hand 1", { exact: true }).waitFor({ state: "visible", timeout: 120_000 });
-  assert.equal(await page.getByText("Deck Randomness Proof — Hand 1", { exact: true }).count(), 1);
+  await page.getByText("Completed hand 1", { exact: true }).waitFor({ state: "visible", timeout: 120_000 });
+  assert.equal(await page.getByText("Completed hand 1", { exact: true }).count(), 1);
   await visit("/", "home-after-single", ["Create a game"]);
 }
 

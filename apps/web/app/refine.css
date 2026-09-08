@@ -186,8 +186,7 @@
   padding: 76px 0;
   border-bottom: 1px solid var(--line-strong);
 }
-.motivation-story h2,
-.motivation-boundary h2 {
+.motivation-story h2 {
   margin: 9px 0 20px;
   font-family: Georgia, "Times New Roman", serif;
   font-size: clamp(31px, 4vw, 45px);
@@ -195,8 +194,7 @@
   line-height: 1.08;
   letter-spacing: -0.025em;
 }
-.motivation-story-copy > p:not(.motivation-kicker),
-.motivation-boundary p {
+.motivation-story-copy > p:not(.motivation-kicker) {
   color: #505760;
   font-size: 15px;
   line-height: 1.72;
@@ -261,13 +259,6 @@
 .motivation-story-challenge:hover .challenge-scene-secret { transform: translateX(-92%) rotate(-16deg); }
 .motivation-story-challenge:hover .challenge-scene-hole { transform: translateX(10%) rotate(14deg); opacity: 0.18; }
 .motivation-story-challenge:hover .challenge-scene-proof { transform: translateX(-22px); }
-
-.motivation-boundary {
-  width: min(100% - 40px, 840px);
-  margin: 0 auto;
-  padding: 58px 0 74px;
-}
-.motivation-boundary a { color: var(--blue); font-size: 13px; font-weight: 700; }
 
 .protocol-hero-new {
   width: min(100% - 40px, 1040px);

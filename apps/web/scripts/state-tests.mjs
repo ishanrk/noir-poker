@@ -3,6 +3,7 @@ import { ProofQueue } from '../lib/proof-queue.ts';
 import { DeckInbox } from '../lib/deck-inbox.ts';
 import { DeckWorkerClient } from '../lib/deck-worker-client.ts';
 import { prepareSounds, playPickupSound, playErrorSound, setMuted, subscribeMute } from '../lib/ui-audio.ts';
+import { compatibleActionWire, isLegacySeatRejection, postSeatWithCompatibility, withoutRequestKey } from '../lib/server-compat.ts';
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 let release;
 const order = [];
@@ -91,4 +92,38 @@ setMuted(false); playErrorSound();
 assert.equal(muteUpdates, 2); unsubscribe();
 assert.ok(plays.at(-1).src.includes('error'));
 dispose(); assert.ok(voices.every(voice => voice.src === ''));
-console.log('State, priority, stale worker and audio scheduling checks passed. Audio was mocked.');
+
+assert.equal(isLegacySeatRejection(422, "unknown field `request_key`"), true);
+assert.equal(isLegacySeatRejection(422, "invalid request"), false);
+assert.equal(isLegacySeatRejection(500, "unknown field `request_key`"), false);
+assert.deepEqual(withoutRequestKey({ players: 2, request_key: 'private-id' }), { players: 2 });
+const postedBodies = [];
+const compatiblePost = await postSeatWithCompatibility(async body => {
+  postedBodies.push(body);
+  return postedBodies.length === 1
+    ? new Response("request_key: unknown field `request_key`", { status: 422 })
+    : Response.json({ room: '12345678', seat: 0, token: 'token' }, { status: 201 });
+}, { players: 2, request_key: 'private-id' });
+assert.equal(compatiblePost.response.status, 201);
+assert.deepEqual(postedBodies, [
+  { players: 2, request_key: 'private-id' },
+  { players: 2 },
+]);
+let unrelatedPosts = 0;
+const unrelated = await postSeatWithCompatibility(async () => {
+  unrelatedPosts += 1;
+  return new Response('invalid request', { status: 422 });
+}, { players: 2, request_key: 'private-id' });
+assert.equal(unrelatedPosts, 1);
+assert.equal(unrelated.message, 'invalid request');
+const legacyView = { hand_no: 3, last_action: { seq: 4 } };
+const currentView = { ...legacyView, next_action_seq: 5 };
+assert.deepEqual(compatibleActionWire({ type: 'call' }, legacyView), { type: 'call' });
+assert.deepEqual(compatibleActionWire({ type: 'ready', entropy: 'fresh' }, legacyView), { type: 'ready', entropy: 'fresh' });
+assert.deepEqual(compatibleActionWire({ type: 'call' }, currentView), {
+  type: 'wager', hand_no: 3, seq: 5, action: { type: 'call' },
+});
+assert.deepEqual(compatibleActionWire({ type: 'ready', entropy: 'fresh' }, currentView), {
+  type: 'ready_hand', hand_no: 3, entropy: 'fresh',
+});
+console.log('State, priority, stale worker, audio scheduling and server compatibility checks passed. Audio was mocked.');

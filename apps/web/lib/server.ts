@@ -1,3 +1,5 @@
+import { postSeatWithCompatibility } from "@/lib/server-compat";
+
 const CONFIGURED_SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL?.trim().replace(/\/+$/, "");
 const LOCAL_SERVER_URL = "http://localhost:3001";
 
@@ -163,16 +165,20 @@ async function requestSeat(kind: string, path: string, intent: unknown, makeBody
   if (pending.identity !== identity) throw new Error("Your previous room request has not been confirmed. Restore those settings and retry to recover it.");
   // Keep the exact entropy and private request credential after ambiguous failure.
   sessionStorage.setItem(key, JSON.stringify(pending));
-  const response = await fetch(`${serverUrl()}${path}`, {
+  const post = (body: object) => fetch(`${serverUrl()}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(pending.body),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(15000),
   });
+
+  const attempted = await postSeatWithCompatibility(post, pending.body);
+  const response = attempted.response;
   if (!response.ok) {
     if (response.status >= 400 && response.status < 500) sessionStorage.removeItem(key);
-    throw new Error(await responseError(response));
+    throw new Error(attempted.message ?? await responseError(response));
   }
+
   const seat = await response.json() as SeatResponse;
   saveSeat(seat.room, seat);
   sessionStorage.removeItem(key);

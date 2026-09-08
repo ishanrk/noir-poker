@@ -6,7 +6,10 @@ const base = process.env.BASE_URL ?? 'http://127.0.0.1:3140';
 if (!['127.0.0.1', 'localhost'].includes(new URL(base).hostname)) throw new Error('Local tests only');
 const output = process.env.POLISH_OUT ?? '../../.local/polish/baseline';
 await mkdir(output, { recursive: true });
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({
+  headless: true,
+  args: process.env.ALLOW_CROSS_ORIGIN_TEST === '1' ? ['--disable-web-security'] : [],
+});
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
   const samples = [];
@@ -67,7 +70,14 @@ try {
     await page.context().setOffline(true);
     await page.waitForTimeout(1000);
     await page.screenshot({ path: `${output}/offline.png`, fullPage: true });
-    await writeFile(`${output}/samples.json`, JSON.stringify({ conditions: { browser: browser.version(), node: process.version, viewport: '1440x1000', build: 'production', realCrypto: true }, samples }, null, 2));
+    await writeFile(`${output}/samples.json`, JSON.stringify({ conditions: {
+      browser: browser.version(),
+      node: process.version,
+      viewport: '1440x1000',
+      build: process.env.BUILD_MODE ?? 'local',
+      server: process.env.SERVER_CONDITION ?? 'local',
+      realCrypto: true,
+    }, samples }, null, 2));
   }
   function returnHome() { assert.ok(true); }
 } finally {

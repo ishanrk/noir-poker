@@ -18,6 +18,7 @@ import "./story.css";
 import "./proof-guides.css";
 import "./aztec.css";
 import "./table-polish.css";
+import "./motivation-polish.css";
 
 export const metadata: Metadata = {
   title: "Noir Poker",

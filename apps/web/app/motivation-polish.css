@@ -1,0 +1,293 @@
+.story-motivation .brief-stack {
+  gap: 24px;
+  padding: 44px 0 84px;
+}
+
+.story-motivation .motivation-panel {
+  display: block;
+  padding: clamp(30px, 4.5vw, 52px);
+  border: 0;
+  clip-path: polygon(13px 0, 100% 0, 100% calc(100% - 13px), calc(100% - 13px) 100%, 0 100%, 0 13px);
+}
+
+.story-motivation .motivation-panel[data-tone="cobalt"] {
+  color: white;
+  background: var(--blue);
+}
+
+.story-motivation .motivation-panel[data-tone="lime"] {
+  color: var(--ink);
+  background: var(--lime);
+}
+
+.story-motivation .motivation-panel > .motivation-panel-number {
+  display: block;
+  margin: 0 0 18px;
+  color: inherit;
+  font-size: 13px;
+  opacity: 0.72;
+}
+
+.story-motivation .motivation-panel h2 {
+  max-width: 820px;
+  margin: 0;
+  color: inherit;
+  font-size: clamp(30px, 4vw, 46px);
+  line-height: 1.08;
+}
+
+.story-motivation .motivation-panel-intro {
+  margin: 13px 0 30px;
+  color: inherit;
+  font-size: 15px;
+  line-height: 1.6;
+  opacity: 0.78;
+}
+
+.story-motivation .motivation-points {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  list-style: none;
+}
+
+.story-motivation .motivation-cases {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.story-motivation .motivation-point {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 340px;
+  margin: 0;
+  padding: 24px;
+  flex-direction: column;
+  border: 1px solid currentColor;
+  background: rgb(255 255 255 / 8%);
+  list-style: none;
+  overflow: hidden;
+  transition: transform 180ms ease, background 180ms ease, box-shadow 180ms ease;
+}
+
+.story-motivation .motivation-panel[data-tone="lime"] .motivation-point {
+  background: rgb(255 255 255 / 38%);
+}
+
+.story-motivation .motivation-point::before {
+  display: none;
+}
+
+.story-motivation .motivation-point:hover,
+.story-motivation .motivation-point:focus-visible {
+  z-index: 1;
+  transform: translateY(-6px);
+  background: rgb(255 255 255 / 16%);
+  box-shadow: 8px 8px 0 var(--lime);
+  outline: none;
+}
+
+.story-motivation .motivation-panel[data-tone="lime"] .motivation-point:hover,
+.story-motivation .motivation-panel[data-tone="lime"] .motivation-point:focus-visible {
+  background: rgb(255 255 255 / 68%);
+  box-shadow: 8px 8px 0 var(--blue);
+}
+
+.story-motivation .motivation-point-copy strong {
+  display: block;
+  color: inherit;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.story-motivation .motivation-point-copy p {
+  margin: 12px 0 0;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1.65;
+  opacity: 0.84;
+}
+
+.story-motivation .motivation-scene {
+  position: relative;
+  height: 116px;
+  margin-top: auto;
+  padding-top: 22px;
+  opacity: 0.58;
+  transition: opacity 180ms ease;
+}
+
+.story-motivation .motivation-point:hover .motivation-scene,
+.story-motivation .motivation-point:focus-visible .motivation-scene {
+  opacity: 1;
+}
+
+.story-motivation .scene-card {
+  position: absolute;
+  bottom: 0;
+  display: grid;
+  width: 58px;
+  height: 78px;
+  place-items: center;
+  border: 2px solid currentColor;
+  font-size: 18px;
+  transition: opacity 220ms ease, transform 260ms ease;
+}
+
+.story-motivation .scene-card-back { left: 10px; color: var(--blue); background: var(--lime); transform: rotate(-7deg); }
+.story-motivation .scene-card-face { left: 30px; color: var(--blue); background: white; opacity: 0; transform: translateX(-10px) rotate(5deg); }
+.story-motivation .motivation-point:hover .scene-card-back,
+.story-motivation .motivation-point:focus-visible .scene-card-back { opacity: 0.18; transform: translateX(-18px) rotate(-14deg); }
+.story-motivation .motivation-point:hover .scene-card-face,
+.story-motivation .motivation-point:focus-visible .scene-card-face { opacity: 1; transform: translateX(28px) rotate(10deg); }
+
+.story-motivation .scene-label,
+.story-motivation .scene-warning,
+.story-motivation .scene-shortfall,
+.story-motivation .scene-result,
+.story-motivation .scene-proof-seal {
+  position: absolute;
+  right: 0;
+  bottom: 7px;
+  padding-bottom: 5px;
+  border-bottom: 3px solid currentColor;
+  font-size: 11px;
+  transition: transform 240ms ease, opacity 180ms ease;
+}
+
+.story-motivation .motivation-point:hover :is(.scene-label, .scene-warning, .scene-shortfall, .scene-result, .scene-proof-seal),
+.story-motivation .motivation-point:focus-visible :is(.scene-label, .scene-warning, .scene-shortfall, .scene-result, .scene-proof-seal) {
+  transform: translateX(-8px);
+}
+
+.story-motivation .scene-mini-card {
+  position: absolute;
+  bottom: 4px;
+  display: grid;
+  width: 38px;
+  height: 54px;
+  place-items: center;
+  border: 1px solid currentColor;
+  background: rgb(255 255 255 / 10%);
+  transition: transform 300ms ease;
+}
+.story-motivation .scene-mini-card:nth-child(1) { left: 0; }
+.story-motivation .scene-mini-card:nth-child(2) { left: 31px; }
+.story-motivation .scene-mini-card:nth-child(3) { left: 62px; }
+.story-motivation .scene-mini-card:nth-child(4) { left: 93px; }
+.story-motivation .motivation-point:hover .scene-mini-card:nth-child(1),
+.story-motivation .motivation-point:focus-visible .scene-mini-card:nth-child(1) { transform: translateX(93px); }
+.story-motivation .motivation-point:hover .scene-mini-card:nth-child(4),
+.story-motivation .motivation-point:focus-visible .scene-mini-card:nth-child(4) { transform: translateX(-93px); }
+
+.story-motivation .scene-record {
+  position: absolute;
+  bottom: 0;
+  width: 48%;
+  padding: 12px;
+  border-top: 3px solid currentColor;
+  background: rgb(255 255 255 / 9%);
+  font-size: 10px;
+  line-height: 1.7;
+  transition: transform 240ms ease, opacity 180ms ease;
+}
+.story-motivation .scene-record-a { left: 0; }
+.story-motivation .scene-record-b { right: 0; opacity: 0.28; }
+.story-motivation .motivation-point:hover .scene-record-a,
+.story-motivation .motivation-point:focus-visible .scene-record-a { transform: translateX(-6px); }
+.story-motivation .motivation-point:hover .scene-record-b,
+.story-motivation .motivation-point:focus-visible .scene-record-b { transform: translateX(6px); opacity: 1; }
+
+.story-motivation .scene-site,
+.story-motivation .scene-eye,
+.story-motivation .scene-balance,
+.story-motivation .scene-bank,
+.story-motivation .scene-hand,
+.story-motivation .scene-deck-count,
+.story-motivation .scene-proof-arrow,
+.story-motivation .scene-transcript,
+.story-motivation .scene-checkmark {
+  position: relative;
+  display: inline-grid;
+  min-height: 42px;
+  margin: 4px 7px 0 0;
+  padding: 8px 10px;
+  place-items: center;
+  border: 1px solid currentColor;
+  font-size: 11px;
+  transition: transform 260ms ease, opacity 180ms ease;
+}
+.story-motivation .scene-site { width: 54px; font-size: 20px; }
+.story-motivation .scene-eye { opacity: 0; transform: translateX(-20px); }
+.story-motivation .motivation-point:hover .scene-eye,
+.story-motivation .motivation-point:focus-visible .scene-eye { opacity: 1; transform: translateX(0); }
+.story-motivation .scene-warning { color: var(--blue); }
+.story-motivation .scene-balance { width: 62%; justify-content: start; background: rgb(255 255 255 / 32%); }
+.story-motivation .scene-bank { width: 22%; overflow: hidden; white-space: nowrap; }
+.story-motivation .scene-shortfall { color: var(--blue); opacity: 0; }
+.story-motivation .motivation-point:hover .scene-shortfall,
+.story-motivation .motivation-point:focus-visible .scene-shortfall { opacity: 1; }
+.story-motivation .scene-hand { opacity: 0.5; }
+.story-motivation .motivation-point:hover .scene-hand,
+.story-motivation .motivation-point:focus-visible .scene-hand { transform: translateY(-7px); opacity: 1; }
+.story-motivation .scene-result { color: var(--lime); }
+.story-motivation .scene-deck-count { width: 52px; height: 62px; font-size: 20px; }
+.story-motivation .scene-proof-arrow { border: 0; font-size: 24px; }
+.story-motivation .scene-proof-seal { color: var(--lime); opacity: 0; }
+.story-motivation .motivation-point:hover .scene-proof-seal,
+.story-motivation .motivation-point:focus-visible .scene-proof-seal { opacity: 1; }
+.story-motivation .scene-transcript { justify-items: start; line-height: 1.6; }
+.story-motivation .scene-checkmark { color: var(--lime); border: 0; font-size: 38px; opacity: 0; transform: scale(0.6); }
+.story-motivation .motivation-point:hover .scene-checkmark,
+.story-motivation .motivation-point:focus-visible .scene-checkmark { opacity: 1; transform: scale(1); }
+
+.story-motivation .motivation-honest-note {
+  margin: 28px 0 0;
+  padding: 18px 20px;
+  border-left: 4px solid var(--lime);
+  color: white;
+  background: rgb(0 0 0 / 14%);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.story-motivation .motivation-panel footer {
+  display: flex;
+  grid-column: auto;
+  gap: 12px 24px;
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid currentColor;
+}
+
+.story-motivation .motivation-panel footer a {
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.story-motivation .motivation-panel[data-tone="cobalt"] footer a { color: var(--lime); }
+.story-motivation .motivation-panel[data-tone="lime"] footer a { color: var(--blue); }
+
+@media (max-width: 820px) {
+  .story-motivation .motivation-points,
+  .story-motivation .motivation-cases { grid-template-columns: 1fr; }
+  .story-motivation .motivation-point { min-height: 280px; }
+}
+
+@media (max-width: 700px) {
+  .story-motivation .brief-stack { width: calc(100% - 24px); padding-top: 24px; }
+  .story-motivation .motivation-panel { padding: 28px 20px; }
+  .story-motivation .motivation-point { min-height: 260px; padding: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .story-motivation .motivation-point,
+  .story-motivation .motivation-scene,
+  .story-motivation .motivation-scene * { transition: none !important; }
+}

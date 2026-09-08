@@ -1,10 +1,18 @@
 # Local polish and reliability handoff
 
+## Oracle rollout compatibility follow-up
+
+The public frontend and Oracle API were checked independently after the presentation release. The frontend exposed source identity `ff604271258f592e0c2c0acdaaa8ad16a83cd7db`, while the API had no `/build` endpoint and rejected the newer optional `request_key` field before creating a room. That establishes a rollout mismatch by observed behavior. It does not establish the API server's exact Git commit.
+
+The client now retries only that exact pre-effect parser rejection without the new field. After joining, a snapshot without `next_action_seq` selects the legacy direct wager and next hand messages. New servers retain request identities, sequenced wagers, and hand-bound readiness. Unit tests cover both formats and the exact fallback condition. A real browser using this client against the public Oracle API completed three consecutive bot hands with real shuffle proofs. A guarded post-release script also covers a one hand single player game, a one hand game in two independent browser contexts, completed receipt verification, and the responsive Motivation presentation.
+
+The Motivation page again uses the original cobalt and lime visual direction. Its shorter examples show how a server can expose cards, arrange a deck, or present inconsistent records, followed by historical cases and the matching Noir Poker protections. Each example has a focusable scene with the same reveal available to keyboard users. The limitations remain explicit: completed hands reveal folded cards, and shuffle proofs do not establish custody, uptime, or a single global history.
+
 ## Source and scope
 
-Prepared locally on repair/polish-reliability in the isolated noir-poker-polish worktree, based on oracle-deploy at `5c3c9c49687b10ed0cf61bc32c95aed5736b90d4`. The original noir-poker worktree on repair/participant-integrity at 58aa155 was preserved. No applicable AGENTS.md was found. The repair is an uncommitted, unstaged working-tree diff plus new public files. Nothing was pushed, merged, published, deployed, or sent through a wallet.
+The original repair was prepared on repair/polish-reliability in the isolated noir-poker-polish worktree, based on oracle-deploy at `5c3c9c49687b10ed0cf61bc32c95aed5736b90d4`. The original noir-poker worktree on repair/participant-integrity at 58aa155 was preserved. No applicable AGENTS.md was found. The owner later authorized the reviewed changes to move onto `oracle-deploy`, which is now the working and frontend release branch. No backend service or live infrastructure was changed, and no wallet transaction was sent.
 
-Production identity remains unverified. Similar navigation and encrypted shuffle behavior justified the local source choice but do not prove the public site runs this commit. Local frontend `/api/build` and server `/build` identify the base source, dirty state, protocol, bb version, and four compatible artifact hashes. A reviewed clean release must supply its own exact source identity.
+The deployed frontend identity can be checked through `/api/build`. The Oracle API's exact source remains unverified because that deployment has no `/build` endpoint. Its strict request parser and legacy snapshots establish the wire generation by observed behavior, not its Git commit. Local frontend `/api/build` and server `/build` identify source, dirty state, protocol, bb version, and four compatible artifact hashes. A coordinated backend release must expose and match that identity before the compatibility bridge is removed.
 
 All four generated artifact and key hashes matched the pinned source. No circuit statement, private randomness rule, public-input binding, or verification key was changed. Optional challenge proving remains background work.
 

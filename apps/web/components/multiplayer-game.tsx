@@ -9,6 +9,7 @@ import type { DealView } from "@/components/deal-integrity";
 import { Preparation } from "@/components/preparation";
 import { DeckInbox } from "@/lib/deck-inbox";
 import { timing } from "@/lib/diagnostics";
+import { compatibleActionWire } from "@/lib/server-compat";
 import { playPickupSound, playErrorSound, SoundToggle } from "@/components/ui-sounds";
 import { PlayProofs } from "@/components/play-proofs";
 import { PrivateChallengeBar } from "@/components/private-challenge";
@@ -1029,9 +1030,7 @@ export function MultiplayerGame({
     }
     setError(undefined);
     try {
-      const expected = actionWait.current;
-      const wire = poker && expected ? { type: "wager", hand_no: expected.hand, seq: expected.seq, action }
-        : action.type === "ready" ? { ...action, type: "ready_hand", hand_no: viewRef.current?.hand_no } : action;
+      const wire = compatibleActionWire(action, viewRef.current);
       current.send(JSON.stringify(wire));
     } catch {
       actionWait.current = undefined;
