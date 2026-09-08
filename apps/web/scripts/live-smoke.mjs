@@ -177,7 +177,7 @@ async function presentation() {
     const panels = page.locator('.motivation-panel');
     assert.equal(await panels.count(), 3);
     assert.match(await panels.nth(0).evaluate(node => getComputedStyle(node).backgroundColor), /31, 11, 209/);
-    assert.match(await panels.nth(1).evaluate(node => getComputedStyle(node).backgroundColor), /193, 255, 36/);
+    assert.match(await panels.nth(1).evaluate(node => getComputedStyle(node).backgroundColor), /199, 255, 50/);
     const reveal = page.locator('.scene-card-face');
     const before = Number(await reveal.evaluate(node => getComputedStyle(node).opacity));
     await page.locator('.motivation-point').first().focus();
