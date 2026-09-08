@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { type CSSProperties } from "react";
+import Link from "next/link";
+import { stageMessage } from "./preparation";
 
 import { Card } from "@/components/card";
 import {
@@ -83,6 +85,7 @@ export type View = {
   settled: boolean;
   game_over?: { winners: number[]; chips: number };
   last_action?: ActionNoticeView;
+  next_action_seq?: number;
   action_notices?: ActionNoticeView[];
   actions: ActionView | undefined;
   result?: HandResultView;
@@ -116,6 +119,8 @@ type TableProps = {
   room: string;
   error?: string;
   disabled?: boolean;
+  submitting?: boolean;
+  connected?: boolean;
   notice?: TableNoticeView;
   stage?: string;
   finish?: boolean;
@@ -144,74 +149,10 @@ const challengeScore = (score: number) => score % 10 === 0
   ? String(score / 10)
   : (score / 10).toFixed(1);
 
-function deckStatus(stage: string): [string, string] {
-  if (stage.includes("shuffle") || stage.includes("proof") || stage.includes("verifying")) {
-    return ["Proving deck randomness", "Checking the encrypted shuffle proof"];
-  }
-  if (stage.includes("key") || stage.includes("collecting")) {
-    return ["Building the encrypted deck", ""];
-  }
-  if (stage.includes("opening") || stage.includes("decrypting") || stage.includes("cards")) {
-    return ["Opening the dealt cards", "Decrypting only the cards now in play"];
-  }
-  return ["Preparing the next hand", stage];
-}
-
-type ActionCopyState = { status: string; message: string; crypto: boolean };
-
-function ActionCopy({ status, message, stage }: {
-  status: string;
-  message: string;
-  stage?: string;
-}) {
-  const initial = { status, message, crypto: Boolean(stage) };
-  const shownRef = useRef<ActionCopyState>(initial);
-  const [shown, setShown] = useState(initial);
-  const [prior, setPrior] = useState<ActionCopyState>();
-  const [moving, setMoving] = useState(false);
-
-  useEffect(() => {
-    const next = { status, message, crypto: Boolean(stage) };
-    const current = shownRef.current;
-    if (
-      current.status === next.status &&
-      current.message === next.message &&
-      current.crypto === next.crypto
-    ) return;
-
-    shownRef.current = next;
-    setPrior(current);
-    setShown(next);
-    setMoving(false);
-    const frame = window.requestAnimationFrame(() => setMoving(true));
-    const timer = window.setTimeout(() => setPrior(undefined), 420);
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(timer);
-    };
-  }, [message, stage, status]);
-
-  return (
-    <div
-      className="action-copy"
-      data-stage={shown.crypto ? "crypto" : undefined}
-      data-moving={moving}
-      data-swap={prior ? "true" : "false"}
-      aria-live="polite"
-    >
-      {prior && (
-        <div className="action-copy-layer action-copy-prior" aria-hidden="true">
-          <span>{prior.status}</span>
-          {prior.message && <strong>{prior.message}</strong>}
-        </div>
-      )}
-      <div className="action-copy-layer action-copy-current">
-        <span>{shown.status}</span>
-        {shown.message && <strong>{shown.message}</strong>}
-      </div>
-    </div>
-  );
+function ActionCopy({ status, message, stage }: { status: string; message: string; stage?: string }) {
+  return <div className="action-copy" data-stage={stage ? "crypto" : undefined} role="status">
+    <div className="action-copy-layer action-copy-current"><span>{status}</span><strong>{message}</strong></div>
+  </div>;
 }
 const playerName = (
   player: number,
@@ -316,6 +257,8 @@ export function Table({
   room,
   error,
   disabled = false,
+  submitting = false,
+  connected = true,
   notice,
   stage,
   finish = false,
@@ -374,7 +317,7 @@ export function Table({
 
   if (view.settled) [status, message] = ["Hand complete", "Pot settled"];
   if (result?.kind === "showdown") status = "Showdown";
-  if (stage) [status, message] = deckStatus(stage);
+  if (stage) [status, message] = ["Preparing the hand", stageMessage(stage)];
   if (notice) {
     const mine = notice.player === viewer;
     const name = playerName(notice.player, viewer, view.mode, view.players);
@@ -390,14 +333,18 @@ export function Table({
           : `${notice.action}${mine ? "" : "s"}`;
     }
 
-    [status, message] = [noticeName, noticeAction];
+    // The separate notice describes history. Action copy describes the current decision.
   }
+
+  if (submitting && !stage) [status, message] = ["Sending your action", "Waiting for server acceptance"];
+  if (!connected) [status, message] = ["Connection interrupted", "Reconnect to recover the current table"];
 
   return (
     <section
       className={`table-shell${finish ? " table-game-over" : ""}${bonusFocus ? " table-bonus-focus" : ""}`}
       data-room-mode={view.mode}
-      aria-label="Six-max poker table"
+      data-player-count={players.length}
+      aria-label={`${players.length} player poker table`}
     >
       {view.mode !== "single" && (
         <aside
@@ -427,6 +374,7 @@ export function Table({
         </aside>
       )}
       <div className="table-hand-count">Hand {view.hand_no + 1} of {view.total_hands}</div>
+      {view.deal?.audit && <Link className="text-action" href={`/audit/${room}/${view.hand_no}`}>Check this deal</Link>}
       {view.hand_no > 0 && <PreviousDealIntegrity room={room} hand={view.hand_no - 1} />}
 
       {PROOF_UI && (
@@ -492,7 +440,7 @@ export function Table({
           </div>
         </div>
 
-        {POSITIONS.map((position) => {
+        {POSITIONS.slice(0, players.length).map((position) => {
           const player = players[position];
           const revealed = result?.revealed[position];
           const out = !!player && player.folded && player.stack === 0;
@@ -510,13 +458,13 @@ export function Table({
           return (
             <Seat
               key={position}
-              position={position}
+              position={players.length === 2 && position !== viewer ? 3 : position === viewer && players.length === 2 ? 0 : position}
               name={playerName(position, viewer, view.mode, view.players)}
               stack={player?.stack}
               bet={player?.bet}
               cards={player ? cards : undefined}
               awards={total === undefined ? undefined : [total]}
-              acting={view.turn === position}
+              acting={!stage && !submitting && connected && view.turn === position}
               dealer={view.dealer === position}
               out={out}
               empty={!player}
@@ -572,7 +520,7 @@ export function Table({
           <div className="raise-control" data-disabled={disabled || !range}>
             <div className="raise-heading">
               <span>Raise</span>
-              <output>{range ? raiseTo.toLocaleString("en-US") : "—"}</output>
+              <output>{range ? raiseTo.toLocaleString("en-US") : "…"}</output>
             </div>
             <input
               aria-label="Raise target"
@@ -613,8 +561,8 @@ export function Table({
                 {view.ready.complete
                   ? "Table Complete"
                   : view.ready.mine
-                    ? `Ready ${view.ready.count}/${view.ready.players}`
-                    : "Ready for Next Hand"}
+                    ? `Ready ${view.ready.count} of ${view.ready.players}`
+                    : "Next hand"}
               </Keycap>
             </button>
           )}
@@ -627,7 +575,7 @@ export function Table({
             >
               <Keycap wide>
                 {view.finish.mine
-                  ? `Finished ${view.finish.count}/${view.finish.players}`
+                  ? `Finished ${view.finish.count} of ${view.finish.players}`
                   : "Finish Game"}
               </Keycap>
             </button>

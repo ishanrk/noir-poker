@@ -42,6 +42,7 @@ export default function MotivationPage() {
             <li>People connected to UltimateBet manipulated its poker software</li>
             <li>The investigation led to more than 22 million dollars returned to affected players</li>
             <li>Full Tilt showed player balances that it lacked enough money to repay</li>
+            <li>A deck proof does not solve custody or prove that balances can be repaid</li>
           </ol>
           <footer>
             <Source href={ULTIMATE_BET}>Kahnawake commission decision coverage</Source>
@@ -51,13 +52,16 @@ export default function MotivationPage() {
 
         <section className="brief-panel" data-tone="cobalt">
           <span>03</span>
-          <h2>Noir Poker removes that trust</h2>
+          <h2>Noir Poker makes the shuffle checkable</h2>
           <ol>
             <li>The server and every player lock the 52 cards under one shared deck key</li>
             <li>Each participant secretly shuffles the encrypted cards</li>
             <li>A proof confirms that every shuffle kept the same 52 cards</li>
             <li>One honest shuffle stops the server from choosing the final order</li>
-            <li>Only the cards needed for play become visible</li>
+            <li>During play, only the cards needed for play become visible</li>
+            <li>The completed deck opening reveals every card afterward, including folded cards</li>
+            <li>Participants can still stop the deal by disconnecting or withholding an opening</li>
+            <li>A hash chain does not stop a server presenting different histories to different people</li>
           </ol>
           <footer>
             <Source href={MENTAL_POKER}>Mental Poker Revisited</Source>

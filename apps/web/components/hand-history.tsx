@@ -34,7 +34,7 @@ export function HandHistory({ room }: { room: string }) {
             <article className={styles.entry} key={hand.hand_no}>
               <strong>HAND {hand.hand_no + 1}</strong>
               <span>TRANSCRIPT READY&nbsp;&nbsp;&nbsp;DEALER PLAYER {hand.dealer + 1}</span>
-              <Link href={`/audit/${room}/${hand.hand_no}`} target="_blank">VERIFY HAND</Link>
+              <Link href={`/audit/${room}/${hand.hand_no}`}>Check this deal</Link>
             </article>
           ))}
           {hands?.length === 0 && <p>NO COMPLETED HANDS</p>}

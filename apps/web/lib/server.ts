@@ -14,6 +14,13 @@ function serverUrl() {
   throw new Error("server url missing for this deployment");
 }
 
+export async function roomInterrupted(room: string) {
+  const response = await fetch(`${serverUrl()}/rooms/${encodeURIComponent(room)}/status`, { signal: AbortSignal.timeout(5000) });
+  if (!response.ok) return undefined;
+  const value = await response.json();
+  return value.state === "interrupted" ? value.code as string : undefined;
+}
+
 export type RoomConfig = {
   players: number;
   stack: number;
@@ -139,26 +146,37 @@ function entropy() {
 }
 
 export async function createRoom(config: RoomConfig): Promise<SeatResponse> {
-  const body = config.mode === "single" ? config : { ...config, entropy: entropy() };
-  const response = await fetch(`${serverUrl()}/rooms`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) throw new Error(await responseError(response));
-  return response.json();
+  return requestSeat("create", "/rooms", config, () => config.mode === "single" ? config : { ...config, entropy: entropy() });
 }
 
 export async function joinRoom(room: string, name?: string): Promise<SeatResponse> {
-  const response = await fetch(`${serverUrl()}/rooms/${encodeURIComponent(room)}/join`, {
+  return requestSeat("join", `/rooms/${encodeURIComponent(room)}/join`, { room, name }, () => ({ entropy: entropy(), name }));
+}
+
+async function requestSeat(kind: string, path: string, intent: unknown, makeBody: () => object): Promise<SeatResponse> {
+  const key = `noir-pending-${kind}`;
+  const identity = JSON.stringify({ path, intent });
+  const saved = sessionStorage.getItem(key);
+  const pending = saved ? JSON.parse(saved) as { identity: string; body: object } : {
+    identity, body: { ...makeBody(), request_key: crypto.randomUUID() },
+  };
+  if (pending.identity !== identity) throw new Error("Your previous room request has not been confirmed. Restore those settings and retry to recover it.");
+  // Keep the exact entropy and private request credential after ambiguous failure.
+  sessionStorage.setItem(key, JSON.stringify(pending));
+  const response = await fetch(`${serverUrl()}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ entropy: entropy(), name }),
+    body: JSON.stringify(pending.body),
+    signal: AbortSignal.timeout(15000),
   });
-
-  if (!response.ok) throw new Error(await responseError(response));
-  return response.json();
+  if (!response.ok) {
+    if (response.status >= 400 && response.status < 500) sessionStorage.removeItem(key);
+    throw new Error(await responseError(response));
+  }
+  const seat = await response.json() as SeatResponse;
+  saveSeat(seat.room, seat);
+  sessionStorage.removeItem(key);
+  return seat;
 }
 
 export async function reserveAztecRoom(input: {

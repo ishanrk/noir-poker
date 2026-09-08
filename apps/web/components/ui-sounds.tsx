@@ -1,84 +1,49 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from 'react';
+import { isMuted, subscribeMute, playPickupSound, prepareSounds, setMuted, stopSounds } from '@/lib/ui-audio';
+export { playErrorSound, playPickupSound } from '@/lib/ui-audio';
 
-const PICKUP = "/sounds/item-pickup.wav";
-const ERROR = "/sounds/button-error.wav";
-
-let pickup: HTMLAudioElement | undefined;
-let error: HTMLAudioElement | undefined;
-let pickupTimer: ReturnType<typeof setTimeout> | undefined;
-
-function play(audio: HTMLAudioElement) {
-  audio.currentTime = 0;
-  void audio.play().catch(() => undefined);
-}
-
-export function playErrorSound() {
-  if (pickupTimer) clearTimeout(pickupTimer);
-  pickupTimer = undefined;
-  if (pickup) {
-    pickup.pause();
-    pickup.currentTime = 0;
-  }
-  error ??= new Audio(ERROR);
-  play(error);
+export function SoundToggle() {
+  const muted = useSyncExternalStore(subscribeMute, isMuted, () => false);
+  return <button type="button" aria-pressed={muted} onClick={() => {
+    setMuted(!muted);
+  }}>{muted ? 'Enable sound' : 'Mute sound'}</button>;
 }
 
 export function UiSounds() {
+  // Let an accepted navigation's short acknowledgement finish. There are no
+  // delayed pickups to replay on the next route; pagehide and unmount stop audio.
   useEffect(() => {
-    pickup = new Audio(PICKUP);
-    error = new Audio(ERROR);
-    pickup.preload = "auto";
-    error.preload = "auto";
-    let last = 0;
-
-    function playPickup(delay = 0) {
-      function run() {
-        pickupTimer = undefined;
-        const now = performance.now();
-        if (now - last < 80 || !pickup) return;
-        last = now;
-        play(pickup);
-      }
-
-      if (!delay) {
-        run();
-        return;
-      }
-
-      if (pickupTimer) clearTimeout(pickupTimer);
-      pickupTimer = setTimeout(run, delay);
-    }
-
+    const release = prepareSounds();
+    let lastSlider = -Infinity;
     function onClick(event: MouseEvent) {
-      if (window.location.pathname !== "/") return;
+      if (window.location.pathname !== '/' || event.defaultPrevented) return;
       const node = event.target instanceof Element ? event.target : null;
-      const control = node?.closest(
-        "button, .mode-switch label, .key-choice, .home-actions a:first-child",
-      );
-      if (!control || control.matches(":disabled, [aria-disabled='true']")) return;
-
-      playPickup(140);
+      // Submissions acknowledge themselves after local validation.
+      const control = node?.closest('.home-actions a:first-child');
+      if (control && !control.matches('[aria-disabled="true"]')) playPickupSound();
     }
-
     function onInput(event: Event) {
-      if (window.location.pathname !== "/") return;
+      if (window.location.pathname !== '/') return;
       const node = event.target instanceof HTMLInputElement ? event.target : null;
-      if (!node || node.type !== "range" || node.disabled) return;
-
-      playPickup();
+      if (!node || node.disabled || !['range', 'radio'].includes(node.type)) return;
+      if (node.type === 'range') {
+        const now = performance.now();
+        if (now - lastSlider < 80) return;
+        lastSlider = now;
+      }
+      playPickupSound();
     }
-
-    document.addEventListener("click", onClick);
-    document.addEventListener("input", onInput);
+    document.addEventListener('click', onClick);
+    document.addEventListener('input', onInput);
+    window.addEventListener('pagehide', stopSounds);
     return () => {
-      if (pickupTimer) clearTimeout(pickupTimer);
-      pickupTimer = undefined;
-      document.removeEventListener("click", onClick);
-      document.removeEventListener("input", onInput);
+      document.removeEventListener('click', onClick);
+      document.removeEventListener('input', onInput);
+      window.removeEventListener('pagehide', stopSounds);
+      release();
     };
   }, []);
-
   return null;
 }

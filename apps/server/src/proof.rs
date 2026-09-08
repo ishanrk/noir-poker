@@ -80,6 +80,7 @@ impl ProofVerifier {
     }
 
     pub async fn verify(&self, proof: &ChallengeProof) -> ProofResult<bool> {
+        let permit = crate::proof_admission::admit().await?;
         let api = Arc::clone(&self.api);
         let vk = Arc::clone(&self.vk);
         let public_inputs = proof.public_inputs.clone();
@@ -87,6 +88,7 @@ impl ProofVerifier {
 
         // pipe proof work off async runtime
         tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             let mut api = api
                 .lock()
                 .map_err(|_| io::Error::other("proof verifier stopped"))?;

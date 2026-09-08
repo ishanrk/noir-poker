@@ -5,7 +5,11 @@ mod deck_proof;
 mod fairness;
 mod mental;
 mod proof;
+mod proof_admission;
+#[cfg(test)]
+mod reliability_tests;
 mod room;
+mod room_retention;
 
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -71,6 +75,7 @@ struct AppState {
     deck_proof: Option<DeckProofs>,
     aztec: Option<aztec::Aztec>,
     admission_locks: AdmissionLocks,
+    creation_gate: Arc<Mutex<()>>,
 }
 
 impl AppState {
@@ -87,6 +92,7 @@ impl AppState {
             deck_proof: Some(deck_proof),
             aztec: None,
             admission_locks: Arc::new(Mutex::new(HashMap::new())),
+            creation_gate: Arc::new(Mutex::new(())),
         }
     }
 
@@ -99,6 +105,7 @@ impl AppState {
             deck_proof: None,
             aztec: None,
             admission_locks: Arc::new(Mutex::new(HashMap::new())),
+            creation_gate: Arc::new(Mutex::new(())),
         }
     }
 }
@@ -114,6 +121,7 @@ struct SeatResponse {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreateRoomRequest {
+    request_key: Option<Uuid>,
     players: usize,
     stack: u32,
     small_blind: u32,
@@ -143,6 +151,7 @@ impl CreateRoomRequest {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EntropyRequest {
+    request_key: Option<Uuid>,
     entropy: String,
     name: Option<String>,
 }
@@ -195,6 +204,11 @@ enum ClientMessage {
     Auth {
         token: Uuid,
     },
+    Wager {
+        hand_no: u64,
+        seq: u64,
+        action: WagerAction,
+    },
     Fold,
     Check,
     Call,
@@ -217,6 +231,10 @@ enum ClientMessage {
     },
     Ready {
         entropy: Option<String>,
+    },
+    ReadyHand {
+        hand_no: u64,
+        entropy: String,
     },
     Finish,
     DealEntropy {
@@ -248,6 +266,25 @@ enum ClientMessage {
     },
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum WagerAction {
+    Fold,
+    Check,
+    Call,
+    RaiseTo { to: u32 },
+}
+impl From<WagerAction> for Action {
+    fn from(action: WagerAction) -> Self {
+        match action {
+            WagerAction::Fold => Action::Fold,
+            WagerAction::Check => Action::Check,
+            WagerAction::Call => Action::Call,
+            WagerAction::RaiseTo { to } => Action::RaiseTo(to),
+        }
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerMessage {
@@ -268,6 +305,7 @@ enum ServerMessage {
     },
     Error {
         message: &'static str,
+        code: &'static str,
     },
     ProofError {
         kind: &'static str,
@@ -364,6 +402,7 @@ struct SeatView {
     game_over: Option<GameOverView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_action: Option<ActionNoticeView>,
+    next_action_seq: u64,
     action_notices: Vec<ActionNoticeView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     actions: Option<ActionView>,
@@ -645,9 +684,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if refunds != 0 {
         eprintln!("staged {refunds} aztec restart refunds");
     }
-    let incomplete = db.incomplete_rooms().await?;
+    let incomplete = db.interrupt_incomplete_rooms().await?;
     if incomplete != 0 {
-        eprintln!("warning skipping {incomplete} rooms with unfinished encrypted decks");
+        eprintln!("recorded {incomplete} interrupted encrypted rooms");
     }
     fairness::ensure_pending(&db).await?;
     finish_pending_challenges(&db).await?;
@@ -667,6 +706,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     state.aztec = aztec;
     let worker = state.clone();
     tokio::spawn(async move { settle_aztec(worker).await });
+    tokio::spawn(room_retention::run(state.clone()));
 
     axum::serve(listener, app_with_origins(state, origins)).await?;
     Ok(())
@@ -675,6 +715,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 fn app_with_origins(state: AppState, origins: Vec<HeaderValue>) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/build", get(build_identity))
+        .route("/ready", get(readiness))
+        .route("/rooms/{room}/status", get(room_status))
         .route("/rooms", post(create_room))
         .route("/rooms/{room}/join", post(join_room))
         .route("/aztec/rooms", post(reserve_aztec_room))
@@ -737,14 +780,56 @@ async fn health() -> &'static str {
     "ok"
 }
 
+async fn build_identity() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "source": env!("NOIR_SOURCE_COMMIT"), "dirty": env!("NOIR_SOURCE_DIRTY"),
+        "protocol": "encrypted-deck-v1", "bb": BB_VERSION,
+        "deck_artifact_sha256": "89327e378ed1161825260eb6a5b3bca788d18d88fa8f09d4ee15d073a861b8e5",
+        "deck_vk_sha256": "4e82925a6ff56b94d62d3665899e44c87c9720f8bd47d250273a553d6d68ccc1",
+        "challenge_artifact_sha256": ARTIFACT_SHA256, "challenge_vk_sha256": VK_SHA256
+    }))
+}
+
+async fn readiness(AxumState(state): AxumState<AppState>) -> StatusCode {
+    // Backends and pinned artifacts load before binding. This only checks the DB.
+    if state.db.ready().await {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
+}
+
+async fn stored_room_id(state: &AppState, code: &str) -> Result<Uuid, HttpError> {
+    state
+        .db
+        .public_room_id(code)
+        .await
+        .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "room lookup unavailable"))?
+        .ok_or((StatusCode::NOT_FOUND, "room not found"))
+}
+
+async fn room_status(
+    AxumState(state): AxumState<AppState>,
+    Path(code): Path<String>,
+) -> Result<Json<serde_json::Value>, HttpError> {
+    let id = stored_room_id(&state, &code).await?;
+    let reason = state
+        .db
+        .interruption_reason(id)
+        .await
+        .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "room lookup unavailable"))?;
+    Ok(Json(
+        serde_json::json!({ "state": if reason.is_some() { "interrupted" } else { "available" },
+        "code": reason.as_deref().unwrap_or("ok") }),
+    ))
+}
+
 async fn deal_audit(
     AxumState(state): AxumState<AppState>,
     Path((code, hand_no)): Path<(String, u64)>,
 ) -> Result<Json<AuditResponse>, HttpError> {
-    let (room, live) = resolve_room(&state, &code)
-        .await
-        .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
-    {
+    let room = stored_room_id(&state, &code).await?;
+    if let Some((_, live)) = resolve_room(&state, &code).await {
         let live = live.lock().await;
         let deck = live
             .deck
@@ -853,15 +938,22 @@ async fn hand_history(
     AxumState(state): AxumState<AppState>,
     Path(code): Path<String>,
 ) -> Result<Json<HandHistoryView>, HttpError> {
-    let (room_id, room) = resolve_room(&state, &code)
-        .await
-        .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
-    let (latest, settled) = {
+    let room_id = stored_room_id(&state, &code).await?;
+    let (latest, settled) = if let Some((_, room)) = resolve_room(&state, &code).await {
         let room = room.lock().await;
         room.hand
             .as_ref()
             .map(|hand| (Some(hand.no), hand.game.settled))
             .unwrap_or((None, false))
+    } else {
+        (
+            state
+                .db
+                .last_completed_deck(room_id)
+                .await
+                .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "history unavailable"))?,
+            true,
+        )
     };
     let hands = state
         .db
@@ -894,9 +986,7 @@ async fn proof_history(
     AxumState(state): AxumState<AppState>,
     Path(code): Path<String>,
 ) -> Result<Json<ProofHistoryView>, HttpError> {
-    let (room, _) = resolve_room(&state, &code)
-        .await
-        .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
+    let room = stored_room_id(&state, &code).await?;
     let proofs = state
         .db
         .proof_history(room)
@@ -968,9 +1058,7 @@ async fn published_proof(
     AxumState(state): AxumState<AppState>,
     Path((code, hand_no, seat, kind)): Path<(String, u64, usize, String)>,
 ) -> Result<Json<PublishedProofView>, HttpError> {
-    let (room, _) = resolve_room(&state, &code)
-        .await
-        .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
+    let room = stored_room_id(&state, &code).await?;
     let completion = match kind.as_str() {
         "draw" => false,
         "completion" => true,
@@ -1634,9 +1722,54 @@ async fn create_room(
     config
         .validate()
         .map_err(|err| (StatusCode::BAD_REQUEST, err))?;
-    let token = Uuid::new_v4();
+    let token = request.request_key.unwrap_or_else(Uuid::new_v4);
     let token_hash = hash_token(token);
-    let id = new_room_id(&state).await;
+    let id = if request.request_key.is_some() {
+        admission_room_id(token)
+    } else {
+        new_room_id(&state).await
+    };
+    let admission = admission_lock(&state, id).await;
+    let _admission_guard = admission.lock().await;
+    if state
+        .db
+        .public_room_id(&id.to_string())
+        .await
+        .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "room lookup unavailable"))?
+        .is_some()
+    {
+        let matches = state
+            .db
+            .creation_matches(
+                id,
+                &token_hash,
+                config,
+                mode.text(),
+                &name,
+                request.entropy.as_deref(),
+            )
+            .await
+            .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "room lookup unavailable"))?;
+        if !matches {
+            return Err((StatusCode::CONFLICT, "request identity conflict"));
+        }
+        return Ok((
+            StatusCode::OK,
+            Json(SeatResponse {
+                room: room_code(id),
+                room_id: id,
+                seat: 0,
+                token,
+            }),
+        ));
+    }
+    let _creation_guard = state.creation_gate.lock().await;
+    if state.rooms.lock().await.len() >= room_retention::MAX_ORDINARY_ROOMS {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "table capacity busy. Try again later.",
+        ));
+    }
     let ceremony = fairness::random_ceremony(id, 0, config.players).map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1705,6 +1838,29 @@ async fn join_room(
         .await
         .ok_or((StatusCode::NOT_FOUND, "room not found"))?;
     let mut room = room.lock().await;
+    if room.retired {
+        return Err((StatusCode::CONFLICT, "room interrupted"));
+    }
+    room.last_activity = std::time::Instant::now();
+    if let Some(token) = request.request_key {
+        if let Some(seat) = seat_for_token(&room, token) {
+            let name = player_name(request.name.as_deref(), room.mode, seat)?;
+            let matches = state
+                .db
+                .join_matches(id, seat, &name, &share)
+                .await
+                .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "room lookup unavailable"))?;
+            if !matches {
+                return Err((StatusCode::CONFLICT, "request identity conflict"));
+            }
+            return Ok(Json(SeatResponse {
+                room: room_code(id),
+                room_id: id,
+                seat,
+                token,
+            }));
+        }
+    }
     if room.mode == RoomMode::Single {
         return Err((StatusCode::CONFLICT, "single room full"));
     }
@@ -1722,7 +1878,10 @@ async fn join_room(
     {
         return Err((StatusCode::CONFLICT, "player name already used"));
     }
-    let (token, token_hash) = room_token(&room);
+    let (token, token_hash) = request
+        .request_key
+        .map(|token| (token, hash_token(token)))
+        .unwrap_or_else(|| room_token(&room));
     let seat = join_fair(
         &state.db,
         id,
@@ -1988,7 +2147,9 @@ async fn room_ws(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    ws.on_upgrade(move |socket| socket_loop(socket, state, id))
+    ws.max_message_size(262144)
+        .max_frame_size(262144)
+        .on_upgrade(move |socket| socket_loop(socket, state, id))
 }
 
 async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
@@ -2022,6 +2183,9 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
         return;
     }
 
+    if let Some(room) = find_room(&state, id).await {
+        room.lock().await.last_activity = std::time::Instant::now();
+    }
     // proof persistence survives disconnect
     let (proof_tx, mut proof_rx) = mpsc::unbounded_channel();
     let mut pending_proofs = HashSet::new();
@@ -2048,7 +2212,17 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                     }
                     Message::Ping(_) | Message::Pong(_) => continue,
                 };
+                if let Some(room) = find_room(&state, id).await {
+                    let mut room = room.lock().await;
+                    if room.retired { return; }
+                    room.last_activity = std::time::Instant::now();
+                }
                 let result = match message {
+                    ClientMessage::Wager { hand_no, seq, action } => {
+                        let result = apply_action_checked(&state, id, seat, action.into(), Some((hand_no, seq))).await;
+                        if result.is_ok() { start_bots(&state, id, true); }
+                        result
+                    }
                     ClientMessage::Fold => apply_action(&state, id, seat, Action::Fold).await,
                     ClientMessage::Check => apply_action(&state, id, seat, Action::Check).await,
                     ClientMessage::Call => apply_action(&state, id, seat, Action::Call).await,
@@ -2067,13 +2241,13 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                         public_inputs,
                     } => {
                         let key = ("draw", hand_no);
-                        if !pending_proofs.insert(key) {
+                        if pending_proofs.len() >= 2 || !pending_proofs.insert(key) {
                             let _ = send_message(
                                 &mut socket,
                                 &ServerMessage::ProofError {
                                     kind: key.0,
                                     hand_no: key.1,
-                                    message: "proof already pending",
+                                    message: "proof pending or capacity busy",
                                 },
                             )
                             .await;
@@ -2105,13 +2279,13 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                         public_inputs,
                     } => {
                         let key = ("completion", hand_no);
-                        if !pending_proofs.insert(key) {
+                        if pending_proofs.len() >= 2 || !pending_proofs.insert(key) {
                             let _ = send_message(
                                 &mut socket,
                                 &ServerMessage::ProofError {
                                     kind: key.0,
                                     hand_no: key.1,
-                                    message: "proof already pending",
+                                    message: "proof pending or capacity busy",
                                 },
                             )
                             .await;
@@ -2140,6 +2314,11 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
                     ClientMessage::Ready { entropy } => match entropy {
                         Some(entropy) => ready_room_entropy(&state, id, seat, &entropy).await,
                         None => Err("deal entropy required"),
+                    },
+                    ClientMessage::ReadyHand { hand_no, entropy } => {
+                        let result = ready_room_entropy_checked(&state, id, seat, &entropy, Some(hand_no)).await;
+                        if result.is_ok() { let _ = drive_bot_ready(&state, id).await; start_bots(&state, id, true); }
+                        result
                     },
                     ClientMessage::Finish => finish_room(&state, id, seat).await,
                     ClientMessage::DealEntropy { entropy } => {
@@ -2177,6 +2356,13 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
 
                 if let Err(err) = result {
                     send_error(&mut socket, err).await;
+                }
+                // Both a duplicate acknowledgement and a rejection reconcile legal actions.
+                if let Some(room) = find_room(&state, id).await {
+                    let guard = room.lock().await;
+                    let message = room_message(id, &guard, seat);
+                    drop(guard);
+                    if !send_message(&mut socket, &message).await { return; }
                 }
             }
             proof = proof_rx.recv() => {
@@ -2217,6 +2403,12 @@ async fn socket_loop(mut socket: WebSocket, state: AppState, id: Uuid) {
 }
 
 async fn auth_token(socket: &mut WebSocket) -> Result<Uuid, &'static str> {
+    tokio::time::timeout(Duration::from_secs(10), auth_token_inner(socket))
+        .await
+        .map_err(|_| "authentication timed out")?
+}
+
+async fn auth_token_inner(socket: &mut WebSocket) -> Result<Uuid, &'static str> {
     loop {
         let message = socket
             .recv()
@@ -2255,6 +2447,10 @@ async fn deck_key(
     let room = find_room(state, id).await.ok_or("room not found")?;
     let start_server = {
         let mut room = room.lock().await;
+        if room.retired {
+            return Err("room interrupted");
+        }
+        room.last_activity = std::time::Instant::now();
         let deck = room.deck.as_mut().ok_or("deck protocol missing")?;
         if deck.hand_no != hand_no {
             return Err("wrong deck hand");
@@ -2303,8 +2499,18 @@ async fn server_shuffle(state: &AppState, id: Uuid) -> Result<(), &'static str> 
             masks: &masks,
         })
         .await
-        .map_err(|_| "cannot prove deck shuffle")?;
+        .map_err(|error| {
+            if error.to_string().contains("capacity busy") {
+                "proof capacity busy"
+            } else {
+                "cannot prove deck shuffle"
+            }
+        })?;
     let mut room = room_ref.lock().await;
+    if room.retired {
+        return Err("room interrupted");
+    }
+    room.last_activity = std::time::Instant::now();
     let rev = room.rev;
     let deck = room.deck.as_mut().ok_or("deck protocol missing")?;
     if deck.hand_no != hand_no
@@ -2373,6 +2579,10 @@ async fn deck_shuffle(
         return Err("deck shuffle proof failed");
     }
     let mut room = room_ref.lock().await;
+    if room.retired {
+        return Err("room interrupted");
+    }
+    room.last_activity = std::time::Instant::now();
     let rev = room.rev;
     let players = room.config.players;
     let deck = room.deck.as_mut().ok_or("deck protocol missing")?;
@@ -2400,6 +2610,10 @@ async fn deck_shares(
     let mut resume = false;
     {
         let mut room = room_ref.lock().await;
+        if room.retired {
+            return Err("room interrupted");
+        }
+        room.last_activity = std::time::Instant::now();
         let rev = room.rev;
         let deck = room.deck.as_mut().ok_or("deck protocol missing")?;
         if deck.hand_no != hand_no || deck.head != context {
@@ -2444,6 +2658,10 @@ async fn deck_private_ready(
     let room_ref = find_room(state, id).await.ok_or("room not found")?;
     {
         let mut room = room_ref.lock().await;
+        if room.retired {
+            return Err("room interrupted");
+        }
+        room.last_activity = std::time::Instant::now();
         let rev = room.rev;
         let players = room.config.players;
         let single = room.mode == RoomMode::Single;
@@ -2494,6 +2712,10 @@ async fn deck_open(
 ) -> Result<(), &'static str> {
     let room_ref = find_room(state, id).await.ok_or("room not found")?;
     let mut room = room_ref.lock().await;
+    if room.retired {
+        return Err("room interrupted");
+    }
+    room.last_activity = std::time::Instant::now();
     let rev = room.rev;
     let players = room.config.players;
     let mut deck = room.deck.clone().ok_or("deck protocol missing")?;
@@ -2625,6 +2847,14 @@ fn room_code(id: Uuid) -> String {
     id.simple().to_string()[..8].to_ascii_uppercase()
 }
 
+fn admission_room_id(key: Uuid) -> Uuid {
+    let mut hash = Sha256::new();
+    hash.update(b"NOIR_ROOM_REQUEST_V1");
+    hash.update(key.as_bytes());
+    let digest = hash.finalize();
+    Uuid::from_bytes(digest[..16].try_into().expect("fixed digest length"))
+}
+
 async fn resolve_room(state: &AppState, value: &str) -> Option<(Uuid, Arc<Mutex<Room>>)> {
     let rooms = state.rooms.lock().await;
 
@@ -2673,8 +2903,42 @@ async fn apply_action_once(
     seat: usize,
     action: Action,
 ) -> Result<(), &'static str> {
+    apply_action_checked(state, id, seat, action, None).await
+}
+
+async fn apply_action_checked(
+    state: &AppState,
+    id: Uuid,
+    seat: usize,
+    action: Action,
+    expected: Option<(u64, u64)>,
+) -> Result<(), &'static str> {
     let room = find_room(state, id).await.ok_or("room not found")?;
     let mut room = room.lock().await;
+    if room.retired {
+        return Err("room interrupted");
+    }
+    room.last_activity = std::time::Instant::now();
+    if let Some((hand_no, seq)) = expected {
+        let hand = room.hand.as_ref().ok_or("hand not ready")?;
+        if hand.no != hand_no {
+            return Err("stale hand");
+        }
+        if seq < hand.next_seq {
+            let prior = hand
+                .actions
+                .get(usize::try_from(seq).map_err(|_| "stale action")?)
+                .ok_or("stale action")?;
+            return if prior.player == seat && prior.action == action {
+                Ok(())
+            } else {
+                Err("action identity conflict")
+            };
+        }
+        if seq != hand.next_seq {
+            return Err("stale action");
+        }
+    }
     if room.action_pause {
         return Err("action pending");
     }
@@ -3484,6 +3748,10 @@ async fn ready_room_entropy(
 async fn finish_room(state: &AppState, id: Uuid, seat: usize) -> Result<(), &'static str> {
     let room = find_room(state, id).await.ok_or("room not found")?;
     let mut room = room.lock().await;
+    if room.retired {
+        return Err("room interrupted");
+    }
+    room.last_activity = std::time::Instant::now();
     let pending = room.stage_finish(seat)?;
 
     state
@@ -3508,9 +3776,28 @@ async fn ready_room_entropy_once(
     seat: usize,
     entropy: &str,
 ) -> Result<(), &'static str> {
+    ready_room_entropy_checked(state, id, seat, entropy, None).await
+}
+
+async fn ready_room_entropy_checked(
+    state: &AppState,
+    id: Uuid,
+    seat: usize,
+    entropy: &str,
+    expected: Option<u64>,
+) -> Result<(), &'static str> {
     let share = decode_hex(entropy).ok_or("invalid deal entropy")?;
     let room = find_room(state, id).await.ok_or("room not found")?;
     let mut room = room.lock().await;
+    if room.retired {
+        return Err("room interrupted");
+    }
+    room.last_activity = std::time::Instant::now();
+    if let Some(expected) = expected {
+        if room.hand.as_ref().map(|hand| hand.no) != Some(expected) {
+            return Err("stale hand");
+        }
+    }
     let ceremony = room.ceremony.as_ref().ok_or("deal ceremony missing")?;
 
     if room.mode == RoomMode::Single
@@ -3706,7 +3993,11 @@ fn deck_message(room: &Room, seat: usize) -> Option<ServerMessage> {
         } else {
             ServerMessage::DeckWait {
                 hand_no: deck.hand_no,
-                stage: "verifying shuffles",
+                stage: if participant == 0 {
+                    "server shuffle"
+                } else {
+                    "waiting for another participant"
+                },
             }
         });
     }
@@ -3767,6 +4058,7 @@ fn room_view(id: Uuid, room: &Room, hand: &LiveHand, seat: usize) -> SeatView {
     view.hand_no = hand.no;
     view.total_hands = room.config.hands;
     view.last_action = hand.last_action.map(action_notice_view);
+    view.next_action_seq = hand.next_seq;
     view.action_notices = hand
         .notices
         .iter()
@@ -3982,7 +4274,19 @@ async fn send_message(socket: &mut WebSocket, message: &ServerMessage) -> bool {
 }
 
 async fn send_error(socket: &mut WebSocket, message: &'static str) {
-    let _ = send_message(socket, &ServerMessage::Error { message }).await;
+    let code = if message.contains("busy")
+        || message.contains("capacity")
+        || message.contains("pending")
+    {
+        "busy"
+    } else if message.contains("stale") || message.contains("conflict") {
+        "stale_request"
+    } else if message.contains("proof") || message.contains("public inputs") {
+        "invalid_proof"
+    } else {
+        "request_rejected"
+    };
+    let _ = send_message(socket, &ServerMessage::Error { message, code }).await;
 }
 
 fn room_token(room: &Room) -> (Uuid, TokenHash) {
@@ -4411,6 +4715,8 @@ fn restore_room(stored: StoredRoom) -> Result<Room, io::Error> {
     let (notify, _) = broadcast::channel(16);
 
     Ok(Room {
+        last_activity: std::time::Instant::now(),
+        retired: false,
         config,
         mode,
         seats,
@@ -4829,6 +5135,7 @@ fn seat_view(game: &State, seat: usize) -> SeatView {
         game_over: None,
         last_action: None,
         action_notices: Vec::new(),
+        next_action_seq: 0,
         actions: game.legal_actions(seat).map(action_view),
         result: None,
         ready: None,
@@ -5175,6 +5482,23 @@ mod tests {
         .await
         .unwrap();
         room.commit_draw(draw);
+    }
+
+    // These fixture rows intentionally have no ceremony, identifying the historical
+    // seeded algorithm. Current State::new uses the newer committed deal algorithm.
+    fn legacy_live_hand(
+        id: Uuid,
+        no: u64,
+        seed: [u8; 32],
+        dealer: usize,
+        stacks: Vec<u32>,
+        config: RoomConfig,
+    ) -> LiveHand {
+        let mut hand = live_hand(id, no, seed, dealer, stacks.clone(), config);
+        hand.game = replay_legacy_hand(config, seed, dealer, &stacks, &[])
+            .unwrap()
+            .0;
+        hand
     }
 
     fn same_game(actual: &State, expected: &State) {
@@ -6778,7 +7102,7 @@ mod tests {
         let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE room_interruptions, aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();
@@ -6928,7 +7252,7 @@ mod tests {
         let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE room_interruptions, aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();
@@ -6971,7 +7295,7 @@ mod tests {
         let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE room_interruptions, aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();
@@ -7178,7 +7502,7 @@ mod tests {
         let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE room_interruptions, aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();
@@ -7254,6 +7578,9 @@ mod tests {
         assert!(loaded.iter().any(|room| room.id == waiting_id));
         assert!(!loaded.iter().any(|room| room.id == incomplete_id));
         assert_eq!(db.incomplete_rooms().await.unwrap(), 1);
+        assert_eq!(db.interrupt_incomplete_rooms().await.unwrap(), 1);
+        assert_eq!(db.interrupt_incomplete_rooms().await.unwrap(), 0);
+        assert!(db.interrupted(incomplete_id).await.unwrap());
         assert!(
             sqlx::query(
                 "SELECT transcript IS NULL AND final_deck IS NULL \
@@ -7316,7 +7643,14 @@ mod tests {
         .unwrap();
         room.commit_join(
             second_hash,
-            Some(live_hand(hand_id, 0, SEED, 0, stacks.clone(), config)),
+            Some(legacy_live_hand(
+                hand_id,
+                0,
+                SEED,
+                0,
+                stacks.clone(),
+                config,
+            )),
             1,
         );
 
@@ -7525,7 +7859,14 @@ mod tests {
         .unwrap();
         other.commit_join(
             other_second,
-            Some(live_hand(other_hand, 0, SEED, 0, stacks.clone(), config)),
+            Some(legacy_live_hand(
+                other_hand,
+                0,
+                SEED,
+                0,
+                stacks.clone(),
+                config,
+            )),
             1,
         );
         persist(&db, other_id, &mut other, 0, Action::Fold).await;
@@ -7599,7 +7940,7 @@ mod tests {
         .unwrap();
         all_in.commit_join(
             all_in_second,
-            Some(live_hand(
+            Some(legacy_live_hand(
                 all_in_hand,
                 0,
                 SEED,
@@ -7723,7 +8064,7 @@ mod tests {
             "Player 2".to_owned(),
             1,
             ready_second_share,
-            Some(live_hand(
+            Some(legacy_live_hand(
                 ready_hand,
                 0,
                 ready_seed,
@@ -8282,7 +8623,7 @@ mod tests {
             "Player 2".to_owned(),
             1,
             short_second_share,
-            Some(live_hand(
+            Some(legacy_live_hand(
                 short_hand,
                 0,
                 short_seed,
@@ -8381,7 +8722,7 @@ mod tests {
         .unwrap();
         final_room.commit_join(
             final_second_hash,
-            Some(live_hand(
+            Some(legacy_live_hand(
                 final_hand,
                 0,
                 SEED,
@@ -8473,7 +8814,7 @@ mod tests {
         let bb = std::env::var("BB_PATH").expect("BB_PATH");
         let db = Db::connect(&url).await.unwrap();
 
-        sqlx::query("TRUNCATE aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
+        sqlx::query("TRUNCATE room_interruptions, aztec_settlements, aztec_admissions, deck_transcripts, hand_entropy, hand_ceremonies, challenge_assignments, hand_actions, hands, seats, rooms")
             .execute(db.pool())
             .await
             .unwrap();

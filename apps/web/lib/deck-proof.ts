@@ -1,9 +1,11 @@
+import { withDeckRuntime } from './deck-runtime.ts';
+import { timing } from './diagnostics.ts';
 import circuit from "../zk/deck_shuffle.json" with { type: "json" };
 import { deckShuffleVk } from "../zk/deck-shuffle-vk.ts";
 
 import { bytes, type CipherValue, type PointValue } from "./deck-crypto.ts";
 
-type ShuffleInput = {
+export type ShuffleInput = {
   hand: number;
   seat: number;
   context: string;
@@ -18,28 +20,31 @@ export async function proveShuffle(input: ShuffleInput, status: (value: string) 
   if (input.input.length !== 52 || input.output.length !== 52) {
     throw new Error("invalid encrypted deck");
   }
-  status("building witness");
-  const [{ BackendType, Barretenberg, UltraHonkBackend }, { Noir }] = await Promise.all([
+  status("loading resources");
+  const resourcesAt = performance.now();
+  const [{ UltraHonkBackend }, { Noir }] = await Promise.all([
     import("@aztec/bb.js"),
     import("@noir-lang/noir_js"),
   ]);
+  timing("resources", { hand: input.hand, duration: performance.now() - resourcesAt });
+  status("building witness");
+  const witnessAt = performance.now();
   const noir = new Noir(circuit as ConstructorParameters<typeof Noir>[0]);
   const { witness } = await noir.execute(noirInput(input));
 
+  timing("witness", { hand: input.hand, duration: performance.now() - witnessAt });
   status("proving shuffle");
-  const api = await Barretenberg.new({ backend: BackendType.WasmWorker });
-
-  try {
+  return withDeckRuntime(async api => {
+    const proofAt = performance.now();
     const backend = new UltraHonkBackend(circuit.bytecode, api);
     const proof = await backend.generateProof(witness, { verifierTarget: "noir-recursive" });
 
+    timing("proof", { hand: input.hand, duration: performance.now() - proofAt });
     return {
       proof: base64(proof.proof),
       public_inputs: base64(flatten(proof.publicInputs)),
     };
-  } finally {
-    await api.destroy();
-  }
+  });
 }
 
 export async function verifyShuffle(
@@ -47,7 +52,7 @@ export async function verifyShuffle(
   proofValue: string,
   publicValue: string,
 ) {
-  const [{ BackendType, Barretenberg, UltraHonkVerifierBackend }] = await Promise.all([
+  const [{ UltraHonkVerifierBackend }] = await Promise.all([
     import("@aztec/bb.js"),
   ]);
   const publicInputs = split(unbase64(publicValue));
@@ -55,10 +60,10 @@ export async function verifyShuffle(
   if (publicInputs.length !== expected.length || publicInputs.some((value, index) => value !== expected[index])) {
     throw new Error("shuffle public inputs mismatch");
   }
-  const api = await Barretenberg.new({ backend: BackendType.WasmWorker, srsSize: 2 ** 17 });
-  try {
+  return withDeckRuntime(async api => {
     const backend = new UltraHonkVerifierBackend(api);
-    return await backend.verifyProof(
+    const at = performance.now();
+    const valid = await backend.verifyProof(
       {
         proof: unbase64(proofValue),
         publicInputs,
@@ -66,9 +71,15 @@ export async function verifyShuffle(
       },
       { verifierTarget: "noir-recursive" },
     );
-  } finally {
-    await api.destroy();
-  }
+    timing("verify", { hand: input.hand, duration: performance.now() - at });
+    return valid;
+  }).catch((error: unknown) => {
+    // This pinned backend throws instead of returning false for malformed points.
+    if (error instanceof Error && error.message === "Deserialized point is not on the curve") {
+      throw new Error("invalid shuffle proof point");
+    }
+    throw new Error("Proof verifier unavailable. Retry this check after the current hand.");
+  });
 }
 
 function noirInput(input: ShuffleInput) {
