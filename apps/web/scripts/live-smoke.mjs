@@ -19,8 +19,11 @@ function watch(page, label) {
   const trace = { page, label, view: undefined, postStatuses: [], sentTypes: [] };
   page.on('pageerror', error => failures.push(`${label} page: ${error.message}`));
   page.on('requestfailed', request => {
-    if (['document', 'script', 'stylesheet', 'fetch', 'xhr'].includes(request.resourceType())) {
-      failures.push(`${label} request: ${request.url()} ${request.failure()?.errorText ?? 'failed'}`);
+    const reason = request.failure()?.errorText ?? 'failed';
+    const canceledNavigation = reason.includes('net::ERR_ABORTED') &&
+      new URL(request.url()).searchParams.has('_rsc');
+    if (!canceledNavigation && ['document', 'script', 'stylesheet', 'fetch', 'xhr'].includes(request.resourceType())) {
+      failures.push(`${label} request: ${request.url()} ${reason}`);
     }
   });
   page.on('response', response => {
