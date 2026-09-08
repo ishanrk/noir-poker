@@ -937,19 +937,6 @@
   line-height: 1.45 !important;
 }
 
-.home-page .hero-verifiable {
-  display: inline-block;
-  margin-left: 14px;
-  padding: 4px 7px 3px;
-  color: var(--blue);
-  background: var(--lime);
-  font-size: 0.62em;
-  font-weight: 400;
-  line-height: 1.2;
-  text-transform: uppercase;
-  vertical-align: 0.12em;
-}
-
 .home-page .hero-tech {
   max-width: 700px;
   margin-top: 14px !important;

@@ -29,9 +29,8 @@ export default function Home() {
             <span className="hero-title-poker">Poker</span>
           </h1>
           <p className="hero-tagline">
-            I promise that a rigged server isn&apos;t why you blew threw your stack (you can check)
-            {" "}
-            <span className="hero-verifiable">Verifiable anti cheating server</span>
+            I promise that a rigged server isn&apos;t why you blew threw your stack (you can verify it
+            doesn&apos;t cheat)
           </p>
           <p className="hero-tech">
             Written in <span className="tech-rust">Rust</span> and{" "}
