@@ -6,7 +6,8 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { AztecConnect } from "@/components/aztec-connect";
 import { Keycap } from "@/components/keycap";
-import { playErrorSound } from "@/components/ui-sounds";
+import { playErrorSound, playPickupSound } from "@/components/ui-sounds";
+import { timing } from "@/lib/diagnostics";
 import {
   AZTEC_BIG_BLIND,
   AZTEC_SMALL_BLIND,
@@ -155,6 +156,8 @@ export function Lobby() {
         throw new Error("Connect Aztec and claim Tajaderos first");
       }
 
+      playPickupSound();
+      timing('room-request');
       const result = mode === "aztec" && aztec
           ? (await enterAztec(
             aztec,
@@ -183,6 +186,7 @@ export function Lobby() {
           });
 
       saveSeat(result.room, result);
+      timing('room-ready');
       router.push(`/table/${result.room}${mode === "aztec" ? "?mode=aztec" : ""}`);
     } catch (cause) {
       showError(cause instanceof Error ? cause.message : "server unavailable");
@@ -202,10 +206,12 @@ export function Lobby() {
     const room = String(new FormData(event.currentTarget).get("room")).trim();
 
     try {
+      if (!room) throw new Error("Enter a room code");
       if (mode === "aztec" && !aztecValid) {
         throw new Error("Connect Aztec and claim Tajaderos first");
       }
 
+      playPickupSound();
       const result = mode === "aztec" && aztec
           ? (await enterAztec(
             aztec,
@@ -262,7 +268,7 @@ export function Lobby() {
             />
             <span>
               <strong>Multiplayer</strong>
-              <small>2–6 players</small>
+              <small>2 to 6 players</small>
             </span>
           </label>
           <label>
@@ -289,7 +295,7 @@ export function Lobby() {
             <h3>
               New Game{" "}
               <span>
-                — {mode === "single" ? "Single Player" : mode === "multiplayer" ? "Multiplayer" : "Aztec Poker"}
+                {mode === "single" ? "Single player" : mode === "multiplayer" ? "Multiplayer" : "Aztec Poker"}
               </span>
             </h3>
             <span className="lobby-computer" aria-hidden="true">
@@ -335,7 +341,7 @@ export function Lobby() {
               ))}
             </div>
           </fieldset>
-          {mode === "single" && <p className="seat-help">One human plus {players - 1} bots.</p>}
+          {mode === "single" && <p className="seat-help">One human plus {players - 1} {players === 2 ? "bot" : "bots"}.</p>}
 
           <Scale
             label="Total Number of Hands"

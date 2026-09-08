@@ -168,6 +168,13 @@ export async function verifyShare(
     && (await api.Grumpkin.add(b, cv)).equals(zl);
 }
 
+let cardLookup: Promise<ReadonlyMap<string, number>> | undefined;
+function canonicalLookup() {
+  cardLookup ??= canonicalDeck().then(deck => new Map(deck.map((card, index) => [pointHex(card.right), index])))
+    .catch(error => { cardLookup = undefined; throw error; });
+  return cardLookup;
+}
+
 export async function openCard(cardValue: CipherValue, values: readonly PointValue[]) {
   const api = await curve();
   const card = cipher(cardValue, api);
@@ -178,10 +185,8 @@ export async function openCard(cardValue: CipherValue, values: readonly PointVal
     const inverse = item.isInfinite ? item : new api.Point(item.x, item.y.negate());
     value = await api.Grumpkin.add(value, inverse);
   }
-  for (let i = 0; i < DECK_SIZE; i += 1) {
-    const cardPoint = await api.Grumpkin.mul(api.Grumpkin.generator, new api.Scalar(i + 1));
-    if (cardPoint.equals(value)) return i;
-  }
+  const opened = (await canonicalLookup()).get(pointHex(pointValue(value)));
+  if (opened !== undefined) return opened;
   throw new Error("invalid card opening");
 }
 

@@ -1,6 +1,8 @@
 .git
 .gitignore
 .local
+.private
+**/.private
 target
 **/target
 node_modules

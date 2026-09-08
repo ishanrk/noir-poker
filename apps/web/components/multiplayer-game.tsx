@@ -1,12 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { roomInterrupted } from "@/lib/server";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ContractView, LocalProofState, ProofState } from "@/components/contract";
 import type { DealView } from "@/components/deal-integrity";
-import { Keycap } from "@/components/keycap";
+import { Preparation } from "@/components/preparation";
+import { DeckInbox } from "@/lib/deck-inbox";
+import { timing } from "@/lib/diagnostics";
+import { playPickupSound, playErrorSound, SoundToggle } from "@/components/ui-sounds";
 import { PlayProofs } from "@/components/play-proofs";
 import { PrivateChallengeBar } from "@/components/private-challenge";
 import { ProofTour } from "@/components/proof-tour";
@@ -45,7 +48,6 @@ import {
   openCard,
   publicKey,
   randomScalar,
-  shuffleDeck,
   transcriptNext,
   validScalar,
   verifyKey,
@@ -54,7 +56,7 @@ import {
   type PointValue,
   type ShareProof,
 } from "@/lib/deck-crypto";
-import { proveShuffle } from "@/lib/deck-proof";
+import { DeckWorkerClient } from "@/lib/deck-worker-client";
 import { cardValue } from "@/lib/deal";
 import {
   freshEntropy,
@@ -120,8 +122,7 @@ const MAX_AUTO_PROOF_DELAY_MS = 10_000;
 const GAME_OVER_DELAY_MS = 7000;
 const BONUS_ADD_MS = 1200;
 const BONUS_DELAY_MS = 6000;
-const GAME_OVER_DISPLAY_MS = 4000;
-const DECK_STAGE_MS = 1200;
+
 
 function noticeKey(notice: TableNoticeView) {
   return notice.kind === "action"
@@ -323,8 +324,9 @@ export function MultiplayerGame({
   room: string;
   initialMode?: RoomMode;
 }) {
-  const router = useRouter();
   const socket = useRef<WebSocket | undefined>(undefined);
+  const connectionGeneration = useRef(0);
+  const lifetime = useRef<AbortController | undefined>(undefined);
   const auth = useRef<RoomSeat | undefined>(undefined);
   const rev = useRef(-1);
   const drawing = useRef<number | undefined>(undefined);
@@ -333,8 +335,9 @@ export function MultiplayerGame({
   const proofJobsLoaded = useRef(false);
   const dealing = useRef(false);
   const deckBusy = useRef(false);
+  const proofWorker = useRef<DeckWorkerClient | undefined>(undefined);
   const deckActive = useRef(false);
-  const deckRequests = useRef(new Set<string>());
+  const deckRequests = useRef(new Map<string, string>());
   const localHole = useRef<{ hand: number; cards: [string, string] } | undefined>(undefined);
   const seenAction = useRef<{ hand: number; seq: number } | undefined>(undefined);
   const seenChallenge = useRef(new Set<string>());
@@ -350,8 +353,11 @@ export function MultiplayerGame({
   const [view, setView] = useState<View>();
   const [roomRev, setRoomRev] = useState(-1);
   const [error, setError] = useState<string>();
-  const [connected, setConnected] = useState(false);
-  const [connecting, setConnecting] = useState(false);
+  const [connection, setConnection] = useState<"connecting" | "connected" | "disconnected">("disconnected");
+  const connected = connection === "connected";
+  const connecting = connection === "connecting";
+  const setConnected = useCallback((value: boolean) => setConnection(old => value ? "connected" : old === "connecting" ? old : "disconnected"), []);
+  const setConnecting = useCallback((value: boolean) => setConnection(old => value ? "connecting" : old === "connected" ? old : "disconnected"), []);
   const [actionPending, setActionPending] = useState(false);
   const [raiseTo, setRaiseTo] = useState(0);
   const [objective, setObjective] = useState<string>();
@@ -367,9 +373,8 @@ export function MultiplayerGame({
   const [notices, setNotices] = useState<TableNoticeView[]>([]);
   const noticeQueue = useRef<TableNoticeView[]>([]);
   const [deckStage, setDeckStage] = useState<string>();
-  const [shownDeckStage, setShownDeckStage] = useState<string>();
-  const shownDeckRef = useRef<string | undefined>(undefined);
-  const shownDeckAt = useRef(0);
+  const [deckHand, setDeckHand] = useState<number>();
+  const inbox = useRef<DeckInbox<Extract<ServerMessage, { type: `deck_${string}` }>> | undefined>(undefined);
   const [tourOpen, setTourOpen] = useState(false);
   const [bonusBase, setBonusBase] = useState<number[]>();
   const [bonusApplied, setBonusApplied] = useState(false);
@@ -385,19 +390,6 @@ export function MultiplayerGame({
   const finish = gameReady && finishHand === view?.hand_no;
   const bonusFocus = gameReady && view?.mode === "multiplayer" && !finish;
 
-  useEffect(() => {
-    const elapsed = performance.now() - shownDeckAt.current;
-    const delay = shownDeckRef.current === undefined
-      ? 0
-      : Math.max(0, DECK_STAGE_MS - elapsed);
-    const timer = window.setTimeout(() => {
-      shownDeckRef.current = deckStage;
-      shownDeckAt.current = performance.now();
-      setShownDeckStage(deckStage);
-    }, delay);
-
-    return () => window.clearTimeout(timer);
-  }, [deckStage]);
 
   useEffect(() => {
     const mode = view?.mode ?? waiting?.mode ?? initialMode;
@@ -472,13 +464,6 @@ export function MultiplayerGame({
     };
   }, [gameReady, view?.hand_no, view?.mode]);
 
-  useEffect(() => {
-    if (!finish) return;
-
-    const timer = setTimeout(() => router.push("/"), GAME_OVER_DISPLAY_MS);
-
-    return () => clearTimeout(timer);
-  }, [finish, router]);
 
   useEffect(() => {
     if (!notice) return;
@@ -507,7 +492,14 @@ export function MultiplayerGame({
   const connect = useCallback(() => {
     const current = auth.current;
     if (!current) return;
+    lifetime.current?.abort();
+    lifetime.current = new AbortController();
     if (socket.current) closeSocket(socket.current);
+    inbox.current?.close();
+    proofWorker.current?.close();
+    const worker = new DeckWorkerClient();
+    proofWorker.current = worker;
+    deckBusy.current = false;
 
     setConnecting(true);
     setConnected(false);
@@ -532,6 +524,9 @@ export function MultiplayerGame({
     socket.current = next;
     const failConnection = (message: string) => {
       if (socket.current !== next) return;
+      inbox.current?.close();
+      worker.close();
+      lifetime.current?.abort();
       closeSocket(next);
       socket.current = undefined;
       actionWait.current = undefined;
@@ -552,7 +547,16 @@ export function MultiplayerGame({
       setError(message);
     };
     next.onopen = () => next.send(JSON.stringify({ type: "auth", token: current.token }));
-    const handleDeck = async (message: Extract<ServerMessage, { type: `deck_${string}` }>) => {
+    const generation = ++connectionGeneration.current;
+    const fresh = () => socket.current === next && next.readyState === WebSocket.OPEN;
+    const handleDeck = async (message: Extract<ServerMessage, { type: `deck_${string}` }>, currentHand: () => boolean) => {
+      const freshHand = () => fresh() && currentHand();
+      const ensureFresh = () => { if (!freshHand()) throw new Error("Connection or hand replaced"); };
+      ensureFresh();
+      setConnected(true);
+      setConnecting(false);
+      setDeckHand(message.hand_no);
+      timing("deck-stage", { hand: message.hand_no, generation });
       deckActive.current = true;
       if (message.type === "deck_wait") {
         setDeckStage(message.stage);
@@ -567,9 +571,16 @@ export function MultiplayerGame({
             : message.type === "deck_private"
               ? `${message.hand_no}:private:${message.context}`
               : `${message.hand_no}:open`;
-      if (deckBusy.current || deckRequests.current.has(request)) return;
+      for (const key of deckRequests.current.keys()) if (!key.startsWith(`${message.hand_no}:`)) deckRequests.current.delete(key);
+      const fingerprint = JSON.stringify(message);
+      const previous = deckRequests.current.get(request);
+      if (previous !== undefined) {
+        if (previous !== fingerprint) failConnection("Conflicting deck request. Reconnect to recover the current state.");
+        return;
+      }
+      if (deckRequests.current.size >= 128) { failConnection("Too many deck requests. Reconnect to recover the current state."); return; }
       deckBusy.current = true;
-      deckRequests.current.add(request);
+      deckRequests.current.set(request, fingerprint);
       setDeckStage(
         message.type === "deck_key"
           ? "creating private key"
@@ -589,29 +600,31 @@ export function MultiplayerGame({
             if (!(await verifyKey(entry.key, entry.proof, head))) {
               throw new Error("invalid deck key");
             }
+            ensureFresh();
             head = transcriptNext(head, seq, "key", entry.seat, keyPayload(entry.key, entry.proof));
           }
           if (deckHex(head) !== message.context) throw new Error("invalid deck transcript");
           const key = await publicKey(secret);
           const proof = await keyProof(secret, deckBytes(message.context));
+          ensureFresh();
           next.send(JSON.stringify({ type: "deck_key", hand_no: message.hand_no, key, proof } satisfies ClientAction));
         } else if (message.type === "deck_shuffle") {
-          const shuffled = await shuffleDeck(message.deck, message.key);
-          const proof = await proveShuffle({
+          const proof = await worker.prove({
             hand: message.hand_no,
+            generation,
             seat: message.participant,
             context: message.context,
-            input: message.deck,
-            output: shuffled.output,
+            deck: message.deck,
             key: message.key,
-            permutation: shuffled.permutation,
-            masks: shuffled.masks,
-          }, setDeckStage);
+          }, value => { if (freshHand()) setDeckStage(value); });
+          ensureFresh();
+          setDeckStage("server verification");
+          ensureFresh();
           next.send(JSON.stringify({
             type: "deck_shuffle",
             hand_no: message.hand_no,
             context: message.context,
-            output: shuffled.output,
+            output: proof.output,
             proof: proof.proof,
             public_inputs: proof.public_inputs,
           } satisfies ClientAction));
@@ -623,6 +636,7 @@ export function MultiplayerGame({
             context: message.context,
             ...await decryptionShare(message.deck[position], secret, deckBytes(message.context)),
           })));
+          ensureFresh();
           next.send(JSON.stringify({
             type: "deck_shares",
             hand_no: message.hand_no,
@@ -641,24 +655,31 @@ export function MultiplayerGame({
                 deckBytes(share.context),
               ))) throw new Error("invalid card opening");
             }
+            ensureFresh();
             const mine = await decryptionShare(entry.card, secret, deckBytes(message.context));
             const card = await openCard(entry.card, entry.shares.map((share) => share.value).concat(mine.value));
             cards.push(cardValue(card));
           }
           if (cards.length !== 2) throw new Error("private cards missing");
+          ensureFresh();
           localHole.current = { hand: message.hand_no, cards: [cards[0], cards[1]] };
           saveDeckHole(room, message.hand_no, current.seat, [cards[0], cards[1]]);
+          ensureFresh();
           next.send(JSON.stringify({ type: "deck_private_ready", hand_no: message.hand_no } satisfies ClientAction));
         } else {
+          ensureFresh();
           next.send(JSON.stringify({ type: "deck_open", hand_no: message.hand_no, secret } satisfies ClientAction));
         }
       } catch (cause) {
+        if (!freshHand()) return;
         deckRequests.current.delete(request);
         failConnection(cause instanceof Error ? cause.message : "deck protocol failed");
       } finally {
-        deckBusy.current = false;
+        if (freshHand()) deckBusy.current = false;
       }
     };
+    const deckInbox = new DeckInbox(handleDeck, () => failConnection("Deck messages could not be reconciled. Reconnect to recover the current stage."));
+    inbox.current = deckInbox;
     next.onmessage = (event) => {
       if (socket.current !== next || typeof event.data !== "string") return;
       let message: ServerMessage;
@@ -672,25 +693,7 @@ export function MultiplayerGame({
       if (message.type.startsWith("deck_")) {
         const deckMessage = message as Extract<ServerMessage, { type: `deck_${string}` }>;
         setWaiting(undefined);
-        const run = () => {
-          if (socket.current !== next) return;
-          const active = viewRef.current;
-          const future = active &&
-            deckMessage.hand_no > active.hand_no &&
-            (!active.settled || deckMessage.hand_no > active.hand_no + 1);
-          const reveal = active &&
-            deckMessage.hand_no === active.hand_no &&
-            (deckMessage.type === "deck_shares" || deckMessage.type === "deck_open") &&
-            !active.round_complete &&
-            !active.settled;
-          if (noticeQueue.current.length > 0 || future || reveal) {
-            setTimeout(run, 50);
-            return;
-          }
-          void handleDeck(deckMessage);
-        };
-        if (deckMessage.type === "deck_wait") void handleDeck(deckMessage);
-        else run();
+        deckInbox.push(deckMessage);
         return;
       }
 
@@ -743,7 +746,9 @@ export function MultiplayerGame({
           setBonusBase(undefined);
           setBonusApplied(false);
         }
+        deckInbox.advance(message.view.hand_no);
         viewRef.current = message.view;
+        if (message.view.actions && (!priorView?.actions || priorView.hand_no !== message.view.hand_no)) timing("first-action", { hand: message.view.hand_no });
         const log = message.view.action_notices ?? (message.view.last_action ? [message.view.last_action] : []);
         const last = log.at(-1)?.seq ?? -1;
         const seen = seenAction.current;
@@ -759,7 +764,7 @@ export function MultiplayerGame({
           if (next.length) {
             setNoticeQueue((currentNotices) => {
               const queued = new Set(currentNotices.map(noticeKey));
-              return [...currentNotices, ...next.filter((entry) => !queued.has(noticeKey(entry)))];
+              return [...currentNotices, ...next.filter((entry) => !queued.has(noticeKey(entry)))].slice(-12);
             });
           }
         }
@@ -871,17 +876,16 @@ export function MultiplayerGame({
         } else if (
           !wait ||
           message.view.hand_no !== wait.hand ||
-          (message.view.last_action?.seq ?? -1) >= wait.seq
+          (message.view.next_action_seq ?? (message.view.last_action?.seq ?? -1) + 1) > wait.seq
         ) {
           actionWait.current = undefined;
           setPending(false);
         }
-        setError(undefined);
-
         return;
       }
 
       if (message.type === "error") {
+        playErrorSound();
         if (deckActive.current || dealing.current) {
           failConnection(message.message);
           return;
@@ -923,9 +927,17 @@ export function MultiplayerGame({
         }
       }
     };
-    next.onerror = () => failConnection("Connection failed");
+    const checkInterruption = () => {
+      void roomInterrupted(room).then(interrupted => {
+        if (interrupted && connectionGeneration.current === generation && !socket.current) setError(`This room ended ${interrupted === "idle_timeout" ? "after 30 minutes without activity" : "after a server restart"}. Completed receipts remain available. Return to the lobby for a new room. Ordinary test chips do not transfer between rooms.`);
+      }).catch(() => undefined);
+    };
+    next.onerror = () => { failConnection("Connection failed"); checkInterruption(); };
     next.onclose = () => {
       if (socket.current === next) {
+        deckInbox.close();
+        worker.close();
+        lifetime.current?.abort();
         socket.current = undefined;
         actionWait.current = undefined;
         readyWait.current = undefined;
@@ -942,12 +954,14 @@ export function MultiplayerGame({
         setPending(false);
         setDeckStage(undefined);
         setError((currentError) => currentError ?? "Disconnected");
+        checkInterruption();
       }
     };
-  }, [room, setClaimState, setDrawState, setNoticeQueue, setPending]);
+  }, [room, setClaimState, setDrawState, setNoticeQueue, setPending, setConnected, setConnecting]);
 
   useEffect(() => {
     let live = true;
+    const generations = connectionGeneration;
     proofJobsLoaded.current = false;
     const current = loadSeat(room);
     queueMicrotask(() => {
@@ -963,6 +977,10 @@ export function MultiplayerGame({
     });
     return () => {
       live = false;
+      generations.current++;
+      lifetime.current?.abort();
+      inbox.current?.close();
+      proofWorker.current?.close();
       const currentSocket = socket.current;
       socket.current = undefined;
       actionWait.current = undefined;
@@ -992,7 +1010,7 @@ export function MultiplayerGame({
     if (poker) {
       const currentView = viewRef.current;
       actionWait.current = currentView
-        ? { hand: currentView.hand_no, seq: (currentView.last_action?.seq ?? -1) + 1 }
+        ? { hand: currentView.hand_no, seq: currentView.next_action_seq ?? (currentView.last_action?.seq ?? -1) + 1 }
         : undefined;
       readyWait.current = undefined;
     } else if (action.type === "ready" || action.type === "finish") {
@@ -1003,9 +1021,18 @@ export function MultiplayerGame({
       readyWait.current = undefined;
     }
     setPending(true);
+    timing("activation", { hand: viewRef.current?.hand_no });
+    if (paced) playPickupSound();
+    if (action.type === "ready") {
+      setDeckHand((viewRef.current?.hand_no ?? -1) + 1);
+      setDeckStage("Waiting for participants to be ready");
+    }
     setError(undefined);
     try {
-      current.send(JSON.stringify(action));
+      const expected = actionWait.current;
+      const wire = poker && expected ? { type: "wager", hand_no: expected.hand, seq: expected.seq, action }
+        : action.type === "ready" ? { ...action, type: "ready_hand", hand_no: viewRef.current?.hand_no } : action;
+      current.send(JSON.stringify(wire));
     } catch {
       actionWait.current = undefined;
       readyWait.current = undefined;
@@ -1013,7 +1040,7 @@ export function MultiplayerGame({
       setConnected(false);
       setError("Connection failed");
     }
-  }, [connected, setPending]);
+  }, [connected, setPending, setConnected]);
 
   const commitChallenge = useCallback(() => {
     const challenge = view?.challenge;
@@ -1078,8 +1105,8 @@ export function MultiplayerGame({
         mustFalse: value.mustFalse,
         siblings,
       }, (status: ProofStatus) => {
-        if (drawing.current === hand) setDrawState(hand, status);
-      });
+        if (socket.current === current && drawing.current === hand) setDrawState(hand, status);
+      }, lifetime.current?.signal);
       if (
         drawing.current !== hand ||
         socket.current !== current ||
@@ -1088,7 +1115,7 @@ export function MultiplayerGame({
       setDrawState(hand, "verifying");
       current.send(JSON.stringify({ type: "challenge_draw", hand_no: assignment.hand_no, proof: result.proof, public_inputs: result.public_inputs } satisfies ClientAction));
     } catch {
-      if (drawing.current === hand) {
+      if (socket.current === current && drawing.current === hand) {
         drawing.current = undefined;
         setDrawState(hand, "failed");
       }
@@ -1151,8 +1178,8 @@ export function MultiplayerGame({
         mustFalse: objective.mustFalse,
         siblings,
       }, (status: ProofStatus) => {
-        if (claiming.current === hand) setClaimState(hand, status);
-      });
+        if (socket.current === current && claiming.current === hand) setClaimState(hand, status);
+      }, lifetime.current?.signal);
       if (
         claiming.current !== hand ||
         socket.current !== current ||
@@ -1161,7 +1188,7 @@ export function MultiplayerGame({
       setClaimState(hand, "verifying");
       current.send(JSON.stringify({ type: "challenge_claim", hand_no: claim.hand_no, proof: result.proof, public_inputs: result.public_inputs } satisfies ClientAction));
     } catch {
-      if (claiming.current === hand) {
+      if (socket.current === current && claiming.current === hand) {
         claiming.current = undefined;
         setClaimState(hand, "failed");
       }
@@ -1258,6 +1285,7 @@ export function MultiplayerGame({
   ]);
 
   async function verifyProof(owner: number, hand: number, kind: ProofKind) {
+    const connection = socket.current;
     const key = proofKey(owner, hand, kind);
     if (verifyingProofs.current.has(key)) return;
     verifyingProofs.current.add(key);
@@ -1266,45 +1294,26 @@ export function MultiplayerGame({
     try {
       // exact accepted proof
       const proof = await loadPublishedProof(room, hand, owner, kind);
+      if (socket.current !== connection) return;
       await verifyPublishedProof(proof);
+      if (socket.current !== connection) return;
       setLocalProofs((current) => ({ ...current, [key]: "verified" }));
     } catch {
+      if (socket.current !== connection) return;
       setLocalProofs((current) => ({ ...current, [key]: "failed" }));
     } finally {
       verifyingProofs.current.delete(key);
     }
   }
 
-  if (seat === undefined) return <p className="table-status">Loading room…</p>;
-  if (seat === null) return <div className="room-status"><strong>No seat for this room</strong><Link href="/">Back to lobby</Link></div>;
-  if (waiting) {
-    if (waiting.mode === "single") {
-      return (
-        <div className={`waiting-room${error ? " ui-shake" : ""}`}>
-          <p className="protocol-label">Room {room}</p>
-          <h2>Preparing the table</h2>
-          <p>Creating the private deck</p>
-          {error && <p className="form-error">{error}</p>}
-          {!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><Keycap>Reconnect</Keycap></button>}
-        </div>
-      );
-    }
-    return (
-      <div className={`waiting-room${error ? " ui-shake" : ""}`}>
-        <p className="protocol-label">Room {room}</p>
-        <h2>Waiting for the table.</h2>
-        <strong>{waiting.joined} of {waiting.players} seats</strong>
-        <p>Waiting for every player to join.</p>
-        {error && <p className="form-error">{error}</p>}
-        {!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><Keycap>Reconnect</Keycap></button>}
-      </div>
-    );
-  }
-  if (!view) return <div className={`room-status${error ? " ui-shake" : ""}`}><strong>{error ?? deckStage ?? "Connecting to table"}</strong>{!connecting && !connected && <button className="key-action key-compact" type="button" onClick={connect}><Keycap>Reconnect</Keycap></button>}</div>;
+  if (seat === undefined || seat === null || waiting || !view) return <Preparation
+    shell hand={deckHand} error={seat === null ? "No saved seat for this room. Return to the lobby to join." : error}
+    stage={waiting ? `Waiting for ${waiting.joined} of ${waiting.players} players` : deckStage}
+    reconnect={seat !== null && !connecting && !connected ? connect : undefined}
+  />;
 
   const interactionDisabled =
     actionPending ||
-    notices.length > 0 ||
     Boolean(deckStage) ||
     tourOpen ||
     !connected;
@@ -1369,6 +1378,8 @@ export function MultiplayerGame({
         <ProofTour room={room} seat={seat} handNo={view.hand_no} onOpenChange={setTourOpen} />
       )}
       {!connected && <div className="connection-bar"><span>{connecting ? "Connecting" : "Disconnected"}</span>{!connecting && <button type="button" onClick={connect}>Reconnect</button>}</div>}
+      {deckStage && <Preparation hand={deckHand} stage={deckStage} error={error} reconnect={!connecting && !connected ? connect : undefined} />}
+      <div className="table-receipts"><Link href={`/room/${room}/hands`}>Hand history</Link><SoundToggle /></div>
       <Table
         view={view}
         viewer={seat}
@@ -1376,7 +1387,9 @@ export function MultiplayerGame({
         error={error}
         disabled={interactionDisabled}
         notice={notice}
-        stage={shownDeckStage}
+        stage={deckStage}
+        submitting={actionPending}
+        connected={connected}
         finish={finish}
         bonusFocus={bonusFocus}
         bonusApplied={bonusApplied}

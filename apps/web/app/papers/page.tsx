@@ -54,6 +54,7 @@ export default function PapersPage() {
         <p>Reading list</p>
         <h1>Crypto Papers</h1>
         <span>Relevant cryptography papers</span>
+        <p>These papers explain related ideas. This game uses a Noir shuffle circuit with UltraHonk, not every construction linked below. Cards stay private during play. The completed deck opening reveals all cards afterward, including folded cards. Deck proofs do not establish custody, solvency, or availability.</p>
       </header>
 
       <section className="crypto-papers" aria-labelledby="crypto-papers-title">

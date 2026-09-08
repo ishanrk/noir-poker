@@ -40,3 +40,12 @@ assert.equal(
 
 const next = transcriptNext(context, 0, "key", 0, new TextEncoder().encode("a"));
 assert.notEqual(hex(next), hex(context));
+
+// Cache every public canonical point without retaining a mutable input deck.
+for (let pass = 0; pass < 3; pass++) {
+  for (let index = 0; index < 52; index++) assert.equal(await openCard(deck[index], []), index);
+}
+const invalid = structuredClone(deck[0]);
+invalid.right = { x: "0x" + "0".repeat(64), y: "0x" + "0".repeat(64) };
+await assert.rejects(openCard(invalid, []), /invalid/);
+assert.equal(await openCard(deck[0], []), 0);

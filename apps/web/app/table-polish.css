@@ -1,0 +1,26 @@
+/* Homepage composition is frozen. Navigation typography is explicitly shared. */
+:root { --font-blockprint: "Block Blueprint", "Trebuchet MS", sans-serif; }
+.site-header, .site-header .wordmark, .site-header nav a { font-family: var(--font-blockprint) !important; }
+/* Keep the original narrow heading footprint after removing its separator. */
+@media (max-width: 480px) {
+  .home-page .form-heading-new h3 { width: 100%; }
+  .home-page .form-heading-new h3 > span { display: block; }
+}
+.preparation { font-family: var(--font-blockprint); margin: 16px auto; max-width: 1000px; }
+.preparation-shell .table-stage { height: clamp(260px, 40vw, 470px); }
+.preparation-shell .board-area { color: white; text-align: center; width: 65%; }
+.preparation-copy { padding: 16px; border-left: 4px solid var(--blue); }
+.preparation-copy h2 { font: inherit; font-size: 22px; }
+.preparation-copy p { line-height: 1.6; }
+.preparation-copy > a, .preparation-copy > button { display: inline-block; margin: 14px 16px 0 0; }
+.preparation-copy summary { cursor: pointer; color: var(--blue); }
+.table-shell[data-player-count="2"] .seat-3 { top: 0; }
+.table-shell[data-player-count="2"] .table-stage { max-width: 950px; margin-inline: auto; }
+.table-shell .action-copy-prior { display: none; }
+.table-shell .action-copy-current { transform: none; opacity: 1; }
+.table-receipts { display: flex; gap: 18px; padding: 16px 0; flex-wrap: wrap; }
+.preparation-copy > button, .table-receipts > button { font: inherit; border: 0; background: transparent; color: var(--blue); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; padding: 6px; }
+.preparation :is(h2,p,summary,a,button), .table-shell :is(h1,h2,h3,p,button,summary,label,.action-copy span,.action-copy strong) { font-family: var(--font-blockprint) !important; }
+.deck-proof-page :is(h1,h2,h3,p,dt,button,a,summary,li,small,span,strong,.audit-transcript-head,.audit-record-hash > span) { font-family: var(--font-blockprint) !important; }
+.deck-proof-page :is(dd,.audit-record-hash > strong,code) { font-family: 'Courier New', monospace !important; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .preparation *, .table-shell * { scroll-behavior: auto; } }

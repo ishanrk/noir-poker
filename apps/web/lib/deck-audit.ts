@@ -17,6 +17,7 @@ import {
   type ShareProof,
 } from "./deck-crypto.ts";
 import { verifyShuffle } from "./deck-proof.ts";
+import { proofQueue } from './proof-queue.ts';
 import type { DealAudit } from "./server.ts";
 
 export type DeckCheck = {
@@ -27,11 +28,16 @@ export type DeckCheck = {
   deck: number[];
 };
 
-export async function verifyDeck(audit: DealAudit, progress: (value: string) => void): Promise<DeckCheck> {
+export async function verifyDeck(audit: DealAudit, progress: (value: string) => void, signal?: AbortSignal): Promise<DeckCheck> {
+  signal?.throwIfAborted();
+  if (audit.protocol_version !== 1) throw new Error("unsupported deck protocol");
+  if (![audit.deck, audit.keys, audit.key_proofs, audit.shuffles, audit.openings, audit.records].every(Array.isArray)) throw new Error("incomplete deck transcript");
+  if (audit.records.length > 512 || audit.keys.length > 7) throw new Error("invalid transcript size");
   const ordered = [...audit.deck].sort((a, b) => a - b);
   if (
     audit.protocol_version !== 1 ||
     !Number.isSafeInteger(audit.hand_no) ||
+    audit.hand_no < 0 ||
     audit.keys.length < 2 ||
     audit.keys.length !== audit.key_proofs.length ||
     audit.shuffles.length !== audit.keys.length ||
@@ -50,13 +56,16 @@ export async function verifyDeck(audit: DealAudit, progress: (value: string) => 
   if (!prior || !sameDeck(prior, expected)) throw new Error("invalid canonical deck");
   const participants = new Map<number, number>();
   const shares = new Map<number, PointValue[]>();
+  const shareOwners = new Map<number, Set<number>>();
   const openings = new Set<number>();
 
   for (const [seq, record] of audit.records.entries()) {
+    signal?.throwIfAborted();
     if (record.seq !== seq) throw new Error("invalid transcript order");
     const payload = unbase64(record.payload);
 
     if (record.kind === "key") {
+      if (shuffleIndex || keyIndex >= audit.keys.length || (keyIndex === 0 ? record.seat !== undefined : record.seat === undefined || participants.has(record.seat) || record.seat < 0 || record.seat > 5)) throw new Error("invalid key order");
       progress(`checking key ${keyIndex + 1}`);
       const key = audit.keys[keyIndex];
       const proof = audit.key_proofs[keyIndex];
@@ -66,20 +75,21 @@ export async function verifyDeck(audit: DealAudit, progress: (value: string) => 
       if (record.seat !== undefined) participants.set(record.seat, keyIndex);
       keyIndex += 1;
     } else if (record.kind === "shuffle") {
+      if (keyIndex !== audit.keys.length || shuffleIndex >= audit.shuffles.length || openings.size) throw new Error("invalid shuffle order");
       progress(`checking shuffle ${shuffleIndex + 1}`);
       const value = audit.shuffles[shuffleIndex];
       if (
         value.participant !== shuffleIndex ||
         !prior ||
         !sameDeck(value.input, prior) ||
-        !(await verifyShuffle({
+        !(await proofQueue.run(2, () => verifyShuffle({
           hand: audit.hand_no,
           seat: value.participant,
           context: hex(head),
           input: value.input,
           output: value.output,
           key: aggregate,
-        }, value.proof, value.public_inputs))
+        }, value.proof, value.public_inputs), signal))
       ) throw new Error("invalid shuffle proof");
       const expected = join(
         Uint8Array.of(value.participant),
@@ -92,9 +102,13 @@ export async function verifyDeck(audit: DealAudit, progress: (value: string) => 
       prior = value.output;
       shuffleIndex += 1;
     } else if (record.kind === "share") {
+      if (shuffleIndex !== audit.shuffles.length || openings.size) throw new Error("invalid share order");
       const participant = record.seat === undefined ? 0 : participants.get(record.seat);
       if (participant === undefined) throw new Error("invalid share participant");
       for (const item of parseShares(payload)) {
+        const owners = shareOwners.get(item.position) ?? new Set<number>();
+        if (owners.has(participant)) throw new Error("duplicate decryption share");
+        owners.add(participant); shareOwners.set(item.position, owners);
         if (
           item.position >= prior.length ||
           !(await verifyShare(prior[item.position], audit.keys[participant], item.value, item.proof, head))
@@ -114,6 +128,7 @@ export async function verifyDeck(audit: DealAudit, progress: (value: string) => 
         }
       }
     } else if (record.kind === "opening") {
+      if (shuffleIndex !== audit.shuffles.length || complete) throw new Error("invalid opening order");
       const participant = record.seat === undefined ? 0 : participants.get(record.seat);
       if (participant === undefined || openings.has(participant)) throw new Error("invalid final opening");
       progress(`checking opening ${openings.size + 1}`);
@@ -124,6 +139,7 @@ export async function verifyDeck(audit: DealAudit, progress: (value: string) => 
       if (hex(payload) !== secret) throw new Error("opening missing from transcript");
       openings.add(participant);
     } else if (record.kind === "complete") {
+      if (openings.size !== audit.openings.length || seq !== audit.records.length - 1) throw new Error("incomplete deck transcript");
       if (complete !== 0 || hex(payload) !== hex(Uint8Array.from(audit.deck))) {
         throw new Error("deck missing from transcript");
       }
@@ -141,9 +157,9 @@ export async function verifyDeck(audit: DealAudit, progress: (value: string) => 
     shuffleIndex !== audit.shuffles.length ||
     openings.size !== audit.openings.length ||
     complete !== 1 ||
-    hex(head) !== audit.transcript_hash ||
     !prior
   ) throw new Error("incomplete deck transcript");
+  if (hex(head) !== audit.transcript_hash) throw new Error("invalid transcript hash chain");
 
   progress("reconstructing deck");
   const deck = await Promise.all(prior.map((card) =>

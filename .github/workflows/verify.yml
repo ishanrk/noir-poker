@@ -1,0 +1,62 @@
+name: Local compatibility gates
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.12.0
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+        working-directory: apps/web
+      - run: npm run lint && npm run typecheck && npm run state:test && npm run challenge:test && npm run deck:test && npm run deal:test && npm run receipt:test && npm run aztec:test && npm run build
+        working-directory: apps/web
+  native-proof-and-database:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: noir
+          POSTGRES_PASSWORD: local-ci-only
+          POSTGRES_DB: noir_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U noir -d noir_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned native tools and circuits
+        run: docker build --target test-gates --build-arg NOIR_SOURCE_COMMIT="${{ github.sha }}" --build-arg NOIR_SOURCE_DIRTY=false -t noir-proof-gates .
+      - name: Run unit tests and every ignored native integration
+        run: docker run --rm --network host -e BB_PATH=/usr/local/bin/bb -e TEST_DATABASE_URL=postgres://noir:local-ci-only@127.0.0.1:5432/noir_test noir-proof-gates bash -c 'cargo test --workspace --locked -- --include-ignored --test-threads=1 && (cd circuits/challenge-v2 && nargo test) && (cd circuits/deck-v1 && nargo test)'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.12.0
+      - name: Prepare actual browser gate
+        working-directory: apps/web
+        env:
+          NEXT_PUBLIC_SERVER_URL: http://127.0.0.1:3141
+        run: npm ci && npx playwright install --with-deps chromium && npm run build
+      - name: Real bot, six seat, friend, and rejection journeys
+        working-directory: apps/web
+        run: |
+          docker run --detach --rm --name noir-browser-server --network host -e BB_PATH=/usr/local/bin/bb -e DATABASE_URL=postgres://noir:local-ci-only@127.0.0.1:5432/noir_test -e WEB_ORIGINS=http://127.0.0.1:3140 -e PORT=3141 noir-proof-gates /src/target/release/server
+          npm run start -- -H 127.0.0.1 -p 3140 &
+          browser_web_pid=$!
+          trap 'kill "$browser_web_pid"; docker stop noir-browser-server' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3141/ready && curl --fail --silent http://127.0.0.1:3140 >/dev/null; then break; fi
+            sleep 1
+          done
+          node scripts/reliability-journey.mjs
+          node --experimental-strip-types scripts/receipt-negative.mjs ../../.local/polish/reliability/completed-2.json

@@ -30,12 +30,23 @@ RUN curl -fL --retry 5 --retry-delay 2 \
 
 WORKDIR /src
 COPY . .
+ARG NOIR_SOURCE_COMMIT=unknown
+ARG NOIR_SOURCE_DIRTY=unknown
+ENV NOIR_SOURCE_COMMIT=${NOIR_SOURCE_COMMIT} NOIR_SOURCE_DIRTY=${NOIR_SOURCE_DIRTY}
 
 RUN NARGO_PATH=/usr/local/bin/nargo \
     BB_PATH=/usr/local/bin/bb \
     ./scripts/build-zk.sh
 
 RUN cargo build --locked --release -p server
+
+FROM node:24.12.0-bookworm-slim AS test-node
+
+FROM builder AS test-gates
+COPY --from=test-node /usr/local/bin/node /usr/local/bin/node
+COPY --from=test-node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && npm ci --ignore-scripts --prefix apps/web
 
 FROM debian:bookworm-slim AS runtime
 
