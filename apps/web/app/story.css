@@ -904,6 +904,12 @@
 
 /* home */
 
+.home-page > .site-header,
+.home-page > .site-header .wordmark,
+.home-page > .site-header nav a {
+  font-family: "Block Blueprint", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif !important;
+}
+
 .home-page .hero-copy h1,
 .home-page .hero-tagline,
 .home-page .hero-tech,
@@ -929,6 +935,19 @@
   font-size: clamp(19px, 2vw, 23px) !important;
   font-weight: 520;
   line-height: 1.45 !important;
+}
+
+.home-page .hero-verifiable {
+  display: inline-block;
+  margin-left: 14px;
+  padding: 4px 7px 3px;
+  color: var(--blue);
+  background: var(--lime);
+  font-size: 0.62em;
+  font-weight: 400;
+  line-height: 1.2;
+  text-transform: uppercase;
+  vertical-align: 0.12em;
 }
 
 .home-page .hero-tech {
