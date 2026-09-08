@@ -24,7 +24,7 @@ pub async fn ensure_pending(db: &Db) -> FairResult<()> {
     let rows = query(
         "SELECT rooms.id, rooms.players, rooms.total_hands, COALESCE(MAX(hands.hand_no) + 1, 0) AS next_hand \
          FROM rooms LEFT JOIN hands ON hands.room_id = rooms.id \
-         WHERE NOT EXISTS (SELECT 1 FROM room_interruptions WHERE room_interruptions.room_id = rooms.id) AND NOT EXISTS ( \
+         WHERE NOT EXISTS ( \
              SELECT 1 FROM deck_transcripts \
              WHERE deck_transcripts.room_id = rooms.id \
              AND deck_transcripts.completed_at IS NULL \

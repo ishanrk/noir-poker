@@ -14,7 +14,7 @@ export default function ChipsPage() {
           <p className="story-kicker">Aztec testnet</p>
           <h1>Tajaderos</h1>
           <p>
-            Private test credits on Aztec. Claim a balance, then join a table.
+            Private test credits on Aztec. Claim a balance then lock one table buy-in.
           </p>
         </div>
       </section>

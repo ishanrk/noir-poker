@@ -108,37 +108,11 @@ impl DeckProofs {
     }
 
     pub async fn prove(&self, input: ShuffleInput<'_>) -> DeckResult<ShuffleProof> {
-        let permit = crate::proof_admission::admit().await?;
         let bytecode = Arc::clone(&self.bytecode);
         let api = Arc::clone(&self.api);
-        let program = Arc::clone(&self.program);
-        let (hand_no, seat, context, key) = (input.hand_no, input.seat, input.context, input.key);
-        let (deck, output, permutation, masks) = (
-            *input.input,
-            *input.output,
-            *input.permutation,
-            *input.masks,
-        );
+        let witness = witness(&self.program, input)?;
 
         tokio::task::spawn_blocking(move || {
-            // Admission stays charged until the actual blocking call ends, even if its caller leaves.
-            let _permit = permit;
-            let witness_at = std::time::Instant::now();
-            let witness = witness(
-                &program,
-                ShuffleInput {
-                    hand_no,
-                    seat,
-                    context,
-                    key,
-                    input: &deck,
-                    output: &output,
-                    permutation: &permutation,
-                    masks: &masks,
-                },
-            )?;
-            crate::proof_admission::record("witness", witness_at);
-            let proof_at = std::time::Instant::now();
             let mut api = api
                 .lock()
                 .map_err(|_| io::Error::other("deck prover stopped"))?;
@@ -152,7 +126,6 @@ impl DeckProofs {
                 settings(),
             )?;
             let proof_bytes = result.proof.concat();
-            crate::proof_admission::record("prove", proof_at);
             let public_input_bytes = result.public_inputs.concat();
 
             Ok(ShuffleProof {
@@ -166,22 +139,17 @@ impl DeckProofs {
     }
 
     pub async fn verify(&self, proof: &ShuffleProof) -> DeckResult<bool> {
-        let permit = crate::proof_admission::admit().await?;
         let api = Arc::clone(&self.api);
         let proof_fields = proof.proof.clone();
         let public_inputs = proof.public_inputs.clone();
 
         tokio::task::spawn_blocking(move || {
-            let _permit = permit;
             let mut api = api
                 .lock()
                 .map_err(|_| io::Error::other("deck verifier stopped"))?;
-            let at = std::time::Instant::now();
-            let result = api
+            Ok(api
                 .circuit_verify(VK, public_inputs, proof_fields, settings())?
-                .verified;
-            crate::proof_admission::record("verify", at);
-            Ok(result)
+                .verified)
         })
         .await?
     }

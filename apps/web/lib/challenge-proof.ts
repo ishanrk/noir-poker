@@ -1,5 +1,4 @@
 import circuit from "../zk/challenge_v2.json" with { type: "json" };
-import { proofQueue } from './proof-queue.ts';
 
 export type ProofStatus = "preparing" | "proving";
 
@@ -38,24 +37,13 @@ const PUBLIC_BYTES = PUBLIC_FIELDS * 32;
 export async function proveChallenge(
   input: ChallengeProofInput,
   status: (value: ProofStatus) => void,
-  signal?: AbortSignal,
 ) {
-  return proofQueue.run(1, () => proveChallengeJob(input, status, signal), signal);
-}
-
-async function proveChallengeJob(
-  input: ChallengeProofInput,
-  status: (value: ProofStatus) => void,
-  signal?: AbortSignal,
-) {
-  signal?.throwIfAborted();
   status("preparing");
 
   const [{ BackendType, Barretenberg, UltraHonkBackend }, { Noir }] = await Promise.all([
     import("@aztec/bb.js"),
     import("@noir-lang/noir_js"),
   ]);
-  signal?.throwIfAborted();
   const noir = new Noir(circuit as ConstructorParameters<typeof Noir>[0]);
   const { witness } = await noir.execute({
     mode: input.mode,
@@ -74,19 +62,16 @@ async function proveChallengeJob(
     siblings: input.siblings.map((value) => Array.from(value)),
   });
 
-  signal?.throwIfAborted();
   status("proving");
 
   const api = await Barretenberg.new({ backend: BackendType.WasmWorker });
 
   try {
-    signal?.throwIfAborted();
     const backend = new UltraHonkBackend(circuit.bytecode, api);
     const proof = await backend.generateProof(witness, {
       verifierTarget: "noir-recursive",
     });
 
-    signal?.throwIfAborted();
     if (proof.publicInputs.length !== PUBLIC_FIELDS || proof.proof.length > 65536) {
       throw new Error("invalid challenge proof");
     }
@@ -109,10 +94,6 @@ export async function verifyChallengeProofs(
   proofs: readonly EncodedProof[],
   onVerified?: (index: number) => void,
 ) {
-  return proofQueue.run(2, () => verifyChallengeProofsJob(proofs, onVerified));
-}
-
-async function verifyChallengeProofsJob(proofs: readonly EncodedProof[], onVerified?: (index: number) => void) {
   const { BackendType, Barretenberg, UltraHonkBackend, deflattenFields } = await import(
     "@aztec/bb.js"
   );

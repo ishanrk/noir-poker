@@ -24,21 +24,20 @@ export function HandHistory({ room }: { room: string }) {
       <SiteHeader compact />
       <div className={styles.page}>
         <header className={styles.hero}>
-          <p className={styles.label}>Room <code>{room}</code></p>
-          <h1>Hand history</h1>
+          <p className={styles.label}>ROOM {room}</p>
+          <h1>HAND HISTORY</h1>
           <p>Completed hands with a public deal transcript</p>
         </header>
         {error && <p className={styles.error}>{error}</p>}
         <div className={styles.list}>
           {hands?.map((hand) => (
             <article className={styles.entry} key={hand.hand_no}>
-              <strong>Hand {hand.hand_no + 1}</strong>
-              <span>Transcript ready. Dealer is Player {hand.dealer + 1}.</span>
-              <Link href={`/audit/${room}/${hand.hand_no}`}>Check this deal</Link>
+              <strong>HAND {hand.hand_no + 1}</strong>
+              <span>TRANSCRIPT READY&nbsp;&nbsp;&nbsp;DEALER PLAYER {hand.dealer + 1}</span>
+              <Link href={`/audit/${room}/${hand.hand_no}`} target="_blank">VERIFY HAND</Link>
             </article>
           ))}
-          {!hands && !error && <p role="status">Loading hand history…</p>}
-          {hands?.length === 0 && <p>No completed hands yet.</p>}
+          {hands?.length === 0 && <p>NO COMPLETED HANDS</p>}
         </div>
       </div>
     </main>

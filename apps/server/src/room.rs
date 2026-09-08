@@ -93,8 +93,6 @@ impl RoomConfig {
 }
 
 pub(super) struct Room {
-    pub(super) last_activity: std::time::Instant,
-    pub(super) retired: bool,
     pub(super) config: RoomConfig,
     pub(super) mode: RoomMode,
     pub(super) seats: Vec<Seat>,
@@ -148,8 +146,6 @@ impl Room {
         let (notify, _) = broadcast::channel(16);
 
         Ok(Self {
-            last_activity: std::time::Instant::now(),
-            retired: false,
             config,
             mode,
             seats: vec![Seat::new(token_hash, "Player 1".to_owned())],

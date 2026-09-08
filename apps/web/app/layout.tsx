@@ -17,13 +17,11 @@ import "./repair.css";
 import "./story.css";
 import "./proof-guides.css";
 import "./aztec.css";
-import "./table-polish.css";
-import "./motivation-polish.css";
 
 export const metadata: Metadata = {
   title: "Noir Poker",
   description: "Six-max Texas Hold’em with auditable dealing and private zero-knowledge challenges",
-  icons: { icon: { url: "/favicon.svg", type: "image/svg+xml", sizes: "any" } },
+  icons: { icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" },
 };
 
 type LayoutProps = Readonly<{ children: ReactNode }>;
@@ -31,7 +29,6 @@ type LayoutProps = Readonly<{ children: ReactNode }>;
 export default function RootLayout({ children }: LayoutProps) {
   return (
     <html lang="en">
-      <head><link rel="preload" href="/fonts/block-blueprint.ttf" as="font" type="font/ttf" crossOrigin="anonymous" /></head>
       <body>
         <UiSounds />
         {children}

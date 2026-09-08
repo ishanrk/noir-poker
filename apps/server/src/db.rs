@@ -486,7 +486,6 @@ impl Db {
         )
     }
 
-    #[cfg(test)]
     pub async fn incomplete_rooms(&self) -> DbResult<u64> {
         let row = query(
             "SELECT COUNT(DISTINCT room_id) AS count FROM deck_transcripts \
@@ -498,136 +497,6 @@ impl Db {
         .fetch_one(&self.pool)
         .await?;
         Ok(u64::try_from(row.try_get::<i64, _>("count")?)?)
-    }
-
-    pub async fn interrupt_incomplete_rooms(&self) -> DbResult<u64> {
-        Ok(query(
-            "INSERT INTO room_interruptions (room_id, hand_no, reason) \
-             SELECT room_id, MIN(hand_no), 'server_restart' FROM deck_transcripts \
-             WHERE completed_at IS NULL GROUP BY room_id \
-             ON CONFLICT (room_id) DO NOTHING",
-        )
-        .execute(&self.pool)
-        .await?
-        .rows_affected())
-    }
-
-    pub async fn public_room_id(&self, code: &str) -> DbResult<Option<Uuid>> {
-        if let Ok(id) = Uuid::parse_str(code) {
-            return Ok(query("SELECT id FROM rooms WHERE id = $1")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await?
-                .map(|row| row.get("id")));
-        }
-        if code.len() != 8 || !code.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Ok(None);
-        }
-        let rows = query(
-            "SELECT id FROM rooms WHERE upper(left(replace(id::text, '-', ''), 8)) = $1 LIMIT 2",
-        )
-        .bind(code.to_ascii_uppercase())
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(if rows.len() == 1 {
-            Some(rows[0].get("id"))
-        } else {
-            None
-        })
-    }
-
-    #[cfg(test)]
-    pub async fn interrupted(&self, room: Uuid) -> DbResult<bool> {
-        Ok(
-            query("SELECT room_id FROM room_interruptions WHERE room_id = $1")
-                .bind(room)
-                .fetch_optional(&self.pool)
-                .await?
-                .is_some(),
-        )
-    }
-
-    pub async fn interruption_reason(&self, room: Uuid) -> DbResult<Option<String>> {
-        Ok(
-            query("SELECT reason FROM room_interruptions WHERE room_id = $1")
-                .bind(room)
-                .fetch_optional(&self.pool)
-                .await?
-                .map(|row| row.get("reason")),
-        )
-    }
-
-    pub async fn retire_idle_room(
-        &self,
-        room: Uuid,
-        hand: u64,
-        completed: Option<u64>,
-    ) -> DbResult<()> {
-        query("INSERT INTO room_interruptions (room_id, hand_no, reason, last_completed_hand) VALUES ($1, $2, 'idle_timeout', $3) ON CONFLICT (room_id) DO NOTHING")
-            .bind(room).bind(i64::try_from(hand)?).bind(completed.map(i64::try_from).transpose()?).execute(&self.pool).await?;
-        Ok(())
-    }
-
-    pub async fn last_completed_deck(&self, room: Uuid) -> DbResult<Option<u64>> {
-        let row = query("SELECT greatest((SELECT max(hand_no) FROM deck_transcripts WHERE room_id = $1 AND completed_at IS NOT NULL), (SELECT last_completed_hand FROM room_interruptions WHERE room_id = $1)) AS hand_no")
-            .bind(room).fetch_one(&self.pool).await?;
-        row.get::<Option<i64>, _>("hand_no")
-            .map(u64::try_from)
-            .transpose()
-            .map_err(Into::into)
-    }
-
-    pub async fn ready(&self) -> bool {
-        matches!(
-            tokio::time::timeout(
-                std::time::Duration::from_secs(2),
-                query("SELECT 1").execute(&self.pool)
-            )
-            .await,
-            Ok(Ok(_))
-        )
-    }
-
-    pub async fn creation_matches(
-        &self,
-        id: Uuid,
-        token: &[u8; 32],
-        config: RoomConfig,
-        mode: &str,
-        name: &str,
-        entropy: Option<&str>,
-    ) -> DbResult<bool> {
-        let row = query("SELECT r.mode, r.players, r.stack, r.small_blind, r.big_blind, r.total_hands, s.name, s.token_hash, e.share FROM rooms r JOIN seats s ON s.room_id = r.id AND s.seat = 0 LEFT JOIN hand_entropy e ON e.room_id = r.id AND e.hand_no = 0 AND e.seat = 0 WHERE r.id = $1")
-            .bind(id).fetch_one(&self.pool).await?;
-        let share: Option<Vec<u8>> = row.get("share");
-        Ok(row.get::<String, _>("mode") == mode
-            && row.get::<i32, _>("players") == config.players as i32
-            && row.get::<i64, _>("stack") == i64::from(config.stack)
-            && row.get::<i64, _>("small_blind") == i64::from(config.small_blind)
-            && row.get::<i64, _>("big_blind") == i64::from(config.big_blind)
-            && row.get::<i32, _>("total_hands") == config.hands as i32
-            && row.get::<String, _>("name") == name
-            && row.get::<Vec<u8>, _>("token_hash") == token
-            && (mode == "single"
-                || entropy
-                    .and_then(crate::decode_hex)
-                    .as_ref()
-                    .map(|s| s.as_slice())
-                    == share.as_deref()))
-    }
-
-    pub async fn join_matches(
-        &self,
-        id: Uuid,
-        seat: usize,
-        name: &str,
-        share: &[u8; 32],
-    ) -> DbResult<bool> {
-        let row = query("SELECT s.name, e.share FROM seats s JOIN hand_entropy e ON e.room_id = s.room_id AND e.seat = s.seat AND e.hand_no = 0 WHERE s.room_id = $1 AND s.seat = $2")
-            .bind(id).bind(i32::try_from(seat)?).fetch_optional(&self.pool).await?;
-        Ok(row.is_some_and(|row| {
-            row.get::<String, _>("name") == name && row.get::<Vec<u8>, _>("share") == share
-        }))
     }
 
     pub async fn stage_aztec_refunds(&self) -> DbResult<u64> {
@@ -1285,7 +1154,7 @@ impl Db {
     pub async fn load_rooms(&self) -> DbResult<Vec<StoredRoom>> {
         let rows = query(
             "SELECT id, mode, players, stack, small_blind, big_blind, total_hands, \
-             challenge_awarded, rev FROM rooms WHERE NOT EXISTS (SELECT 1 FROM room_interruptions WHERE room_interruptions.room_id = rooms.id) AND NOT EXISTS ( \
+             challenge_awarded, rev FROM rooms WHERE NOT EXISTS ( \
                  SELECT 1 FROM deck_transcripts \
                  WHERE deck_transcripts.room_id = rooms.id \
                  AND deck_transcripts.completed_at IS NULL \

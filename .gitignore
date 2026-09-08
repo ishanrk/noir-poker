@@ -1,5 +1,4 @@
 .local/
-/.private/
 /target/
 /circuits/challenge-v2/target/
 /circuits/deck-v1/target/

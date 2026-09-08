@@ -176,23 +176,6 @@ function sent(trace, kind) {
   });
 }
 
-function sentPokerAction(trace, kind) {
-  return trace.frames.filter((item) => {
-    const message = value(item);
-    return item.direction === "sent" && (
-      message?.type === kind ||
-      (message?.type === "wager" && message.action?.type === kind)
-    );
-  });
-}
-
-function sentReady(trace) {
-  return trace.frames.filter((item) => {
-    const message = value(item);
-    return item.direction === "sent" && (message?.type === "ready" || message?.type === "ready_hand");
-  });
-}
-
 function actionTimes(trace, hand) {
   const found = new Map();
   for (const item of trace.frames) {
@@ -205,9 +188,7 @@ function actionTimes(trace, hand) {
 }
 
 function actionCount(trace) {
-  return sentPokerAction(trace, "call").length +
-    sentPokerAction(trace, "check").length +
-    sentPokerAction(trace, "fold").length;
+  return sent(trace, "call").length + sent(trace, "check").length + sent(trace, "fold").length;
 }
 
 function paced(trace, hand) {
@@ -255,11 +236,11 @@ async function singleAction(trace) {
 }
 
 async function settleSingle(trace, hand, final) {
-  const before = sentPokerAction(trace, "fold").length;
+  const before = sent(trace, "fold").length;
   const fold = trace.page.getByRole("button", { name: "Fold" });
   await until(async () => await fold.isEnabled(), `single hand ${hand + 1} fold unavailable`);
   await fold.click();
-  await until(() => sentPokerAction(trace, "fold").length === before + 1, `single hand ${hand + 1} fold not sent`);
+  await until(() => sent(trace, "fold").length === before + 1, `single hand ${hand + 1} fold not sent`);
   await frame(
     trace,
     (message) =>
@@ -277,16 +258,16 @@ async function settleSingle(trace, hand, final) {
 }
 
 async function nextSingle(trace, hand) {
-  const before = sentReady(trace).length;
-  const ready = trace.page.getByRole("button", { name: /^(Ready for Next Hand|Next hand)$/i });
+  const before = sent(trace, "ready").length;
+  const ready = trace.page.getByRole("button", { name: "Ready for Next Hand" });
   await until(async () => await ready.isEnabled(), `single hand ${hand + 1} ready unavailable`);
   await ready.click();
-  await until(() => sentReady(trace).length === before + 1, `single hand ${hand + 1} ready not sent`);
+  await until(() => sent(trace, "ready").length === before + 1, `single hand ${hand + 1} ready not sent`);
   await waitHand(trace, hand + 1);
   await trace.page.getByText(`Hand ${hand + 2} of 3`, { exact: true }).waitFor({ timeout: 240_000 });
-  await trace.page.getByText(`Completed hand ${hand + 1}`, { exact: true }).waitFor();
+  await trace.page.getByText(`Deck Randomness Proof — Hand ${hand + 1}`, { exact: true }).waitFor();
   assert.equal(
-    await trace.page.getByText(`Completed hand ${hand + 1}`, { exact: true }).count(),
+    await trace.page.getByText(`Deck Randomness Proof — Hand ${hand + 1}`, { exact: true }).count(),
     1,
   );
   const cards = await hole(trace.page);
@@ -333,15 +314,13 @@ async function singleStress() {
   await nextSingle(trace, 1);
   await singleAction(trace);
   await settleSingle(trace, 2, true);
-  const verifyDeck = trace.page.locator('a[href^="/audit/"][href$="/2"]', {
-    hasText: "Check this deal",
-  });
+  const verifyDeck = trace.page.getByRole("link", { name: /Verify Deck/ });
   await verifyDeck.waitFor();
-  assert.match(await verifyDeck.getAttribute("href"), /^\/audit\/[0-9A-F]{8}\/2$/);
-  await trace.page.goto(base, { waitUntil: "networkidle" });
+  assert.equal(await verifyDeck.getAttribute("target"), "_blank", "deck proof replaced the table tab");
+  await trace.page.waitForURL(`${base}/`, { timeout: 10_000 });
 
   await checkNoticePacing(trace, "single");
-  assert.equal(sentReady(trace).length, 2, "single did not ready twice");
+  assert.equal(sent(trace, "ready").length, 2, "single did not ready twice");
   validDeckKey(trace);
   assert.equal(sent(trace, "challenge_commit").length, 0, "single challenge assigned");
   assert.equal(sent(trace, "challenge_draw").length, 0, "single draw proof generated");
@@ -368,12 +347,12 @@ async function foldCurrent(a, b, hand) {
     return undefined;
   }, `hand ${hand + 1} turn missing`);
   const { trace, button } = current;
-  const before = sentPokerAction(trace, "fold").length;
+  const before = sent(trace, "fold").length;
   await button.evaluate((node) => {
     node.click();
     node.click();
   });
-  await until(() => sentPokerAction(trace, "fold").length === before + 1, "multiplayer double fold sent twice");
+  await until(() => sent(trace, "fold").length === before + 1, "multiplayer double fold sent twice");
 }
 
 const objectives = [
@@ -413,7 +392,7 @@ async function currentPlayer(a, b, hand) {
 }
 
 async function act(trace, kind) {
-  const before = sentPokerAction(trace, kind).length;
+  const before = sent(trace, kind).length;
   if (kind === "raise_to") {
     const min = trace.page.getByRole("button", { name: "Min" });
     const raise = trace.page.getByRole("button", { name: "Raise", exact: true });
@@ -426,7 +405,7 @@ async function act(trace, kind) {
     await until(async () => await button.isEnabled(), `${kind} unavailable`);
     await button.click();
   }
-  await until(() => sentPokerAction(trace, kind).length === before + 1, `${kind} not sent`);
+  await until(() => sent(trace, kind).length === before + 1, `${kind} not sent`);
 }
 
 async function safe(trace) {
@@ -598,8 +577,8 @@ async function multiplayerStress() {
   await foldCurrent(a, b, 0);
   const [aChallenge, bChallenge] = await Promise.all([challenge(a.page), challenge(b.page)]);
 
-  const aReady = a.page.getByRole("button", { name: /^(Ready for Next Hand|Next hand)$/i });
-  const bReady = b.page.getByRole("button", { name: /^(Ready for Next Hand|Next hand)$/i });
+  const aReady = a.page.getByRole("button", { name: "Ready for Next Hand" });
+  const bReady = b.page.getByRole("button", { name: "Ready for Next Hand" });
   await Promise.all([
     until(async () => await aReady.isEnabled(), "first ready unavailable while draw proof pending"),
     until(async () => await bReady.isEnabled(), "second ready unavailable while draw proof pending"),
@@ -687,8 +666,8 @@ async function multiplayerStress() {
     return undefined;
   }, "showdown profit challenge not completed");
 
-  const aNextReady = a.page.getByRole("button", { name: /^(Ready for Next Hand|Next hand)$/i });
-  const bNextReady = b.page.getByRole("button", { name: /^(Ready for Next Hand|Next hand)$/i });
+  const aNextReady = a.page.getByRole("button", { name: "Ready for Next Hand" });
+  const bNextReady = b.page.getByRole("button", { name: "Ready for Next Hand" });
   await Promise.all([
     until(async () => await aNextReady.isEnabled(), "ready blocked by completion proof"),
     until(async () => await bNextReady.isEnabled(), "ready blocked by completion proof"),
@@ -933,7 +912,7 @@ async function tableStress() {
     await Promise.all(
       tables.map(async ({ a }) => {
         await a.page.getByRole("button", { name: "Finish Game" }).click();
-        await a.page.getByRole("button", { name: "Finished 1 of 2" }).waitFor({ timeout: 15_000 });
+        await a.page.getByRole("button", { name: "Finished 1/2" }).waitFor({ timeout: 15_000 });
         assert.equal(Boolean(latest(a).view.game_over), false, "first finish ended table");
       }),
     );

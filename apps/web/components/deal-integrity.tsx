@@ -23,11 +23,11 @@ export function PreviousDealIntegrity({ room, hand }: {
         <span>✓</span>
       </div>
       <div className="deal-copy">
-        <strong>Completed hand {hand + 1}</strong>
+        <strong>Deck Randomness Proof — Hand {hand + 1}</strong>
       </div>
       <div className="deal-actions">
-        <Link href={`/audit/${room}/${hand}`}>
-          Check this deal
+        <Link href={`/audit/${room}/${hand}`} target="_blank">
+          Verify Deck →
         </Link>
       </div>
     </section>

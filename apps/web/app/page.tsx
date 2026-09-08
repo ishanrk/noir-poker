@@ -29,7 +29,7 @@ export default function Home() {
             <span className="hero-title-poker">Poker</span>
           </h1>
           <p className="hero-tagline">
-            I promise that a rigged server isn&apos;t why you blew through your stack (you can check)
+            I promise that a rigged server isn&apos;t why you blew threw your stack (you can check)
           </p>
           <p className="hero-tech">
             Written in <span className="tech-rust">Rust</span> and{" "}

@@ -33,18 +33,18 @@ export function ProofHistory({ room, seat }: { room: string; seat?: number }) {
       <SiteHeader compact />
       <div className={styles.page}>
         <header className={styles.hero}>
-          <p className={styles.label}>Room <code>{room}</code></p>
-          <h1>{seat === undefined ? "Proof history" : `Player ${seat + 1} proofs`}</h1>
+          <p className={styles.label}>ROOM {room}</p>
+          <h1>{seat === undefined ? "PROOF HISTORY" : `PLAYER ${seat + 1} PROOFS`}</h1>
           <p>Published challenge evidence without private objectives or hidden inputs</p>
         </header>
-        {!proofs && !error && <p className={styles.proofNote} role="status">Loading proof history…</p>}
+        {!proofs && !error && <p className={styles.proofNote}>LOADING PROOF HISTORY</p>}
         {error && (
           <div className={styles.actions}>
             <p className={styles.error}>{error}</p>
-            <button type="button" onClick={retry}>Retry</button>
+            <button type="button" onClick={retry}>RETRY</button>
           </div>
         )}
-        {shown?.length === 0 && <p className={styles.proofNote}>No challenge proofs yet.</p>}
+        {shown?.length === 0 && <p className={styles.proofNote}>NO CHALLENGE PROOFS YET</p>}
         <div className={styles.list}>
           {shown?.map((proof) => (
             <ProofEntry key={`${proof.hand_no}-${proof.seat}`} room={room} proof={proof} />
@@ -61,20 +61,20 @@ function ProofEntry({ room, proof }: {
 }) {
   return (
     <article className={styles.entry}>
-      <strong>Hand {proof.hand_no + 1}</strong>
+      <strong>HAND {proof.hand_no + 1}</strong>
       <div className={styles.historyProofs}>
-        <span>Player {proof.seat + 1}</span>
+        <span>PLAYER {proof.seat + 1}</span>
         <span>
-          Draw proof: {proof.draw_published ? "Published" : "Not published"}
-          {proof.draw_published && <Link href={`/room/${room}/proofs/${proof.hand_no}/${proof.seat}/draw`} target="_blank">View proof</Link>}
+          DRAW PROOF&nbsp;&nbsp;&nbsp;{proof.draw_published ? "PUBLISHED" : "NOT PUBLISHED"}
+          {proof.draw_published && <Link href={`/room/${room}/proofs/${proof.hand_no}/${proof.seat}/draw`} target="_blank">VIEW</Link>}
         </span>
         <span>
-          Completion: {proof.completion_published
-            ? "Challenge completed"
+          COMPLETION&nbsp;&nbsp;&nbsp;{proof.completion_published
+            ? "CHALLENGE COMPLETED"
             : proof.finished
-              ? "Missed"
-              : "Assigned"}
-          {proof.completion_published && <Link href={`/room/${room}/proofs/${proof.hand_no}/${proof.seat}/completion`} target="_blank">View proof</Link>}
+              ? "MISSED"
+              : "ASSIGNED"}
+          {proof.completion_published && <Link href={`/room/${room}/proofs/${proof.hand_no}/${proof.seat}/completion`} target="_blank">VIEW</Link>}
         </span>
       </div>
     </article>

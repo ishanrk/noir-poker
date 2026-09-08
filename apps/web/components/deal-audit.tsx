@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 
 import { Card } from "@/components/card";
 import { SiteHeader } from "@/components/site-header";
@@ -133,11 +132,11 @@ const protocol = [
       "Any changed or invalid value makes verification fail",
     ],
     source: "Portable verifier source",
-    href: "https://github.com/ishanrk/noir-poker/blob/5c3c9c49687b10ed0cf61bc32c95aed5736b90d4/apps/web/scripts/verify-deal.mjs",
+    href: "https://github.com/ishanrk/noir-poker/blob/main/apps/web/scripts/verify-deal.mjs",
   },
 ] as const;
 
-const verifierSource = "https://github.com/ishanrk/noir-poker/blob/5c3c9c49687b10ed0cf61bc32c95aed5736b90d4/apps/web/scripts/verify-deal.mjs";
+const verifierSource = "https://github.com/ishanrk/noir-poker/blob/main/apps/web/scripts/verify-deal.mjs";
 
 function proofFileName(audit: DealAudit) {
   return `noir-poker-${audit.room}-hand-${audit.hand_no + 1}-deck-proof.json`;
@@ -185,19 +184,12 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
 
   useEffect(() => {
     let live = true;
-    const lifetime = new AbortController();
-    queueMicrotask(() => {
-      if (!live) return;
-      setState("loading"); setAudit(undefined); setCheck(undefined); setError(undefined);
-      setStep("loading transcript");
-    });
     void loadDealAudit(room, hand)
       .then(async (value) => {
         if (!live) return;
-        const matchesRoom = room.length === 8 ? value.room.replaceAll("-", "").slice(0, 8).toLowerCase() === room.toLowerCase() : value.room.toLowerCase() === room.toLowerCase();
-        if (value.hand_no !== hand || !matchesRoom) throw new Error("deck proof mismatch");
+        if (value.hand_no !== hand) throw new Error("deck proof mismatch");
         setAudit(value);
-        const result = await verifyDeck(value, (next) => live && setStep(next), lifetime.signal);
+        const result = await verifyDeck(value, (next) => live && setStep(next));
         if (!live) return;
         setCheck(result);
         setState("verified");
@@ -208,7 +200,7 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
         setState(message === "deck proof unavailable for this hand" ? "unavailable" : "failed");
         setError(message);
       });
-    return () => { live = false; lifetime.abort(); };
+    return () => { live = false; };
   }, [hand, room]);
 
   const shown: Array<number | undefined> = check
@@ -223,18 +215,18 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
         <div>
           <p className="eyebrow">Deck Randomness Verification</p>
           <h1>{state === "verified" ? "Deck verified" : state === "unavailable" ? "Proof unavailable" : state === "failed" ? "Verification failed" : "Checking deck"}</h1>
-          <p>Check this completed shuffle and deck opening in your browser</p>
+          <p>Short proof showing server didn&apos;t cheat the deck</p>
         </div>
         <div className="deck-proof-seal" data-state={state}>
-          <span>{state === "verified" ? "VALID" : state === "unavailable" ? "UNAVAILABLE" : state === "failed" ? "FAILED" : "CHECKING"}</span>
+          <span>{state === "verified" ? "VALID" : state === "unavailable" ? "OLD HAND" : state === "failed" ? "FAILED" : "CHECKING"}</span>
           <small>{state === "loading" ? step : state === "unavailable" ? "no encrypted transcript" : `${audit?.shuffles.length ?? 0} shuffle proofs`}</small>
         </div>
       </header>
 
       {state === "unavailable" ? (
         <section className="deck-unavailable">
-          <strong>No completed encrypted transcript is available</strong>
-          <p>The hand may still be opening, may have been interrupted, or may use an older deal format. Return to hand history to check its status.</p>
+          <strong>This hand used the previous deal system</strong>
+          <p>Start a new hand with the current server to create an encrypted shuffle proof</p>
         </section>
       ) : error ? <p className="proof-error">{error}</p> : null}
 
@@ -256,7 +248,6 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
             </div>
           </div>
           <div className="audit-proof-actions">
-            <Link className="text-action" href={`/table/${room}`}>Return to table</Link>
             <button type="button" className="primary-action" onClick={() => downloadProofs(audit)}>
               Download Proof Transcript
             </button>
@@ -321,9 +312,8 @@ export function DealAuditView({ room, hand }: { room: string; hand: number }) {
       </section>
 
       <section className="deck-limit">
-        <strong>What this check cannot guarantee</strong>
-        <p>A player or server can stop responding. A valid shuffle proof does not guarantee availability, custody of funds, payout rules, or one history shared by every player. The hash chain binds this record, but does not prevent different records being shown to different people.</p>
-        <p>Cards are private during play. After completion the deck opening lets anyone reconstruct every card, including folded cards. Private challenge objectives use a separate proof.</p>
+        <strong>Abort boundary</strong>
+        <p>A server or player can still disconnect. No protocol can force another machine to send a packet. An abort cannot secretly replace the proven deck and remains visible as an incomplete transcript.</p>
       </section>
     </main>
   );
