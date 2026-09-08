@@ -91,8 +91,20 @@ async function botGame(players, hands) {
       await act(c, c.latest.actions.check ? 'Check' : 'Call');
       await until(() => c.held, 'held wager');
       await page.getByText('Sending your action', { exact: true }).waitFor();
+      const copyFits = await page.locator('.action-copy').evaluate(node => {
+        const parent = node.getBoundingClientRect();
+        const text = node.querySelector('.action-copy-current').getBoundingClientRect();
+        return parent.height > 0 && parent.width > 0 && text.top >= parent.top && text.bottom <= parent.bottom + 1;
+      });
+      assert.equal(copyFits, true, 'Submission status fits its container and is not clipped');
       assert.equal(await page.getByRole('button', { name: 'Fold', exact: true }).isDisabled(), true);
       await page.screenshot({ path: `${output}/${c.name}-submitting.png`, fullPage: true });
+      if (players === 2) {
+        await page.setViewportSize({ width: 390, height: 844 });
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Active table fits narrow viewport');
+        await page.screenshot({ path: `${output}/${c.name}-active-narrow.png`, fullPage: true });
+        await page.setViewportSize({ width: 1440, height: 1000 });
+      }
       const pendingView = c.latest;
       c.hold = false; c.held(); c.held = undefined;
       await until(() => c.latest !== pendingView, 'released wager accepted');

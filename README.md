@@ -47,6 +47,8 @@ The extended journey defaults to frontend port 3140 and server port 3141. Set `B
 
 `JOURNEY=ambiguous` disconnects after a fold was accepted but before the completed opening reaches the client, then reconciles without resending the wager. `node scripts/audio-check.mjs` checks scheduling, keyboard activation, local rejection, slow response feedback, and clip completion across real navigation. It cannot measure sound at the user's speakers.
 
+After the extended journey has saved a completed transcript, `node scripts/visual-refresh-check.mjs` checks supporting page typography, desktop and narrow layouts, keyboard disclosure, receipt verification, and the NP favicon. Override the fixture path with `COMPLETED_TRANSCRIPT`. Set `BASELINE_HOME` to a pre-edit 1440 by 1000 viewport full-page screenshot to additionally check that homepage pixels are unchanged. Captures and results stay under `.local/polish/visual-refresh` by default. These are local browser checks, not wallet transactions or production tests.
+
 ## Protocol and operations
 
 Read [docs/protocol.md](docs/protocol.md), [docs/reliability.md](docs/reliability.md), and [docs/release.md](docs/release.md). Public build identities are available at frontend `/api/build` and server `/build`. `/health` is process liveness; `/ready` checks database responsiveness after successful startup validation without generating a proof.

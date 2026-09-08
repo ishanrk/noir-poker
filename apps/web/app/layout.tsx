@@ -22,7 +22,7 @@ import "./table-polish.css";
 export const metadata: Metadata = {
   title: "Noir Poker",
   description: "Six-max Texas Hold’em with auditable dealing and private zero-knowledge challenges",
-  icons: { icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" },
+  icons: { icon: { url: "/favicon.svg", type: "image/svg+xml", sizes: "any" } },
 };
 
 type LayoutProps = Readonly<{ children: ReactNode }>;

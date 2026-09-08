@@ -51,21 +51,29 @@ export default function PapersPage() {
       <SiteHeader compact />
 
       <header className="brief-hero">
-        <p>Reading list</p>
+        <p className="brief-kicker">Reading list</p>
         <h1>Crypto Papers</h1>
-        <span>Relevant cryptography papers</span>
-        <p>These papers explain related ideas. This game uses a Noir shuffle circuit with UltraHonk, not every construction linked below. Cards stay private during play. The completed deck opening reveals all cards afterward, including folded cards. Deck proofs do not establish custody, solvency, or availability.</p>
+        <p className="brief-description">The ideas behind checkable shuffles and private challenges.</p>
       </header>
 
       <section className="crypto-papers" aria-labelledby="crypto-papers-title">
         <header>
           <h2 id="crypto-papers-title">Reading order</h2>
           <p>
-            This list follows the general order in which I got started understanding
-            zero-knowledge protocols commitment schemes and Aztec&apos;s network
+            Start with commitments and zero knowledge, then explore mental poker,
+            shuffle proofs, and Aztec. This is the order that helped me learn.
           </p>
-          <p>I especially like commitment schemes and zero-knowledge protocols because they are pretty cool</p>
         </header>
+        <aside className="reading-context" aria-label="How these papers relate to Noir Poker">
+          <h3>What this game uses</h3>
+          <div>
+            <p>Noir Poker uses a Noir shuffle circuit with UltraHonk. These papers explain related ideas, not a claim that the game implements every construction below.</p>
+            <details>
+              <summary>What a deck proof does and does not show</summary>
+              <p>Cards stay private during play. The completed deck opening reveals all cards afterward, including folded cards. Deck proofs do not establish custody, solvency, or availability.</p>
+            </details>
+          </div>
+        </aside>
         <ol>
           {PAPERS.map(([title, href, authors]) => (
             <li key={title}>
@@ -78,7 +86,7 @@ export default function PapersPage() {
         </ol>
         <p className="crypto-notes">
           My <a href={NOTES} target="_blank" rel="noreferrer">cryptography notes</a> include
-          short summaries of zero-knowledge protocols and commitment schemes
+          short summaries of zero knowledge protocols and commitment schemes.
         </p>
       </section>
     </main>

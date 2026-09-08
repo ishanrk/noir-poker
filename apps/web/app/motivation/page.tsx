@@ -16,12 +16,12 @@ export default function MotivationPage() {
       <SiteHeader compact />
 
       <header className="brief-hero">
-        <p>Motivation</p>
+        <p className="brief-kicker">Motivation</p>
         <h1>The reason for Noir Poker</h1>
-        <span>
+        <p className="brief-description">
           It is easy for a normal poker server to cheat because it controls the deck and hides its
-          internal state
-        </span>
+          internal state.
+        </p>
       </header>
 
       <div className="brief-stack">

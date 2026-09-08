@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Noir Poker</title>
+  <path fill="#1f0bd1" d="M8 0h48l8 8v48l-8 8H8l-8-8V8z"/>
+  <g fill="#c7ff32">
+    <path d="M8 16h8v8h4v8h4V16h8v32h-8v-8h-4v-8h-4v16H8z"/>
+    <path fill-rule="evenodd" d="M36 16h16v4h4v16h-4v4h-8v8h-8zm8 8v8h4v-8z"/>
+  </g>
+</svg>
